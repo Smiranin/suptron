@@ -1,0 +1,64 @@
+min_version = "2026.6.10"
+
+[tools]
+node = "26.10.0"
+pnpm = "12.6.0"
+
+[tasks."setup:check"]
+description = "Validate host prerequisites (git, gh and its authentication)"
+run = "scripts/check-prereqs.sh"
+
+[tasks."setup:deps"]
+description = "Install workspace dependencies from the committed lock"
+depends = ["setup:check"]
+run = "pnpm install --frozen-lockfile"
+
+[tasks."setup:all"]
+description = "Prepare a new machine for development"
+depends = ["setup:deps"]
+run = "echo 'Ready. Run: mise run dev'"
+
+[tasks.dev]
+description = "Start the server and the web UI in watch mode"
+run = "pnpm --parallel --filter @suptron/server --filter @suptron/web dev"
+
+[tasks."dev:server"]
+description = "Start the local server in watch mode"
+run = "pnpm --filter @suptron/server dev"
+
+[tasks."dev:web"]
+description = "Start the web UI dev server"
+run = "pnpm --filter @suptron/web dev"
+
+[tasks.build]
+description = "Build every package and application"
+run = "pnpm -r build"
+
+[tasks.start]
+description = "Run the built server, which also serves the built web UI"
+depends = ["build"]
+run = "pnpm --filter @suptron/server start"
+
+[tasks.typecheck]
+description = "Type-check every package"
+run = "pnpm typecheck"
+
+[tasks.test]
+description = "Run all tests once"
+run = "pnpm test"
+
+[tasks."test:watch"]
+description = "Run tests in watch mode"
+run = "pnpm test:watch"
+
+[tasks.lint]
+description = "Lint the workspace"
+run = "pnpm lint"
+
+[tasks.format]
+description = "Format the workspace with Prettier"
+run = "pnpm format"
+
+[tasks.check]
+description = "Typecheck, lint, format check and tests: what must pass before a commit"
+run = ["pnpm typecheck", "pnpm lint", "pnpm format:check", "pnpm test"]

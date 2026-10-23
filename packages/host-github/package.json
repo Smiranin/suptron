@@ -1,0 +1,14 @@
+{
+  "name": "@suptron/host-github",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc"
+  },
+  "dependencies": {
+    "@suptron/runtime": "workspace:*"
+  }
+}

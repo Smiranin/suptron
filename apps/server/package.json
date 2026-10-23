@@ -1,0 +1,22 @@
+{
+  "name": "@suptron/server",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/main.ts",
+    "start": "tsx src/main.ts",
+    "build": "tsc",
+    "typecheck": "tsc"
+  },
+  "devDependencies": {
+    "tsx": "^4.23.15"
+  },
+  "dependencies": {
+    "@suptron/runtime": "workspace:*",
+    "@suptron/engine-claude": "workspace:*",
+    "@suptron/host-github": "workspace:*",
+    "@fastify/cors": "^11.3.1",
+    "@fastify/static": "^10.1.7",
+    "fastify": "^5.12.7"
+  }
+}

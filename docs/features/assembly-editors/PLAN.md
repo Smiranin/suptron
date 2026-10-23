@@ -6,6 +6,7 @@
 **Glossary:** ../../GLOSSARY.md
 **Status:** draft
 **Amended:** 2026-10-22 by ../missions-ui/PLAN.md: its Stage 3 extracts the pure clock primitives of `features/assembly-editor/canvas/` (viewport, ring, Core circle, arrows, chords, card shell) and `layoutClock` into `features/clock/`, which the editor then composes; its Stage 6 rewrites `ProjectsPage` to show every Project expanded with its Assemblies and a Launch button, and adds a Launch button to the editor header. Build the canvas with that split in mind: keep drawing and interaction in separate components.
+**Amended:** 2026-10-23: TanStack Router replaces react-router; the shadcn/ui primitives and the design tokens live in `packages/ui` (`@suptron/ui`), not in `apps/web/src/components/ui`.
 **Amended:** 2026-10-22 by ../../adr/0004-robot-vocabulary.md: the product is named Suptron and the main nouns are renamed (Brick → Unit, Workflow → Assembly, Node → Slot, Master Agent → Core, Master Rules → Core Directives, Node Agent → Pilot, Run → Mission, Owner → Commander, Never-list → Laws); the `core` package is `runtime`.
 **Scope note:** this plan adds the write side of the configuration API to `apps/server`, creates the React web application `apps/web` (its shell plus the Units and Projects areas), and implements the three editors. The Missions screens (POC SPEC FR-36 to FR-41) are a separate SPEC and PLAN; this plan leaves them a route and nothing else.
 
@@ -25,7 +26,7 @@ Decisions taken during /to-plan that the SPEC did not settle:
 2. **Paths are typed, not picked.** The repository path and the Knowledge Sources are text fields; the server checks that the path exists (`GET /api/fs/stat`). SPEC FR-14 and FR-15 were amended on 2026-10-22. No native dialogs, no in-app file browser.
 3. **Saving rewrites the file canonically.** Fixed key order, defaults omitted, comments and hand formatting lost; every setting preserved. Success criterion 2 of the SPEC was amended accordingly. There is no raw-file view in the UI, read-only or otherwise; "Open in editor" is the only way to the file.
 4. **Optimistic concurrency with content ETags.** `GET` returns `{ data, etag }`, `etag` being the SHA-256 of the file text. `PUT` with `If-Match` fails with `412` when the file changed; the UI then offers Reload or Overwrite, and Overwrite repeats the `PUT` with `?force=1`. The check happens only on Save; there is no file watching.
-5. **Front-end stack:** Vite, React 19, TypeScript strict, Tailwind CSS, shadcn/ui components (Radix primitives copied into the repository), react-hook-form with the zod resolver, TanStack Query for server data, react-router. No drag-and-drop library and no zoom library: the ring-constrained drag and the centre-anchored zoom are a few lines of geometry on pointer events.
+5. **Front-end stack:** Vite, React 19, TypeScript strict, Tailwind CSS, shadcn/ui components (Radix primitives copied into the repository), react-hook-form with the zod resolver, TanStack Query for server data, TanStack Router (code-based route tree). No drag-and-drop library and no zoom library: the ring-constrained drag and the centre-anchored zoom are a few lines of geometry on pointer events.
 6. **One validation function.** `validateAssembly()` from `@suptron/runtime/browser` runs in the editor on every change and on the server on every `PUT`. The server refuses hard errors with `400`; the UI disables Save while they exist.
 7. **Renaming a Unit in use is refused** exactly like deleting it (SPEC FR-9), with the list of Assemblies. Renaming an Assembly is always allowed; active Missions keep their snapshot.
 8. **"Open in editor"** runs the command template in `SUPTRON_EDITOR` (default `code --goto {path}`); when the program is not on `PATH`, falls back to `open {path}` on macOS.
@@ -77,7 +78,7 @@ Limitations to overcome: nothing writes configuration files; the server has no n
 | Folder | Responsibility | Must not know about |
 |---|---|---|
 | `api/` | `client.ts` (fetch wrapper: JSON, ETag headers, typed errors `ConflictError`, `ValidationError`, `InUseError`), `queries.ts` (TanStack Query hooks and mutation hooks per resource). | Components. |
-| `components/ui/` | shadcn/ui primitives (button, input, select, switch, tabs, dialog, badge, tooltip, textarea). | The domain. |
+| `packages/ui` (`@suptron/ui`) | Design tokens (`globals.css`), bundled fonts and the shadcn/ui primitives (button, input, select, switch, tabs, dialog, badge, tooltip, textarea); add missing primitives there, not in the app. | The domain. |
 | `components/` | Shared domain widgets: `SaveBar`, `DiscardGuard`, `ConflictDialog`, `OpenInEditorButton`, `ActiveMissionsNote`, `ModelSelect`, `PathField`, `CheckListEditor`, `MarkdownField`, `NameField`. | Which editor hosts them. |
 | `features/hangar/` | `HangarPage` (library list with Duplicate and Delete), `UnitEditorPage`, `UnitForm`. | Assemblies. |
 | `features/projects/` | `ProjectsPage`, `NewProjectDialog`, `ProjectPage` (Profile form + Assemblies list), `ProfileForm`, `AssembliesList`. | The canvas. |
@@ -109,7 +110,7 @@ Editing an Assembly, end to end:
 1. `AssemblyEditorPage` loads `GET /api/projects/:p/assemblies/:assembly` (document, `etag`, issues, `activeMissions`) and `GET /api/units`, `GET /api/models`. The document becomes the reducer's initial state and is kept as `loadedDoc`.
 2. Every interaction dispatches a command. The reducer returns a new `AssemblyFile`; `layoutClock()` and `validateAssembly()` are recomputed from it with `useMemo`. `dirty = !deepEqual(doc, loadedDoc)`.
 3. Save (button or Cmd+S) is enabled when `dirty && errors.length === 0`. It sends `PUT` with `If-Match: etag`. On `200` the response's document and `etag` replace `loadedDoc`. On `412` the `ConflictDialog` offers Reload (dispatch `replaceDoc` with the response's current document) or Overwrite (`PUT ?force=1`). On `400` the server's issues are shown (should not happen, since the same validator ran locally).
-4. Leaving the route with `dirty` triggers `DiscardGuard` (react-router `useBlocker` plus `beforeunload`).
+4. Leaving the route with `dirty` triggers `DiscardGuard` (TanStack Router `useBlocker` plus `beforeunload`).
 
 Units and Profiles follow the same cycle with react-hook-form holding the state instead of a reducer; `dirty` is the form's `isDirty`.
 
@@ -122,7 +123,7 @@ Units and Profiles follow the same cycle with react-hook-form holding the state 
 - **Pointer events for every drag.** `setPointerCapture` on `pointerdown`, angle computed from the pointer position relative to the clock centre, released on `pointerup`. The canvas receives the viewport size as a prop so the geometry is testable in jsdom, where `getBoundingClientRect` returns zeros.
 - **Optimistic concurrency** with `If-Match` / `412` / `428`; standard HTTP, no custom locking.
 - **Deliberately not applied:** Redux or any global store (TanStack Query caches server state, each editor owns its local state); a drag-and-drop library; d3; a canvas renderer; a markdown preview (Rules and Instructions are plain monospace textareas); file watching and live reload; undo/redo.
-- **Libraries:** `react`, `react-dom`, `react-router`, `@tanstack/react-query`, `react-hook-form`, `@hookform/resolvers`, `zod` (shared with `runtime`), `tailwindcss`, shadcn/ui via `components.json`, `lucide-react` icons, `vite`, `vitest`, `@testing-library/react`, `@testing-library/user-event`, `msw`, `@playwright/test`; server: `@fastify/static`; runtime: `esbuild` (dev dependency, for the browser-safety test).
+- **Libraries:** `react`, `react-dom`, `@tanstack/react-router`, `@tanstack/react-query`, `react-hook-form`, `@hookform/resolvers`, `zod` (shared with `runtime`), `tailwindcss`, shadcn/ui via `components.json`, `lucide-react` icons, `vite`, `vitest`, `@testing-library/react`, `@testing-library/user-event`, `msw`, `@playwright/test`; server: `@fastify/static`; runtime: `esbuild` (dev dependency, for the browser-safety test).
 
 ## Interfaces and Contracts
 
@@ -299,7 +300,7 @@ Tests describe behaviour, not implementation: they never call the reducer from a
 - **Depends on:** Stage 3.
 - **Touches:** `apps/web/` (new), root `package.json` scripts, `pnpm-workspace.yaml`.
 - **Steps:**
-  1. Scaffold Vite + React + TypeScript strict, Tailwind, shadcn/ui (`components.json`, the primitives listed in Modules), react-router with routes `/hangar`, `/hangar/:name`, `/hangar/new`, `/projects`, `/projects/:project`, `/projects/:project/assemblies/:assembly`, `/missions` (placeholder), redirect `/` → `/projects`. Vite dev proxy `/api` → `127.0.0.1:4777`.
+  1. Scaffold Vite + React + TypeScript strict, Tailwind, shadcn/ui in `packages/ui` (`components.json`, the primitives listed in Modules), TanStack Router with routes `/hangar`, `/hangar/$name`, `/hangar/new`, `/projects`, `/projects/$project`, `/projects/$project/assemblies/$assembly`, `/missions` (placeholder), redirect `/` → `/projects`. Vite dev proxy `/api` → `127.0.0.1:4777`.
   2. `api/client.ts` and `api/queries.ts` for every route of Stages 2 and 3, with typed errors.
   3. Test setup: Vitest jsdom, RTL, `test/fake-server.ts` (msw, in-memory `SUPTRON_HOME` from fixtures), `renderWithProviders()` helper.
   4. Shell: left navigation Hangar / Projects / Missions, page layout, `NotFound`.

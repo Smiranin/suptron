@@ -1,0 +1,4 @@
+/* Fonts are bundled, not loaded from a CDN: the UI is served from 127.0.0.1 and must work offline. */
+@import '@fontsource-variable/plus-jakarta-sans';
+@import '@fontsource-variable/plus-jakarta-sans/wght-italic.css';
+@import '@fontsource-variable/geist-mono';

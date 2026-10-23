@@ -21,9 +21,10 @@ packages/
   runtime/         domain, configuration, Runner, Core client, Checks, Laws, events (no SDK, no HTTP)
   engine-claude/   Engine on @anthropic-ai/claude-agent-sdk (the only package that imports the SDK)
   host-github/     RepoHost on the gh CLI
+  ui/              design tokens, bundled fonts and shadcn/ui primitives for apps/web
 apps/
   server/          composition root: Fastify REST + SSE on 127.0.0.1:4777, serves apps/web/dist
-  web/             Vite + React + Tailwind single-page application
+  web/             Vite + React + TanStack Router + Tailwind single-page application
 docs/              glossary, ADRs, SPECs and PLANs
 ```
 

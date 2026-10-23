@@ -1,2 +1,161 @@
-@import 'tailwindcss';
+@import '@suptron/ui/fonts.css';
+@import '@suptron/ui/globals.css';
 @plugin '@tailwindcss/typography';
+
+html,
+body,
+#root {
+  @apply min-h-full;
+}
+
+body {
+  @apply bg-sidebar m-0 font-sans;
+  text-rendering: optimizeLegibility;
+}
+
+html:has([data-shell-scroll]) {
+  overflow: clip;
+  overscroll-behavior: none;
+}
+
+button,
+a,
+input {
+  -webkit-tap-highlight-color: transparent;
+}
+
+#app-content {
+  view-transition-name: app-content;
+}
+
+/* Capture only the transparent scroller; its parent owns the fixed page surface. */
+::view-transition-old(root) {
+  display: none;
+}
+
+::view-transition-new(root),
+::view-transition-group(app-content) {
+  animation: none;
+}
+
+::view-transition-image-pair(app-content) {
+  overflow: clip;
+  border-top-left-radius: 1.5rem;
+}
+
+::view-transition-old(app-content) {
+  animation: app-page-exit 150ms ease-in both;
+  mix-blend-mode: normal;
+}
+
+::view-transition-new(app-content) {
+  animation: app-page-enter 180ms ease-out 150ms both;
+  mix-blend-mode: normal;
+}
+
+@keyframes app-page-exit {
+  to {
+    opacity: 0;
+    transform: translateX(28px);
+  }
+}
+
+@keyframes app-page-enter {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@media (max-width: 767px) {
+  ::view-transition-image-pair(app-content) {
+    border-top-right-radius: 1.5rem;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-group(*),
+  ::view-transition-old(*),
+  ::view-transition-new(*) {
+    animation: none;
+  }
+}
+
+[data-slot='dialog-content'][data-state='open'] {
+  animation: app-dialog-enter 220ms ease-out both;
+}
+
+[data-slot='dialog-content'][data-state='closed'] {
+  animation: app-dialog-exit 180ms ease-in both;
+}
+
+@keyframes app-dialog-enter {
+  from {
+    opacity: 0;
+    transform: translateY(100px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes app-dialog-exit {
+  from {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(100px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-slot='dialog-content'][data-state],
+  [data-slot='dialog-overlay'][data-state] {
+    animation: none;
+  }
+}
+
+[data-shell-scroll],
+[data-sidebar='content'] {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in oklab, var(--muted-foreground) 45%, transparent) transparent;
+}
+
+[data-shell-scroll]:hover,
+[data-sidebar='content']:hover {
+  scrollbar-color: color-mix(in oklab, var(--muted-foreground) 70%, transparent) transparent;
+}
+
+/* Fallback for browsers without standard scrollbar styling. */
+@supports not (scrollbar-color: auto) {
+  [data-shell-scroll]::-webkit-scrollbar,
+  [data-sidebar='content']::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+
+  [data-shell-scroll]::-webkit-scrollbar-thumb,
+  [data-sidebar='content']::-webkit-scrollbar-thumb {
+    background: color-mix(in oklab, var(--muted-foreground) 45%, transparent);
+    background-clip: padding-box;
+    border: 3px solid transparent;
+    border-radius: 999px;
+  }
+
+  [data-shell-scroll]::-webkit-scrollbar-thumb:hover,
+  [data-sidebar='content']::-webkit-scrollbar-thumb:hover {
+    background-color: color-mix(in oklab, var(--muted-foreground) 70%, transparent);
+  }
+
+  [data-shell-scroll]::-webkit-scrollbar-track,
+  [data-shell-scroll]::-webkit-scrollbar-corner,
+  [data-sidebar='content']::-webkit-scrollbar-track,
+  [data-sidebar='content']::-webkit-scrollbar-corner {
+    background: transparent;
+  }
+}

@@ -239,7 +239,16 @@ importers:
       fastify:
         specifier: ^5.12.7
         version: 5.12.7
+      shell-quote:
+        specifier: ^1.12.0
+        version: 1.12.0
+      zod:
+        specifier: ^4.6.7
+        version: 4.6.7
     devDependencies:
+      '@types/shell-quote':
+        specifier: ^1.7.5
+        version: 1.7.5
       tsx:
         specifier: ^4.23.15
         version: 4.23.15
@@ -337,6 +346,16 @@ importers:
       '@suptron/runtime':
         specifier: workspace:*
         version: link:../runtime
+      esbuild:
+        specifier: ^0.28.2
+        version: 0.28.2
+      shell-quote:
+        specifier: ^1.12.0
+        version: 1.12.0
+    devDependencies:
+      '@types/shell-quote':
+        specifier: ^1.7.5
+        version: 1.7.5
 
   packages/host-github:
     dependencies:

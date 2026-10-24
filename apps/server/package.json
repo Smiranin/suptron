@@ -9,14 +9,17 @@
     "typecheck": "tsc"
   },
   "devDependencies": {
+    "@types/shell-quote": "^1.7.5",
     "tsx": "^4.23.15"
   },
   "dependencies": {
-    "@suptron/runtime": "workspace:*",
-    "@suptron/engine-claude": "workspace:*",
-    "@suptron/host-github": "workspace:*",
     "@fastify/cors": "^11.3.1",
     "@fastify/static": "^10.1.7",
-    "fastify": "^5.12.7"
+    "@suptron/engine-claude": "workspace:*",
+    "@suptron/host-github": "workspace:*",
+    "@suptron/runtime": "workspace:*",
+    "fastify": "^5.12.7",
+    "shell-quote": "^1.12.0",
+    "zod": "^4.6.7"
   }
 }

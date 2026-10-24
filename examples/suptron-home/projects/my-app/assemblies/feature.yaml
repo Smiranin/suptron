@@ -1,0 +1,41 @@
+name: feature
+core:
+  model: opus
+  instructions: |-
+    Compose each Slot prompt from the Task documents, the Knowledge Sources, the Git
+    conventions and the Slot Outputs it is given. Judge Checks strictly against their
+    criterion. Explain a Needs Attention in two or three sentences a developer can act on.
+    Report at the end what was built, what was verified and what remains open.
+slots:
+  - name: analyst
+    unit: analyst
+    mayAskCommander: true
+  - name: implementer
+    unit: implementer
+    memoryMode: persistent
+    context:
+      gitConventions: true
+      slotOutputs:
+        - analyst
+  - name: reviewer
+    unit: reviewer
+    context:
+      gitConventions: true
+    loop:
+      target: implementer
+      limit: 3
+  - name: tester
+    unit: tester
+    loop:
+      target: implementer
+      limit: 3
+  - name: publisher
+    unit: publisher
+    context:
+      gitConventions: true
+  - name: pr-reviewer
+    unit: pr-reviewer
+    loop:
+      target: implementer
+      limit: 3
+    exitPoint: true

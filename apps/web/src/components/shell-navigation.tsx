@@ -13,6 +13,7 @@ import {
 import { Link } from '@tanstack/react-router';
 import { FolderGit2, Rocket, Warehouse, X } from 'lucide-react';
 import type { MouseEvent, PropsWithChildren } from 'react';
+import { useNeedsYouCount } from '../features/missions/MissionsProvider';
 import { Brand } from './brand';
 
 const activeProps = { 'aria-current': 'page' as const, 'data-active': true };
@@ -27,6 +28,20 @@ function NavigationItem({ children }: PropsWithChildren) {
         {children}
       </SidebarMenuButton>
     </SidebarMenuItem>
+  );
+}
+
+function MissionsBadge() {
+  const count = useNeedsYouCount();
+  if (count === 0) return null;
+  return (
+    <span
+      className="bg-warning text-background ml-auto rounded-full px-2 py-0.5 text-xs font-bold tabular-nums"
+      aria-label={`${count} Missions need you`}
+      data-testid="missions-badge"
+    >
+      {count}
+    </span>
   );
 }
 
@@ -73,6 +88,7 @@ export function ShellNavigation() {
                   <Link to="/missions" activeProps={activeProps}>
                     <Rocket aria-hidden="true" />
                     <span>Missions</span>
+                    <MissionsBadge />
                   </Link>
                 </NavigationItem>
               </SidebarMenu>

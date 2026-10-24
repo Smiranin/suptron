@@ -1,0 +1,13 @@
+name: my-app
+repository:
+  path: /absolute/path/to/your/repository
+knowledgeSources:
+  - README.md
+git:
+  branchNameTemplate: feature/{work_item_id}-{task_slug}
+  pullRequestTemplate: |
+    ## {task_title}
+
+    ### Summary
+
+    ### Testing

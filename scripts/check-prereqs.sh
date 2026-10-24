@@ -16,7 +16,7 @@ if command -v gh >/dev/null 2>&1 && ! gh auth status >/dev/null 2>&1; then
 fi
 
 if [ -z "${ANTHROPIC_API_KEY:-}" ]; then
-  echo "note: ANTHROPIC_API_KEY is not set; the Claude Engine needs it (or Bedrock/Vertex variables)" >&2
+  echo "note: ANTHROPIC_API_KEY is not set; the Claude Engine will use the local Claude Code login" >&2
 fi
 
 exit "$fail"

@@ -11,7 +11,7 @@ The place the system works on, described by its Project Profile. In the POC a Pr
 _Avoid_: Repo (when the profile is meant), codebase
 
 **Task**:
-The input of a Mission: one or more documents that describe the work (usually a SPEC and a PLAN, sometimes a single implementation plan), optionally with a Work Item ID.
+The input of a Mission: one or more documents that describe the work (usually a SPEC and a PLAN, sometimes a single implementation plan) or text typed at start, optionally with a Work Item ID. Text is stored as `task.md` in the Mission folder, so every Mission has a Task location on disk.
 _Avoid_: Ticket, ADR (an ADR is only one possible part of a Task), issue
 
 **Work Item ID**:
@@ -127,7 +127,7 @@ The single user of the system: the person who starts Missions, answers Human Che
 _Avoid_: User, developer, operator, Owner (former name)
 
 **Laws**:
-The set of actions the system never performs regardless of configuration. In the POC, where every Project is a code repository, they are: pushing to or merging into the default branch, force-pushing, deleting or renaming any branch, deploying, changing repository, CI or secret settings, marking a Pull Request ready for review. Like the laws of robotics, they are built into the system and no configuration can change them.
+The set of actions the system never performs regardless of configuration. In the POC, where every Project is a code repository, they are: pushing to or merging into the protected branch, force-pushing, deleting or renaming any branch, deploying, changing repository, CI or secret settings, marking a Pull Request ready for review. Like the laws of robotics, they are built into the system and no configuration can change them.
 _Avoid_: Guardrails, safety rules, Never-list (former name)
 
 **Engine**:

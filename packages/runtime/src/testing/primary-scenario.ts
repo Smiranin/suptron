@@ -98,17 +98,22 @@ export function primaryUnits(): UnitFile[] {
 export function primaryProfile(repositoryPath: string, name = 'my-app'): ProfileFile {
   return {
     name,
-    repository: { path: repositoryPath, remote: 'origin', protectedBranch: 'main' },
-    knowledgeSources: ['README.md'],
-    git: {
-      branchNameTemplate: 'feature/{work_item_id}-{task_slug}',
-      pullRequestTemplate: '## {task_title}\n\n### Summary\n\n### Testing\n',
-      labels: [],
-      reviewers: [],
+    workspace: {
+      kind: 'repository',
+      path: repositoryPath,
+      remote: 'origin',
+      protectedBranch: 'main',
+      host: 'github',
+      git: {
+        branchNameTemplate: 'feature/{work_item_id}-{task_slug}',
+        pullRequestTemplate: '## {task_title}\n\n### Summary\n\n### Testing\n',
+        labels: [],
+        reviewers: [],
+      },
+      ciWaitTimeoutMinutes: 30,
     },
-    host: 'github',
+    knowledgeSources: [{ path: 'README.md' }],
     engine: 'claude-code',
-    ciWaitTimeoutMinutes: 30,
   };
 }
 

@@ -1,4 +1,10 @@
-import { validateAssembly, type AssemblyFile, type Issue } from '@suptron/runtime/browser';
+import {
+  validateAssembly,
+  type AssemblyFile,
+  type Capability,
+  type Issue,
+  type ValidationUnit,
+} from '@suptron/runtime/browser';
 
 export interface EditorIssues {
   errors: Issue[];
@@ -7,8 +13,12 @@ export interface EditorIssues {
 }
 
 /** The one validation function, grouped by Slot for the cards and the inspector. */
-export function validate(doc: AssemblyFile, units: readonly { name: string }[]): EditorIssues {
-  const result = validateAssembly(doc, units);
+export function validate(
+  doc: AssemblyFile,
+  units: readonly ValidationUnit[],
+  capabilities: ReadonlySet<Capability> | null,
+): EditorIssues {
+  const result = validateAssembly(doc, units, capabilities);
   const bySlot = new Map<string, Issue[]>();
   for (const issue of result.errors) {
     if (!issue.slotName) continue;

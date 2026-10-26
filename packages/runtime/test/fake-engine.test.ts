@@ -10,7 +10,13 @@ const spec: AgentSpec = {
   cwd: '/tmp',
   additionalDirectories: [],
   allowQuestions: true,
-  guard: { protectedBranch: 'main', checkoutPath: '/tmp', taskPath: '/tmp', configHome: '/tmp' },
+  guard: {
+    cwd: '/tmp',
+    writeRoots: ['/tmp'],
+    protectedBranch: 'main',
+    taskPath: '/tmp',
+    configHome: '/tmp',
+  },
 };
 
 describe('FakeEngine', () => {

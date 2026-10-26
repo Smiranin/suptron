@@ -1,9 +1,8 @@
 import { evaluateCondition, type CheckContext } from '../checks/runners.js';
 import type { MissionSnapshot, ResolvedSlot } from '../config/snapshot.js';
-import type { CoreAgent, Feedback } from '../core-agent/index.js';
+import type { CoreAgent, Feedback, KnowledgeSourceRef } from '../core-agent/index.js';
 import type { CheckResult } from '../domain/check.js';
 import { addCost, ZERO_COST, type Cost } from '../domain/cost.js';
-import type { PullRequestRef } from '../domain/host.js';
 import {
   CORE_SLOT_NAME,
   type MissionAttention,
@@ -15,22 +14,20 @@ import {
   type SlotRecord,
 } from '../domain/mission.js';
 import type { Answers } from '../domain/transcript.js';
-import type { AgentHandle, Engine, GuardContext } from '../engine/index.js';
+import type { AgentHandle, Engine } from '../engine/index.js';
 import type { MissionEventInput } from '../events/mission-event.js';
-import type { GitClient } from '../git/types.js';
-import type { RepoHost } from '../host/index.js';
+import { buildGuard, type Workspace } from '../workspace/workspace.js';
 import { buildContextBundle } from './context.js';
 
 export interface RunnerDeps {
   engine: Engine;
-  host: RepoHost;
-  git: GitClient;
+  workspace: Workspace;
   core: CoreAgent;
   emit: (event: MissionEventInput) => void;
   /** Tuning knobs for tests and the Commander's environment. */
   ciPollIntervalMs?: number;
   ciNoneGraceMs?: number;
-  /** Overrides the Profile's CI wait timeout (tests). */
+  /** Overrides the Workspace's CI wait timeout (tests). */
   ciWaitTimeoutMs?: number;
 }
 
@@ -42,11 +39,11 @@ export interface MissionMeta {
   taskTitle: string;
   taskDocuments: string[];
   workItemId?: string;
-  checkoutPath: string;
   configHome: string;
-  gitConventions: string;
+  /** Rendered once at start; null when the Workspace has none. */
+  gitConventions: string | null;
+  knowledgeSources: KnowledgeSourceRef[];
   startedAt: string;
-  branch: string | null;
 }
 
 type Control = { kind: 'stop' } | { kind: 'retry'; note?: string };
@@ -104,8 +101,7 @@ export class Runner {
       ...(meta.workItemId !== undefined && { workItemId: meta.workItemId }),
       state: 'running',
       currentSlot: null,
-      branch: meta.branch,
-      checkoutPath: meta.checkoutPath,
+      workspace: { ...deps.workspace.summary },
       startedAt: meta.startedAt,
       cost: { ...ZERO_COST, estimated: true },
     };
@@ -229,7 +225,7 @@ export class Runner {
 
       const execution = await this.executeSlot(slot, feedback);
       this.throwIfStopping();
-      await this.refreshBranch();
+      await this.refreshWorkspace();
 
       if (execution.kind === 'error') {
         const control = await this.needsAttention('engine_error', slot, [], execution.message);
@@ -337,20 +333,15 @@ export class Runner {
     if (this.stopRequested) throw new StopRequested();
   }
 
-  private guard(): GuardContext {
-    return {
-      protectedBranch: this.snapshot.profile.repository.protectedBranch,
-      checkoutPath: this.meta.checkoutPath,
-      taskPath: this.meta.taskPath,
-      configHome: this.meta.configHome,
-    };
-  }
-
   private async executeSlot(
     slot: ResolvedSlot,
     feedback: Feedback | undefined,
   ): Promise<SlotExecution> {
-    const bundle = buildContextBundle(slot, this.snapshot, this.meta, this.slotOutputs);
+    const bundle = buildContextBundle(
+      slot,
+      { ...this.meta, workspace: this.deps.workspace.fragment },
+      this.slotOutputs,
+    );
     let prompt: string;
     try {
       prompt = await this.deps.core.composeSlotPrompt({
@@ -373,11 +364,14 @@ export class Runner {
       label: slot.name,
       model: slot.model,
       systemPrompt: { rules: slot.rules, instructions: slot.instructions },
-      cwd: this.meta.checkoutPath,
+      cwd: this.deps.workspace.cwd,
       additionalDirectories: [this.meta.taskPath],
       allowQuestions: slot.mayAskCommander,
       ...(resume !== undefined && { resumeSessionId: resume }),
-      guard: this.guard(),
+      guard: buildGuard(this.deps.workspace, {
+        taskPath: this.meta.taskPath,
+        configHome: this.meta.configHome,
+      }),
     });
     this.currentHandle = handle;
     let output: string | null = null;
@@ -462,15 +456,13 @@ export class Runner {
   ) {
     this.checkAbort = new AbortController();
     const ctx: CheckContext = {
-      checkoutPath: this.meta.checkoutPath,
-      protectedBranch: this.snapshot.profile.repository.protectedBranch,
-      host: this.deps.host,
-      git: this.deps.git,
+      workspace: this.deps.workspace,
       core: this.deps.core,
       slotOutput: output,
-      ciWaitTimeoutMs:
-        this.deps.ciWaitTimeoutMs ?? this.snapshot.profile.ciWaitTimeoutMinutes * 60_000,
       signal: this.checkAbort.signal,
+      ...(this.deps.ciWaitTimeoutMs !== undefined && {
+        ciWaitTimeoutMs: this.deps.ciWaitTimeoutMs,
+      }),
       ...(this.deps.ciPollIntervalMs !== undefined && {
         ciPollIntervalMs: this.deps.ciPollIntervalMs,
       }),
@@ -535,18 +527,14 @@ export class Runner {
   }
 
   private async complete(exitSlot: ResolvedSlot): Promise<void> {
-    const branch = this.summary.branch;
-    let pr: PullRequestRef | null;
-    try {
-      pr = branch
-        ? await this.deps.host.findPullRequest({ checkoutPath: this.meta.checkoutPath, branch })
-        : null;
-    } catch {
-      pr = null;
-    }
+    const pr = await this.deps.workspace.pullRequest();
     let report: string;
     try {
-      report = await this.deps.core.finalReport({ slots: this.slotRecords(), ...(pr && { pr }) });
+      report = await this.deps.core.finalReport({
+        slots: this.slotRecords(),
+        ...(pr && { pr }),
+        workspace: this.deps.workspace.fragment,
+      });
     } catch (error) {
       report = `The Core could not write the report: ${errorMessage(error)}`;
     }
@@ -604,12 +592,10 @@ export class Runner {
     });
   }
 
-  private async refreshBranch(): Promise<void> {
-    try {
-      this.summary.branch = await this.deps.git.currentBranch(this.meta.checkoutPath);
-    } catch {
-      // keep the last known branch
-    }
+  /** A Slot may have switched branches; the summary follows the Workspace (SPEC FR-18). */
+  private async refreshWorkspace(): Promise<void> {
+    await this.deps.workspace.refresh();
+    this.summary.workspace = { ...this.deps.workspace.summary };
   }
 }
 

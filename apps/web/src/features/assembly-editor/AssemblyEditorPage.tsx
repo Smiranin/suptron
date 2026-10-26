@@ -1,7 +1,9 @@
 import {
   DEFAULTS,
+  capabilitiesOf,
   referencesToSlot,
   type AssemblyFile,
+  type Capability,
   type UnitFile,
 } from '@suptron/runtime/browser';
 import { Button } from '@suptron/ui/components/button';
@@ -17,6 +19,7 @@ import {
   useHealth,
   useInvalidateConfig,
   useModels,
+  useProject,
   useUnits,
 } from '../../api/queries';
 import { ActiveMissionsNote } from '../../components/active-missions-note';
@@ -60,11 +63,12 @@ export interface AssemblyEditorPageProps {
 
 export function AssemblyEditorPage({ project, assembly, viewport }: AssemblyEditorPageProps) {
   const query = useAssembly(project, assembly);
+  const projectQuery = useProject(project);
   const units = useUnits();
   const models = useModels();
   const isNew = query.error instanceof NotFoundError;
 
-  if (query.isPending || units.isPending || models.isPending) {
+  if (query.isPending || projectQuery.isPending || units.isPending || models.isPending) {
     return (
       <div className="flex flex-col gap-4 p-6" aria-busy="true">
         <Skeleton className="h-8 w-64" />
@@ -90,7 +94,20 @@ export function AssemblyEditorPage({ project, assembly, viewport }: AssemblyEdit
       />
     );
   }
+  if (projectQuery.error) {
+    return (
+      <StatePanel
+        label={projectQuery.error instanceof NotFoundError ? '404' : 'Error'}
+        title="Could not load the Project"
+        description={projectQuery.error.message}
+      />
+    );
+  }
   const unitFiles = (units.data ?? []).flatMap((u) => (u.unit ? [u.unit] : []));
+  // The Workspace decides which Checks and context sources the Assembly may use (SPEC FR-7).
+  const capabilities = projectQuery.data.profile
+    ? capabilitiesOf(projectQuery.data.profile.workspace)
+    : null;
 
   if (query.data?.status === 'unparseable') {
     return (
@@ -125,6 +142,7 @@ export function AssemblyEditorPage({ project, assembly, viewport }: AssemblyEdit
       initialEtag={isNew ? null : (query.data?.etag ?? null)}
       activeMissions={query.data?.activeMissions ?? 0}
       units={unitFiles}
+      capabilities={capabilities}
       viewport={viewport}
     />
   );
@@ -195,6 +213,7 @@ interface AssemblyEditorProps {
   initialEtag: string | null;
   activeMissions: number;
   units: UnitFile[];
+  capabilities: ReadonlySet<Capability> | null;
   viewport?: Viewport;
 }
 
@@ -211,6 +230,7 @@ function AssemblyEditor({
   initialEtag,
   activeMissions,
   units,
+  capabilities,
   viewport: fixedViewport,
 }: AssemblyEditorProps) {
   const [state, dispatchAction] = useReducer(reducer, undefined, () =>
@@ -225,7 +245,10 @@ function AssemblyEditor({
 
   const unitMap = useMemo(() => unitIndex(units), [units]);
   const layout = useMemo(() => layoutClock(state.doc), [state.doc]);
-  const issues = useMemo(() => validate(state.doc, units), [state.doc, units]);
+  const issues = useMemo(
+    () => validate(state.doc, units, capabilities),
+    [state.doc, units, capabilities],
+  );
   const dirty = !deepEqual(state.doc, state.loadedDoc) || state.etag === null;
   const canSave = dirty && issues.errors.length === 0;
   // The first validation error outranks "nothing to save": it tells the Commander what blocks the file.
@@ -376,6 +399,7 @@ function AssemblyEditor({
           <Inspector
             doc={state.doc}
             units={unitMap}
+            capabilities={capabilities}
             issues={issues}
             selected={state.selected}
             tab={state.tab}

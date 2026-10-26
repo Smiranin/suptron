@@ -1,13 +1,14 @@
 name: my-app
-repository:
+workspace:
+  kind: repository
   path: /absolute/path/to/your/repository
+  git:
+    branchNameTemplate: feature/{work_item_id}-{task_slug}
+    pullRequestTemplate: |
+      ## {task_title}
+
+      ### Summary
+
+      ### Testing
 knowledgeSources:
-  - README.md
-git:
-  branchNameTemplate: feature/{work_item_id}-{task_slug}
-  pullRequestTemplate: |
-    ## {task_title}
-
-    ### Summary
-
-    ### Testing
+  - path: README.md

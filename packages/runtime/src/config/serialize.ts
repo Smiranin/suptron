@@ -3,10 +3,12 @@ import { DEFAULTS } from './defaults.js';
 import type {
   AssemblyFile,
   Check,
+  KnowledgeSource,
   ProfileFile,
   SlotContextFile,
   SlotFile,
   UnitFile,
+  WorkspaceFile,
 } from './schemas.js';
 import { formatUnitMarkdown } from './unit-markdown.js';
 
@@ -57,7 +59,6 @@ function plainContext(context: SlotContextFile | undefined): Plain | undefined {
     'knowledgeSources',
     unlessDefault(context.knowledgeSources, DEFAULTS.slot.context.knowledgeSources),
   );
-  put(out, 'checkout', unlessDefault(context.checkout, DEFAULTS.slot.context.checkout));
   put(
     out,
     'gitConventions',
@@ -112,36 +113,52 @@ export function serializeAssembly(assembly: AssemblyFile): string {
   return stringifyYaml(doc, YAML_OPTIONS);
 }
 
+/** The Workspace section with the defaults of its kind omitted; the kind always comes first. */
+function plainWorkspace(workspace: WorkspaceFile): Plain {
+  switch (workspace.kind) {
+    case 'none':
+      return { kind: 'none' };
+    case 'folder':
+      return { kind: 'folder', path: workspace.path };
+    case 'repository': {
+      const defaults = DEFAULTS.profile.repository;
+      const out: Plain = { kind: 'repository', path: workspace.path };
+      put(out, 'remote', unlessDefault(workspace.remote, defaults.remote));
+      put(
+        out,
+        'protectedBranch',
+        unlessDefault(workspace.protectedBranch, defaults.protectedBranch),
+      );
+      put(out, 'host', unlessDefault(workspace.host, defaults.host));
+      const git: Plain = { branchNameTemplate: workspace.git.branchNameTemplate };
+      put(
+        git,
+        'pullRequestTemplate',
+        unlessDefault(workspace.git.pullRequestTemplate, defaults.git.pullRequestTemplate),
+      );
+      put(git, 'labels', nonEmpty(workspace.git.labels));
+      put(git, 'reviewers', nonEmpty(workspace.git.reviewers));
+      out.git = git;
+      put(
+        out,
+        'ciWaitTimeoutMinutes',
+        unlessDefault(workspace.ciWaitTimeoutMinutes, defaults.ciWaitTimeoutMinutes),
+      );
+      return out;
+    }
+  }
+}
+
+function plainKnowledgeSource(source: KnowledgeSource): Plain {
+  const out: Plain = 'path' in source ? { path: source.path } : { text: source.text };
+  put(out, 'title', source.title);
+  return out;
+}
+
 export function serializeProfile(profile: ProfileFile): string {
-  const repository: Plain = { path: profile.repository.path };
-  put(
-    repository,
-    'remote',
-    unlessDefault(profile.repository.remote, DEFAULTS.profile.repository.remote),
-  );
-  put(
-    repository,
-    'protectedBranch',
-    unlessDefault(profile.repository.protectedBranch, DEFAULTS.profile.repository.protectedBranch),
-  );
-  const git: Plain = { branchNameTemplate: profile.git.branchNameTemplate };
-  put(
-    git,
-    'pullRequestTemplate',
-    unlessDefault(profile.git.pullRequestTemplate, DEFAULTS.profile.git.pullRequestTemplate),
-  );
-  put(git, 'labels', nonEmpty(profile.git.labels));
-  put(git, 'reviewers', nonEmpty(profile.git.reviewers));
-  const doc: Plain = { name: profile.name, repository };
-  put(doc, 'knowledgeSources', nonEmpty(profile.knowledgeSources));
-  doc.git = git;
-  put(doc, 'host', unlessDefault(profile.host, DEFAULTS.profile.host));
+  const doc: Plain = { name: profile.name, workspace: plainWorkspace(profile.workspace) };
+  put(doc, 'knowledgeSources', nonEmpty(profile.knowledgeSources)?.map(plainKnowledgeSource));
   put(doc, 'engine', unlessDefault(profile.engine, DEFAULTS.profile.engine));
-  put(
-    doc,
-    'ciWaitTimeoutMinutes',
-    unlessDefault(profile.ciWaitTimeoutMinutes, DEFAULTS.profile.ciWaitTimeoutMinutes),
-  );
   return stringifyYaml(doc, YAML_OPTIONS);
 }
 

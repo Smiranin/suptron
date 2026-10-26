@@ -76,7 +76,11 @@ export function MissionLevelView({ state }: { state: ReadyMissionState }) {
               <ExternalLink aria-hidden="true" className="size-3.5" /> Pull Request #{pr.number}
             </a>
           ) : (
-            <p className="text-muted-foreground m-0">No Pull Request was opened.</p>
+            <p className="text-muted-foreground m-0" data-testid="workspace-outcome">
+              {summary.workspace.path !== null
+                ? `Produced in ${summary.workspace.path}`
+                : `Produced next to the Task: ${summary.taskPath}`}
+            </p>
           )}
           {result && (
             <div className="border-border rounded-lg border p-3" data-testid="final-report">

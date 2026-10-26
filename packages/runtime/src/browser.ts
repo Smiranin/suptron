@@ -1,4 +1,4 @@
-// Browser-safe entry: domain types, config schemas, validateAssembly(), Check catalogue.
+// Browser-safe entry: domain types, config schemas, validateAssembly(), Check catalogue, Workspace kinds.
 // Must never import `node:` modules. See docs/features/assembly-editors/PLAN.md.
 export * from './domain/index.js';
 export * from './events/mission-event.js';
@@ -9,7 +9,9 @@ export {
   checkSchema,
   conditionSchema,
   coreDirectivesSchema,
+  isAbsolutePath,
   issuesFromZod,
+  knowledgeSourceSchema,
   loopRuleSchema,
   memoryModeSchema,
   nameSchema,
@@ -18,9 +20,23 @@ export {
   slotFileSchema,
   unitFileSchema,
   unitFrontmatterSchema,
+  workspaceFileSchema,
 } from './config/schemas.js';
-export type { AssemblyFileInput, ProfileFileInput, UnitFileInput } from './config/schemas.js';
-export { validateAssembly, type ValidationResult } from './config/validate-assembly.js';
+export type {
+  AssemblyFileInput,
+  KnowledgeSource,
+  ProfileFileInput,
+  RepositoryWorkspaceFile,
+  UnitFileInput,
+  WorkspaceFile,
+  WorkspaceFileInput,
+} from './config/schemas.js';
+export {
+  validateAssembly,
+  type ValidationResult,
+  type ValidationUnit,
+} from './config/validate-assembly.js';
+export * from './workspace/kinds.js';
 export { referencesToSlot, uniqueSlotName, type SlotReference } from './config/slot-names.js';
 export {
   resolveCore,

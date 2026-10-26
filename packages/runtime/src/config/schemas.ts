@@ -45,24 +45,76 @@ export const unitFileSchema = unitFrontmatterSchema.extend({
 export type UnitFile = z.infer<typeof unitFileSchema>;
 export type UnitFileInput = z.input<typeof unitFileSchema>;
 
-export const profileFileSchema = z.object({
-  name: nameSchema,
-  repository: z.object({
+/** An absolute path, judged without `node:path` so the schema also runs in the browser. */
+export function isAbsolutePath(path: string): boolean {
+  return path.startsWith('/');
+}
+
+/**
+ * The Workspace of a Project: exactly one kind, with the fields of that kind only (SPEC FR-1).
+ * Unknown fields are rejected so a `folder` Project cannot carry a stray protected branch.
+ */
+export const workspaceFileSchema = z.discriminatedUnion('kind', [
+  z.strictObject({ kind: z.literal('none') }),
+  z.strictObject({
+    kind: z.literal('folder'),
+    path: z.string().min(1, 'A folder path is required'),
+  }),
+  z.strictObject({
+    kind: z.literal('repository'),
     path: z.string().min(1, 'A repository path is required'),
     remote: z.string().min(1).default(DEFAULTS.profile.repository.remote),
     protectedBranch: z.string().min(1).default(DEFAULTS.profile.repository.protectedBranch),
+    host: z.enum(['github', 'none']).default(DEFAULTS.profile.repository.host),
+    git: z.object({
+      branchNameTemplate: z.string().min(1, 'A branch name template is required'),
+      pullRequestTemplate: z.string().default(DEFAULTS.profile.repository.git.pullRequestTemplate),
+      labels: z.array(z.string().min(1)).default([]),
+      reviewers: z.array(z.string().min(1)).default([]),
+    }),
+    ciWaitTimeoutMinutes: z
+      .number()
+      .int()
+      .positive()
+      .default(DEFAULTS.profile.repository.ciWaitTimeoutMinutes),
   }),
-  knowledgeSources: z.array(z.string().min(1)).default([]),
-  git: z.object({
-    branchNameTemplate: z.string().min(1, 'A branch name template is required'),
-    pullRequestTemplate: z.string().default(''),
-    labels: z.array(z.string().min(1)).default([]),
-    reviewers: z.array(z.string().min(1)).default([]),
-  }),
-  host: z.literal('github').default(DEFAULTS.profile.host),
-  engine: z.literal('claude-code').default(DEFAULTS.profile.engine),
-  ciWaitTimeoutMinutes: z.number().int().positive().default(DEFAULTS.profile.ciWaitTimeoutMinutes),
-});
+]);
+
+export type WorkspaceFile = z.infer<typeof workspaceFileSchema>;
+export type WorkspaceFileInput = z.input<typeof workspaceFileSchema>;
+export type RepositoryWorkspaceFile = Extract<WorkspaceFile, { kind: 'repository' }>;
+
+/** A Knowledge Source is a path (relative to the Workspace root, or absolute) or an inline text (SPEC FR-2). */
+export const knowledgeSourceSchema = z.union([
+  z.strictObject({ path: z.string().min(1, 'A path is required'), title: z.string().optional() }),
+  z.strictObject({ text: z.string().min(1, 'A text is required'), title: z.string().optional() }),
+]);
+
+export type KnowledgeSource = z.infer<typeof knowledgeSourceSchema>;
+
+export const RELATIVE_PATH_WITHOUT_WORKSPACE = 'relative_path_without_workspace';
+
+export const profileFileSchema = z
+  .object({
+    name: nameSchema,
+    workspace: workspaceFileSchema,
+    knowledgeSources: z.array(knowledgeSourceSchema).default([]),
+    engine: z.literal('claude-code').default(DEFAULTS.profile.engine),
+  })
+  .superRefine((profile, ctx) => {
+    // A relative path has nothing to resolve against when the Project has no folder.
+    if (profile.workspace.kind !== 'none') return;
+    profile.knowledgeSources.forEach((source, index) => {
+      if ('path' in source && !isAbsolutePath(source.path)) {
+        ctx.addIssue({
+          code: 'custom',
+          params: { code: RELATIVE_PATH_WITHOUT_WORKSPACE },
+          message: 'A relative path needs a Workspace folder; use an absolute path or a text',
+          path: ['knowledgeSources', index, 'path'],
+        });
+      }
+    });
+  });
 
 export type ProfileFile = z.infer<typeof profileFileSchema>;
 export type ProfileFileInput = z.input<typeof profileFileSchema>;
@@ -82,7 +134,6 @@ export type MemoryMode = z.infer<typeof memoryModeSchema>;
 export const slotContextSchema = z.object({
   taskDocuments: z.boolean().optional(),
   knowledgeSources: z.boolean().optional(),
-  checkout: z.boolean().optional(),
   gitConventions: z.boolean().optional(),
   slotOutputs: z.array(z.string()).optional(),
 });

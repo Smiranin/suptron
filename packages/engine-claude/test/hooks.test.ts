@@ -3,8 +3,9 @@ import { describe, expect, it } from 'vitest';
 import { createPreToolUseHook, decideToolUse } from '../src/hooks.js';
 
 const ctx: GuardContext = {
+  cwd: '/work/repo',
+  writeRoots: ['/work/repo'],
   protectedBranch: 'main',
-  checkoutPath: '/work/repo',
   taskPath: '/work/tasks/t1',
   configHome: '/home/me/.suptron',
 };
@@ -81,7 +82,28 @@ describe('decideToolUse', () => {
     ).toEqual({ allowed: true });
   });
 
-  it('denies NotebookEdit outside the Checkout and ignores other tools', () => {
+  it('allows a Write into a second write root and denies one outside both', () => {
+    const two: GuardContext = { ...ctx, writeRoots: ['/work/repo', '/work/notes'] };
+    expect(
+      decideToolUse('Write', { file_path: '/work/notes/draft.md', content: '' }, two, null, exists),
+    ).toEqual({ allowed: true });
+    expect(
+      decideToolUse('Write', { file_path: '/work/other/x.md', content: '' }, two, null, exists)
+        .allowed,
+    ).toBe(false);
+  });
+
+  it('allows a commit on main when the Workspace has no protected branch', () => {
+    const noProtected: GuardContext = { ...ctx, protectedBranch: null };
+    expect(
+      decideToolUse('Bash', { command: 'git commit -m x' }, noProtected, 'main', exists),
+    ).toEqual({ allowed: true });
+    expect(
+      decideToolUse('Bash', { command: 'git push --force' }, noProtected, 'main', exists).allowed,
+    ).toBe(false);
+  });
+
+  it('denies NotebookEdit outside the Workspace and ignores other tools', () => {
     expect(
       decideToolUse('NotebookEdit', { notebook_path: '/tmp/x.ipynb' }, ctx, null, exists).allowed,
     ).toBe(false);

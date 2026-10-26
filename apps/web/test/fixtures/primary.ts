@@ -59,17 +59,81 @@ export function primaryUnits(): UnitFile[] {
 export function primaryProfile(repositoryPath = '/repos/my-app', name = 'my-app'): ProfileFile {
   return {
     name,
-    repository: { path: repositoryPath, remote: 'origin', protectedBranch: 'main' },
-    knowledgeSources: ['README.md'],
-    git: {
-      branchNameTemplate: 'feature/{work_item_id}-{task_slug}',
-      pullRequestTemplate: '## {task_title}\n\n### Summary\n\n### Testing\n',
-      labels: [],
-      reviewers: [],
+    workspace: {
+      kind: 'repository',
+      path: repositoryPath,
+      remote: 'origin',
+      protectedBranch: 'main',
+      host: 'github',
+      git: {
+        branchNameTemplate: 'feature/{work_item_id}-{task_slug}',
+        pullRequestTemplate: '## {task_title}\n\n### Summary\n\n### Testing\n',
+        labels: [],
+        reviewers: [],
+      },
+      ciWaitTimeoutMinutes: 30,
     },
-    host: 'github',
+    knowledgeSources: [{ path: 'README.md' }],
     engine: 'claude-code',
-    ciWaitTimeoutMinutes: 30,
+  };
+}
+
+/** A folder Project (kind `folder`): notes in `/notes`, no git. */
+export function notesProfile(path = '/notes', name = 'notes'): ProfileFile {
+  return { name, workspace: { kind: 'folder', path }, knowledgeSources: [], engine: 'claude-code' };
+}
+
+/** A Project without a folder (kind `none`), with a text Knowledge Source. */
+export function researchProfile(name = 'research'): ProfileFile {
+  return {
+    name,
+    workspace: { kind: 'none' },
+    knowledgeSources: [{ title: 'House style', text: 'Cite every claim with a dated source.' }],
+    engine: 'claude-code',
+  };
+}
+
+/** The two Units of the research scenario; nothing in them needs a folder or git. */
+export function briefUnits(): UnitFile[] {
+  return [
+    {
+      name: 'researcher',
+      model: 'sonnet',
+      mayAskCommander: false,
+      doneCondition: [
+        { kind: 'llm_judgment', criterion: 'RESEARCH.md lists at least three dated sources.' },
+      ],
+      rules: 'Never modify the existing Task documents.',
+      instructions: 'Research the question and write RESEARCH.md next to the Task.',
+    },
+    {
+      name: 'brief-writer',
+      model: 'sonnet',
+      mayAskCommander: false,
+      doneCondition: [
+        { kind: 'llm_judgment', criterion: 'BRIEF.md answers the Task using only RESEARCH.md.' },
+      ],
+      rules: 'Never cite a source that is not in RESEARCH.md.',
+      instructions: 'Write BRIEF.md next to the Task.',
+    },
+  ];
+}
+
+/** researcher → brief-writer ⟲ researcher (limit 2) */
+export function briefAssembly(name = 'brief'): AssemblyFile {
+  return {
+    name,
+    core: { model: 'opus', defaultAttemptLimit: 2, defaultLoopLimit: 3, instructions: '' },
+    slots: [
+      { name: 'researcher', unit: 'researcher' },
+      {
+        name: 'brief-writer',
+        unit: 'brief-writer',
+        context: { slotOutputs: ['researcher'] },
+        loop: { target: 'researcher', limit: 2 },
+        exitPoint: true,
+      },
+    ],
   };
 }
 

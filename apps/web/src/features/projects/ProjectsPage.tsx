@@ -1,3 +1,5 @@
+import { workspaceKindLabel } from '@suptron/runtime/browser';
+import { Badge } from '@suptron/ui/components/badge';
 import { Button } from '@suptron/ui/components/button';
 import { Link } from '@tanstack/react-router';
 import { FolderGit2, Plus } from 'lucide-react';
@@ -27,7 +29,7 @@ export function ProjectsPage() {
         <EmptyState
           icon={FolderGit2}
           title="No Projects yet"
-          description="A Project is one repository with its Profile and Assemblies."
+          description="A Project is a repository, a folder or no folder at all, with its Profile and Assemblies."
           action={newButton}
         />
       ) : (
@@ -41,20 +43,31 @@ export function ProjectsPage() {
             >
               <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
                 <div className="flex min-w-0 flex-col gap-0.5">
-                  <h2
-                    id={`project-${project.name}`}
-                    className="m-0 text-lg font-bold tracking-tight"
-                  >
-                    <Link
-                      to="/projects/$project"
-                      params={{ project: project.name }}
-                      className="text-foreground no-underline hover:underline"
+                  <div className="flex items-center gap-2">
+                    <h2
+                      id={`project-${project.name}`}
+                      className="m-0 text-lg font-bold tracking-tight"
                     >
-                      {project.name}
-                    </Link>
-                  </h2>
+                      <Link
+                        to="/projects/$project"
+                        params={{ project: project.name }}
+                        className="text-foreground no-underline hover:underline"
+                      >
+                        {project.name}
+                      </Link>
+                    </h2>
+                    {project.profile && (
+                      <Badge variant="secondary" data-testid="project-kind">
+                        {workspaceKindLabel(project.profile.workspace.kind)}
+                      </Badge>
+                    )}
+                  </div>
                   <p className="text-muted-foreground truncate font-mono text-xs">
-                    {project.profile?.repository.path ?? 'Profile is invalid'}
+                    {project.profile
+                      ? 'path' in project.profile.workspace
+                        ? project.profile.workspace.path
+                        : 'No folder'
+                      : 'Profile is invalid'}
                   </p>
                 </div>
                 <div className="flex items-center gap-3">

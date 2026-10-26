@@ -3,6 +3,7 @@
 import { spawnSync } from 'node:child_process';
 import { evaluateCommand, type CommandContext } from '@suptron/runtime';
 import { quote } from 'shell-quote';
+import { guardFromEnv } from './shim.js';
 
 function fail(message: string, code = 1): never {
   process.stderr.write(`suptron: ${message}\n`);
@@ -24,16 +25,10 @@ const env = process.env;
 const real = program === 'git' ? env.SUPTRON_REAL_GIT : env.SUPTRON_REAL_GH;
 if (!real) fail(`the real ${program} binary was not found on PATH`, 127);
 
-const ctx: CommandContext | null =
-  env.SUPTRON_GUARD_PROTECTED_BRANCH && env.SUPTRON_GUARD_CHECKOUT
-    ? {
-        protectedBranch: env.SUPTRON_GUARD_PROTECTED_BRANCH,
-        checkoutPath: env.SUPTRON_GUARD_CHECKOUT,
-        taskPath: env.SUPTRON_GUARD_TASK ?? '',
-        configHome: env.SUPTRON_GUARD_CONFIG_HOME ?? '',
-        currentBranch: currentBranch(env.SUPTRON_REAL_GIT ?? 'git'),
-      }
-    : null;
+const guard = guardFromEnv(env);
+const ctx: CommandContext | null = guard
+  ? { ...guard, currentBranch: currentBranch(env.SUPTRON_REAL_GIT ?? 'git') }
+  : null;
 
 // Outside a Mission (no guard context) the shim is transparent.
 if (ctx) {

@@ -6,6 +6,7 @@
 **Editors plan:** ../assembly-editors/PLAN.md (`apps/web`, the clock canvas, the test fake server; read it second)
 **Glossary:** ../../GLOSSARY.md
 **Status:** draft
+**Amended:** 2026-10-26 by ../workspaces/PLAN.md: `checkoutPath` is optional in the Start request and absent for Projects without git; `409 checkout_busy` is `409 workspace_busy`; `MissionSummary.workspace` replaces `branch` and `checkoutPath`; the prefill holds `{ checkoutPath?, taskPath }`; the list row, the header and the Completed view read `summary.workspace`.
 **Amended:** 2026-10-22 by ../../adr/0004-robot-vocabulary.md: the product is named Suptron and the main nouns are renamed (Brick → Unit, Workflow → Assembly, Node → Slot, Master Agent → Core, Master Rules → Core Directives, Node Agent → Pilot, Run → Mission, Owner → Commander, Never-list → Laws); the `core` package is `runtime`.
 **Scope note:** this plan finishes the server side of Missions (terminal Mission retention, Dismiss, transcript sections, a complete Mission detail payload), extracts the clock primitives of the Assembly editor into a shared module, and implements the Missions area of `apps/web`: the Missions list, the Start Mission dialog, the Mission page with the read-only clock, the side panel with the transcript, the Human Checkpoint and Needs Attention tabs, Stop, Completed and Stopped layouts. It assumes the POC plan and the editors plan are implemented in full.
 
@@ -64,7 +65,7 @@ Limitations this plan overcomes:
 |---|---|
 | `src/transcript-store.ts` | Per Mission: an ordered list of `TranscriptSection`s keyed by `ExecutionKey`; appends entries from `agent.*`, `check.evaluated`, `question.asked`, `question.answered` and the Retry note of `slot.started`; merges `agent.tool_result` into its `tool_call` entry by `toolCallId`; trims every section but the current one to its last 200 entries and counts `dropped`. |
 | `src/sse.ts` | Assigns `seq` per Mission (monotonic from 1) and per global stream; accepts `?after=<seq>` and replays the buffer from there; when `after` is older than the buffer, sends `event: resync` first so the client refetches. |
-| `src/routes/missions.ts` | `DELETE /api/missions/:id`; `GET /api/missions/:id` returns `MissionDetail`; `POST /api/missions` returns `400 { issues: [{ field, message }] }` and `409 { reason: 'checkout_busy', missionId }`. |
+| `src/routes/missions.ts` | `DELETE /api/missions/:id`; `GET /api/missions/:id` returns `MissionDetail`; `POST /api/missions` returns `400 { issues: [{ field, message }] }` and `409 { reason: 'checkout_busy', missionId }` (workspaces: `workspace_busy` since 2026-10-26). |
 | `docs/api.md` | Updated contract. |
 
 `apps/web/src` additions and changes:
@@ -194,8 +195,8 @@ interface MissionDetail {
 ```
 GET    /api/missions                  MissionSummary[]                      every Mission since start, including Completed, Stopped and interrupted
 POST   /api/missions                  → 201 MissionSummary
-                                  400 { issues: { field: 'taskPath' | 'checkoutPath' | 'assembly' | 'workItemId'; message }[] }
-                                  409 { reason: 'checkout_busy', missionId }
+                                  400 { issues: { field: 'taskPath' | 'checkoutPath' | 'assembly' | 'workItemId'; message }[] }   (workspaces: plus 'taskText' and 'workspace'; checkoutPath optional)
+                                  409 { reason: 'checkout_busy', missionId }   (workspaces: 'workspace_busy' since 2026-10-26)
 GET    /api/missions/:id              MissionDetail | 404
 DELETE /api/missions/:id              204 | 404 | 409 { reason: 'not_finished' }
 GET    /api/events?mission=<id>&after=<seq>   replays buffered events with seq > after, then streams; sends `event: resync` (data: {}) first
@@ -292,11 +293,11 @@ function useClockViewport(layout: ClockLayout, viewport: Viewport): { transform:
 
 ```ts
 const startMissionSchema = z.object({
-  checkoutPath: z.string().min(1), taskPath: z.string().min(1), workItemId: z.string().trim().optional(),
+  checkoutPath: z.string().min(1).optional() /* workspaces: repository Projects only */, taskPath: z.string().min(1), workItemId: z.string().trim().optional(),
   mayAskCommander: z.record(z.boolean()),
 });
 // Request body = { project, assembly, ...form }. Advanced toggles are marked "changed" when they differ from the effective Assembly value.
-// localStorage key `suptron.startMission.<project>` holds { checkoutPath, taskPath }.
+// localStorage key `suptron.startMission.<project>` holds { checkoutPath?, taskPath } (workspaces: checkoutPath only for a repository Project).
 ```
 
 ## Testing Strategy
@@ -461,7 +462,7 @@ Written into ../suptron-poc/PLAN.md (sections marked "(missions-ui)"), ./SPEC.md
 2. `TranscriptEntry`, `TranscriptSection`, `ExecutionKey` and `Question` are defined as above; `GET /api/missions/:id` returns `MissionDetail` (Assembly document, sections, `transcriptLost`, `pendingQuestion`, `attention`, `result`, `seq`).
 3. Events: `seq` on every event; `slot.started` gains `loopFrom?` and `note?`; `question.answered` gains `slot` and `answers`; `mission.state` gains `slot?` and `failedChecks?`; `mission.completed` gains `exitSlot` and `pr: PullRequestRef | null`; new `mission.dismissed`.
 4. `GET /api/events` accepts `after=<seq>` and may send `event: resync`.
-5. `POST /api/missions` error bodies: `400 { issues: [{ field, message }] }`, `409 { reason: 'checkout_busy', missionId }`; `DELETE /api/missions/:id` → `204 | 404 | 409 { reason: 'not_finished' }`.
+5. `POST /api/missions` error bodies: `400 { issues: [{ field, message }] }`, `409 { reason: 'checkout_busy', missionId }` (workspaces: `workspace_busy` since 2026-10-26); `DELETE /api/missions/:id` → `204 | 404 | 409 { reason: 'not_finished' }`.
 6. The ledger entry is `{ summary, assembly, slots }`, rewritten on start, `slot.started`, `slot.done` and terminal states.
 7. The missions-ui SPEC Constraints: "the screens consume the POC contract and may extend it only by the Dismiss call and by the Missions route returning every Mission known since start" becomes "… and by the data the Mission page needs on reload, as listed in ./PLAN.md".
 

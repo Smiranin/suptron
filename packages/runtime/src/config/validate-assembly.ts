@@ -1,21 +1,43 @@
-import type { AssemblyFile, Issue } from './schemas.js';
+import { checkDescriptor } from '../checks/catalogue.js';
+import {
+  CONTEXT_SOURCE_REQUIREMENTS,
+  describeCapability,
+  missingCapabilities,
+  type Capability,
+  type ContextSource,
+} from '../workspace/kinds.js';
+import type { AssemblyFile, Check, Issue, UnitFile } from './schemas.js';
 
 export interface ValidationResult {
   errors: Issue[];
   warnings: Issue[];
 }
 
+/** What the validator needs of a Unit: its name and the Done Condition a Slot inherits (FR-8). */
+export type ValidationUnit = Pick<UnitFile, 'name' | 'doneCondition'>;
+
+const CONTEXT_SOURCE_LABELS: Record<ContextSource, string> = {
+  taskDocuments: 'the Task documents',
+  knowledgeSources: 'the Knowledge Sources',
+  gitConventions: 'the Git conventions',
+  slotOutputs: 'the Slot Outputs',
+};
+
 /**
  * The one validation function of an Assembly, shared by the loader, the server and the editors.
  * Hard errors mirror the editors SPEC FR-37; warnings never block a Save.
+ *
+ * `capabilities` is what the Project's Workspace provides; `null` means the Profile is invalid
+ * and the capability rules are skipped (the Profile problem is reported on the Project).
  */
 export function validateAssembly(
   assembly: AssemblyFile,
-  units: readonly Pick<{ name: string }, 'name'>[],
+  units: readonly ValidationUnit[],
+  capabilities: ReadonlySet<Capability> | null,
 ): ValidationResult {
   const errors: Issue[] = [];
   const warnings: Issue[] = [];
-  const unitNames = new Set(units.map((u) => u.name));
+  const unitsByName = new Map(units.map((u) => [u.name, u]));
   const slots = assembly.slots;
   const indexOf = new Map<string, number>();
   slots.forEach((slot, index) => {
@@ -36,7 +58,8 @@ export function validateAssembly(
 
   slots.forEach((slot, index) => {
     const isLast = index === slots.length - 1;
-    if (!unitNames.has(slot.unit)) {
+    const unit = unitsByName.get(slot.unit);
+    if (!unit) {
       errors.push({
         code: 'unknown_unit',
         message: `Slot "${slot.name}" uses an unknown Unit "${slot.unit}"`,
@@ -92,6 +115,15 @@ export function validateAssembly(
         slotName: slot.name,
       });
     }
+    if (capabilities) {
+      // The placed Slot's resolved Done Condition is judged, never the Unit on its own (FR-8).
+      const doneCondition = slot.doneCondition ?? unit?.doneCondition ?? [];
+      errors.push(
+        ...unavailableChecks(slot.name, doneCondition, 'doneCondition', capabilities),
+        ...unavailableChecks(slot.name, slot.exitCondition ?? [], 'exitCondition', capabilities),
+        ...unavailableContextSources(slot.name, slot.context ?? {}, capabilities),
+      );
+    }
   });
 
   // A Slot Output nobody reads, neither by name nor through the Slot's own Loop feedback.
@@ -111,4 +143,49 @@ export function validateAssembly(
   });
 
   return { errors, warnings };
+}
+
+function unavailableChecks(
+  slotName: string,
+  condition: readonly Check[],
+  field: 'doneCondition' | 'exitCondition',
+  capabilities: ReadonlySet<Capability>,
+): Issue[] {
+  return condition.flatMap((check, index) => {
+    const descriptor = checkDescriptor(check.kind);
+    const missing = missingCapabilities(descriptor.requires, capabilities);
+    if (missing.length === 0) return [];
+    return [
+      {
+        code: 'check_unavailable',
+        message: `Slot "${slotName}" uses the Check "${descriptor.label}", which needs ${missing
+          .map(describeCapability)
+          .join(' and ')} this Project's Workspace does not provide`,
+        slotName,
+        path: `${field}[${index}]`,
+      },
+    ];
+  });
+}
+
+function unavailableContextSources(
+  slotName: string,
+  context: NonNullable<AssemblyFile['slots'][number]['context']>,
+  capabilities: ReadonlySet<Capability>,
+): Issue[] {
+  const issues: Issue[] = [];
+  for (const source of Object.keys(CONTEXT_SOURCE_REQUIREMENTS) as ContextSource[]) {
+    if (context[source] !== true) continue;
+    const missing = missingCapabilities(CONTEXT_SOURCE_REQUIREMENTS[source], capabilities);
+    if (missing.length === 0) continue;
+    issues.push({
+      code: 'context_source_unavailable',
+      message: `Slot "${slotName}" reads ${CONTEXT_SOURCE_LABELS[source]}, which need ${missing
+        .map(describeCapability)
+        .join(' and ')} this Project's Workspace does not provide`,
+      slotName,
+      path: `context.${source}`,
+    });
+  }
+  return issues;
 }

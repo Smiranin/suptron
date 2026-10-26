@@ -1,4 +1,5 @@
 import type { Check, CheckKind } from '../config/schemas.js';
+import type { Capability } from '../workspace/kinds.js';
 
 export interface CheckParam {
   name: string;
@@ -13,6 +14,8 @@ export interface CheckDescriptor {
   label: string;
   description: string;
   params: CheckParam[];
+  /** What the Project's Workspace must provide for the Check to run (SPEC FR-5). */
+  requires: readonly Capability[];
   summarize(check: Check): string;
 }
 
@@ -21,7 +24,7 @@ export const CHECK_CATALOGUE: readonly CheckDescriptor[] = [
   {
     kind: 'command',
     label: 'Command succeeds',
-    description: 'A shell command exits with code 0 in the Checkout.',
+    description: "A shell command exits with code 0 in the Workspace's working directory.",
     params: [
       {
         name: 'command',
@@ -32,6 +35,7 @@ export const CHECK_CATALOGUE: readonly CheckDescriptor[] = [
       },
       { name: 'timeoutSeconds', label: 'Timeout (seconds)', type: 'number', required: false },
     ],
+    requires: [],
     summarize: (check) => (check.kind === 'command' ? check.command : ''),
   },
   {
@@ -39,6 +43,7 @@ export const CHECK_CATALOGUE: readonly CheckDescriptor[] = [
     label: 'CI green',
     description: "Waits for the Pull Request's checks up to the Project's CI timeout.",
     params: [],
+    requires: ['host'],
     summarize: () => 'CI green',
   },
   {
@@ -46,6 +51,7 @@ export const CHECK_CATALOGUE: readonly CheckDescriptor[] = [
     label: 'Pull Request exists',
     description: 'A Pull Request exists for the current branch.',
     params: [],
+    requires: ['host'],
     summarize: () => 'PR exists',
   },
   {
@@ -53,13 +59,16 @@ export const CHECK_CATALOGUE: readonly CheckDescriptor[] = [
     label: 'No open PR comments',
     description: 'The Pull Request has no unresolved review threads.',
     params: [],
+    requires: ['host'],
     summarize: () => 'no open PR comments',
   },
   {
     kind: 'llm_judgment',
     label: 'LLM judgment',
-    description: 'The Core judges the Slot Output against a written criterion.',
+    description:
+      "The Core judges the Slot Output, and the Workspace's change summary when it has one, against a written criterion.",
     params: [{ name: 'criterion', label: 'Criterion', type: 'text', required: true }],
+    requires: [],
     summarize: (check) => (check.kind === 'llm_judgment' ? `judgment: ${check.criterion}` : ''),
   },
 ];

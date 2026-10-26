@@ -3,7 +3,13 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { exec, tempRepo, type TempRepo } from '@suptron/runtime';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { findExecutable, guardEnv, installShims, type ShimInstall } from '../src/shim.js';
+import {
+  findExecutable,
+  guardEnv,
+  guardFromEnv,
+  installShims,
+  type ShimInstall,
+} from '../src/shim.js';
 
 describe('git/gh shims', () => {
   let shims: ShimInstall;
@@ -21,15 +27,23 @@ describe('git/gh shims', () => {
     await rm(home, { recursive: true, force: true });
   });
 
-  const env = () => ({
+  const guard = (protectedBranch: string | null = 'main') => ({
+    cwd: repo.clonePath,
+    writeRoots: [repo.clonePath, join(home, 'missions', 'm1')],
+    protectedBranch,
+    taskPath: join(home, 'task'),
+    configHome: home,
+  });
+  const env = (protectedBranch: string | null = 'main') => ({
     ...process.env,
     ...shims.env,
-    ...guardEnv({
-      protectedBranch: 'main',
-      checkoutPath: repo.clonePath,
-      taskPath: join(home, 'task'),
-      configHome: home,
-    }),
+    ...guardEnv(guard(protectedBranch)),
+  });
+
+  it('round-trips the GuardContext through the environment', () => {
+    expect(guardFromEnv(guardEnv(guard()))).toEqual(guard());
+    expect(guardFromEnv(guardEnv(guard(null)))).toEqual(guard(null));
+    expect(guardFromEnv({})).toBeNull();
   });
 
   it('resolves the real binaries outside the shim directory', () => {
@@ -54,6 +68,20 @@ describe('git/gh shims', () => {
     });
     expect(result.code).toBe(1);
     expect(result.stderr).toContain('protected branch');
+  });
+
+  it('allows a commit on the protected branch when the Workspace has none', async () => {
+    const result = await exec(join(shims.dir, 'git'), ['commit', '--allow-empty', '-m', 'x'], {
+      cwd: repo.clonePath,
+      env: env(null),
+    });
+    expect(result.code).toBe(0);
+    const forced = await exec(join(shims.dir, 'git'), ['push', '--force'], {
+      cwd: repo.clonePath,
+      env: env(null),
+    });
+    expect(forced.code).toBe(1);
+    expect(forced.stderr).toContain('denied by the Laws');
   });
 
   it('execs the real git for an allowed command', async () => {

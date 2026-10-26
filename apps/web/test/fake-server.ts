@@ -1,6 +1,7 @@
 import {
   DEFAULTS,
   assemblyFileSchema,
+  capabilitiesOf,
   profileFileSchema,
   resolveCore,
   resolveSlot,
@@ -15,11 +16,21 @@ import {
   type ProfileFile,
   type SlotRecord,
   type UnitFile,
+  type WorkspaceSummary,
 } from '@suptron/runtime/browser';
 import { http, HttpResponse, type HttpHandler } from 'msw';
 import { setupServer } from 'msw/node';
 import { FakeLiveEvents } from '../src/features/missions/live/LiveEvents';
-import { invalidAssembly, primaryAssembly, primaryProfile, primaryUnits } from './fixtures/primary';
+import {
+  briefAssembly,
+  briefUnits,
+  invalidAssembly,
+  notesProfile,
+  primaryAssembly,
+  primaryProfile,
+  primaryUnits,
+  researchProfile,
+} from './fixtures/primary';
 
 /** Content hash stand-in: deterministic and distinct for distinct documents. */
 export function etagOf(value: unknown): string {
@@ -69,9 +80,10 @@ export class FakeHome {
   readonly home = '/home/me/.suptron';
   nextMissionId = 1;
 
+  /** `my-app` (repository), `notes` (folder at /notes) and `research` (no folder). */
   static primary(): FakeHome {
     const home = new FakeHome();
-    for (const unit of primaryUnits()) home.units.set(unit.name, unit);
+    for (const unit of [...primaryUnits(), ...briefUnits()]) home.units.set(unit.name, unit);
     const profile = primaryProfile();
     home.projects.set('my-app', {
       profile,
@@ -84,6 +96,17 @@ export class FakeHome {
         { path: '/repos/my-app-wt', branch: 'feature/other', isMainWorktree: false },
       ],
     });
+    home.projects.set('notes', {
+      profile: notesProfile(),
+      assemblies: new Map([['brief', { doc: briefAssembly() }]]),
+      checkouts: [],
+    });
+    home.projects.set('research', {
+      profile: researchProfile(),
+      assemblies: new Map([['brief', { doc: briefAssembly() }]]),
+      checkouts: [],
+    });
+    home.existingPaths.set('/notes', 'dir');
     home.existingPaths.set('/repos/my-app', 'dir');
     home.existingPaths.set('/repos/my-app/README.md', 'file');
     home.existingPaths.set('/repos/my-app/docs/adr', 'dir');
@@ -150,11 +173,37 @@ export class FakeHome {
         },
       };
     }
-    const validation = validateAssembly(a.doc, [...this.units.values()]);
+    const profile = this.projects.get(project)?.profile;
+    const validation = validateAssembly(
+      a.doc,
+      [...this.units.values()],
+      profile ? capabilitiesOf(profile.workspace) : null,
+    );
     return {
       status: validation.errors.length === 0 ? ('valid' as const) : ('invalid' as const),
       issues: validation,
     };
+  }
+
+  /** The active Mission whose Workspace sits at `path`, if any (the busy rule over the path). */
+  busyMissionAt(path: string): MissionDetail | undefined {
+    return [...this.missions.values()].find(
+      (m) =>
+        m.summary.workspace.path === path &&
+        m.summary.state !== 'completed' &&
+        m.summary.state !== 'stopped',
+    );
+  }
+
+  /** What a Mission of this Project shows as its Workspace (the server derives it the same way). */
+  workspaceSummaryFor(p: FakeProject, checkoutPath: string | undefined): WorkspaceSummary {
+    const workspace = p.profile.workspace;
+    if (workspace.kind === 'repository') {
+      const checkout = p.checkouts.find((c) => c.path === checkoutPath);
+      return { kind: 'repository', path: checkoutPath ?? null, branch: checkout?.branch ?? null };
+    }
+    if (workspace.kind === 'folder') return { kind: 'folder', path: workspace.path, branch: null };
+    return { kind: 'none', path: null, branch: null };
   }
 
   projectItem(name: string, p: FakeProject) {
@@ -178,13 +227,12 @@ export class FakeHome {
     assembly: string;
     task: MissionTask;
     workItemId?: string;
-    checkoutPath: string;
+    checkoutPath?: string;
     mayAskCommander?: Record<string, boolean>;
   }): MissionDetail {
     const project = this.projects.get(body.project)!;
     const doc = project.assemblies.get(body.assembly)!.doc!;
     const id = `m${this.nextMissionId++}`;
-    const checkout = project.checkouts.find((c) => c.path === body.checkoutPath);
     const { task } = body;
     const taskPath = task.kind === 'path' ? task.path : `/home/.suptron/missions/${id}`;
     const taskTitle =
@@ -203,8 +251,7 @@ export class FakeHome {
       ...(body.workItemId && { workItemId: body.workItemId }),
       state: 'running',
       currentSlot: doc.slots[0]?.name ?? null,
-      branch: checkout?.branch ?? null,
-      checkoutPath: body.checkoutPath,
+      workspace: this.workspaceSummaryFor(project, body.checkoutPath),
       startedAt: new Date().toISOString(),
       cost: { usd: 0, inputTokens: 0, outputTokens: 0, estimated: true },
     };
@@ -566,18 +613,14 @@ export function handlersFor(home: FakeHome): HttpHandler[] {
     http.get('/api/projects/:project/checkouts', ({ params }) => {
       const p = home.projects.get(String(params.project));
       if (!p) return json({ reason: 'not_found' }, 404);
+      if (!capabilitiesOf(p.profile.workspace).has('git'))
+        return json({ reason: 'not_found', message: 'This Project has no Checkouts' }, 404);
       if (p.checkoutsError)
         return json({ reason: 'checkouts_unavailable', message: p.checkoutsError }, 500);
       return json(
         p.checkouts.map((c) => ({
           ...c,
-          busyMissionId:
-            [...home.missions.values()].find(
-              (m) =>
-                m.summary.checkoutPath === c.path &&
-                m.summary.state !== 'completed' &&
-                m.summary.state !== 'stopped',
-            )?.summary.id ?? null,
+          busyMissionId: home.busyMissionAt(c.path)?.summary.id ?? null,
         })),
       );
     }),
@@ -613,7 +656,11 @@ export function handlersFor(home: FakeHome): HttpHandler[] {
       const oldName = String(params.assembly);
       const p = home.projects.get(project);
       if (!p) return json({ reason: 'not_found' }, 404);
-      const validation = validateAssembly(parsed.data, [...home.units.values()]);
+      const validation = validateAssembly(
+        parsed.data,
+        [...home.units.values()],
+        capabilitiesOf(p.profile.workspace),
+      );
       if (validation.errors.length > 0) return json({ issues: validation.errors }, 400);
       const doc = parsed.data;
       if (doc.name !== oldName) {
@@ -695,16 +742,16 @@ export function handlersFor(home: FakeHome): HttpHandler[] {
         });
       if (body.task.kind === 'text' && body.task.text.trim() === '')
         issues.push({ field: 'taskText', message: 'The Task text is empty' });
-      if (project && !project.checkouts.some((c) => c.path === body.checkoutPath))
+      // The Workspace kind decides whether a Checkout is required or refused (SPEC FR-9).
+      const hasCheckouts = project ? capabilitiesOf(project.profile.workspace).has('git') : false;
+      if (project && hasCheckouts && !project.checkouts.some((c) => c.path === body.checkoutPath))
         issues.push({ field: 'checkoutPath', message: 'Not a Checkout of the Project' });
+      if (project && !hasCheckouts && body.checkoutPath !== undefined)
+        issues.push({ field: 'checkoutPath', message: 'This Project has no Checkouts' });
       if (issues.length > 0) return json({ issues }, 400);
-      const busy = [...home.missions.values()].find(
-        (m) =>
-          m.summary.checkoutPath === body.checkoutPath &&
-          m.summary.state !== 'completed' &&
-          m.summary.state !== 'stopped',
-      );
-      if (busy) return json({ reason: 'checkout_busy', missionId: busy.summary.id }, 409);
+      const workspace = home.workspaceSummaryFor(project!, body.checkoutPath);
+      const busy = workspace.path === null ? undefined : home.busyMissionAt(workspace.path);
+      if (busy) return json({ reason: 'workspace_busy', missionId: busy.summary.id }, 409);
       return json(home.startMission(body).summary, 201);
     }),
     http.get('/api/missions/:id', async ({ params, request }) => {

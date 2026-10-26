@@ -1,7 +1,13 @@
-import { basename } from 'node:path';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { basename, join } from 'node:path';
 import {
+  briefAssembly,
+  briefUnits,
   coreCallName,
   defaultCoreScript,
+  folderProfile,
+  noneProfile,
   type MissionDetail,
   type MissionEvent,
 } from '@suptron/runtime';
@@ -99,7 +105,7 @@ describe('Missions routes', () => {
       taskPath: s.taskDir,
       taskTitle: basename(s.taskDir),
       workItemId: 'ABC-1',
-      branch: 'main',
+      workspace: { kind: 'repository', branch: 'main' },
       cost: { estimated: true },
     });
     const busy = await s.app.inject({
@@ -108,13 +114,67 @@ describe('Missions routes', () => {
       payload: s.startBody(),
     });
     expect(busy.statusCode).toBe(409);
-    expect(busy.json()).toEqual({ reason: 'checkout_busy', missionId: first.json().id });
+    expect(busy.json()).toEqual({ reason: 'workspace_busy', missionId: first.json().id });
     const checkouts = await s.app.inject({ method: 'GET', url: '/api/projects/my-app/checkouts' });
     expect(checkouts.json()[0].busyMissionId).toBe(first.json().id);
     expect(
       (await s.app.inject({ method: 'DELETE', url: `/api/missions/${first.json().id}` })).json(),
     ).toMatchObject({ reason: 'not_finished' });
     release();
+  });
+
+  it('starts a none Mission without a Checkout and refuses a Checkout for a folder Project', async () => {
+    await s.cleanup();
+    const folder = await mkdtemp(join(tmpdir(), 'suptron-notes-'));
+    s = await testServer({
+      units: briefUnits(),
+      projects: [
+        { profile: noneProfile(), assemblies: [briefAssembly()] },
+        { profile: folderProfile(folder), assemblies: [briefAssembly()] },
+      ],
+    });
+    const none = await s.app.inject({
+      method: 'POST',
+      url: '/api/missions',
+      payload: { project: 'research', assembly: 'brief', task: { kind: 'text', text: '# Q' } },
+    });
+    expect(none.statusCode).toBe(201);
+    expect(none.json()).toMatchObject({
+      state: 'running',
+      taskTitle: 'Q',
+      workspace: { kind: 'none', path: null, branch: null },
+    });
+    await s.waitFor((es) => es.some((e) => e.type === 'mission.completed'));
+    const detail = (
+      await s.app.inject({ method: 'GET', url: `/api/missions/${none.json().id}` })
+    ).json() as MissionDetail;
+    expect(detail.result).toMatchObject({ exitSlot: 'brief-writer', pr: null });
+
+    const withCheckout = await s.app.inject({
+      method: 'POST',
+      url: '/api/missions',
+      payload: {
+        project: 'notes',
+        assembly: 'brief',
+        task: { kind: 'path', path: s.taskDir },
+        checkoutPath: s.repo.clonePath,
+      },
+    });
+    expect(withCheckout.statusCode).toBe(400);
+    expect(withCheckout.json().issues).toEqual([
+      { field: 'checkoutPath', message: expect.stringContaining('no Checkouts') },
+    ]);
+    const onFolder = await s.app.inject({
+      method: 'POST',
+      url: '/api/missions',
+      payload: { project: 'notes', assembly: 'brief', task: { kind: 'path', path: s.taskDir } },
+    });
+    expect(onFolder.statusCode).toBe(201);
+    expect(onFolder.json().workspace).toEqual({ kind: 'folder', path: folder, branch: null });
+    expect(
+      (await s.app.inject({ method: 'GET', url: '/api/projects/notes/checkouts' })).statusCode,
+    ).toBe(404);
+    await rm(folder, { recursive: true, force: true });
   });
 
   it('builds the Mission detail with transcript sections after a Loop and a Retry', async () => {

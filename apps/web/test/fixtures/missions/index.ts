@@ -4,7 +4,7 @@ import type {
   SlotRecord,
   TranscriptSection,
 } from '@suptron/runtime/browser';
-import { primaryAssembly } from '../primary';
+import { briefAssembly, primaryAssembly } from '../primary';
 
 const ZERO = { usd: 0, inputTokens: 0, outputTokens: 0 };
 const SLOT_NAMES = ['analyst', 'implementer', 'reviewer', 'tester', 'publisher', 'pr-reviewer'];
@@ -29,8 +29,7 @@ function summary(id: string, overrides: Partial<MissionSummary> = {}): MissionSu
     taskTitle: 'my-task',
     state: 'running',
     currentSlot: 'implementer',
-    branch: 'feature/my-task',
-    checkoutPath: '/repos/my-app',
+    workspace: { kind: 'repository', path: '/repos/my-app', branch: 'feature/my-task' },
     startedAt: '2026-10-23T10:00:00.000Z',
     cost: { usd: 0.42, inputTokens: 12000, outputTokens: 3000, estimated: true },
     ...overrides,
@@ -139,7 +138,7 @@ export function waitingDetail(id = 'm-waiting'): MissionDetail {
     summary: summary(id, {
       state: 'waiting_for_owner',
       currentSlot: 'analyst',
-      branch: 'main',
+      workspace: { kind: 'repository', path: '/repos/my-app', branch: 'main' },
       startedAt: '2026-10-23T11:00:00.000Z',
       workItemId: 'ABC-7',
     }),
@@ -290,6 +289,76 @@ export function interruptedDetail(id = 'm-interrupted'): MissionDetail {
   };
 }
 
+const BRIEF_SLOTS = ['researcher', 'brief-writer', 'core'];
+
+function briefRecords(overrides: Record<string, Partial<SlotRecord>> = {}): SlotRecord[] {
+  return BRIEF_SLOTS.map((name) => ({
+    name,
+    attempts: 0,
+    loops: 0,
+    cost: ZERO,
+    checkResults: [],
+    ...overrides[name],
+  }));
+}
+
+/** A Completed Mission of the `research` Project (kind `none`): no Pull Request, no path. */
+export function completedNoneDetail(id = 'm-brief'): MissionDetail {
+  return {
+    summary: summary(id, {
+      projectName: 'research',
+      assemblyName: 'brief',
+      taskPath: `/home/me/.suptron/missions/${id}`,
+      taskTitle: 'Compare note-taking apps',
+      state: 'completed',
+      currentSlot: null,
+      workspace: { kind: 'none', path: null, branch: null },
+      startedAt: '2026-10-23T05:00:00.000Z',
+      cost: { usd: 0.2, inputTokens: 6000, outputTokens: 1500, estimated: true },
+    }),
+    assembly: briefAssembly(),
+    slots: briefRecords({
+      researcher: { attempts: 1, lastOutput: 'three sources' },
+      'brief-writer': { attempts: 1, lastOutput: 'brief written' },
+    }),
+    transcript: [
+      {
+        execution: { slot: 'brief-writer', attempt: 1 },
+        entries: [{ id: `${id}:6`, at, kind: 'text', text: 'Writing BRIEF.md.' }],
+        dropped: 0,
+      },
+    ],
+    transcriptLost: false,
+    result: {
+      report: '# Brief\n\nBRIEF.md sits next to the Task.',
+      pr: null,
+      exitSlot: 'brief-writer',
+    },
+    seq: 8,
+  };
+}
+
+/** A running Mission of the `notes` Project (kind `folder`). */
+export function runningFolderDetail(id = 'm-notes'): MissionDetail {
+  return {
+    summary: summary(id, {
+      projectName: 'notes',
+      assemblyName: 'brief',
+      taskPath: '/tasks/my-task',
+      taskTitle: 'my-task',
+      state: 'running',
+      currentSlot: 'researcher',
+      workspace: { kind: 'folder', path: '/notes', branch: null },
+      startedAt: '2026-10-23T12:00:00.000Z',
+    }),
+    assembly: briefAssembly(),
+    slots: briefRecords({ researcher: { attempts: 1 } }),
+    transcript: [{ execution: { slot: 'researcher', attempt: 1 }, entries: [], dropped: 0 }],
+    transcriptLost: false,
+    seq: 3,
+  };
+}
+
 export const MISSION_FIXTURES = {
   running: runningDetail,
   waiting: waitingDetail,
@@ -297,4 +366,6 @@ export const MISSION_FIXTURES = {
   completed: completedDetail,
   stopped: stoppedDetail,
   interrupted: interruptedDetail,
+  completedNone: completedNoneDetail,
+  runningFolder: runningFolderDetail,
 } as const;

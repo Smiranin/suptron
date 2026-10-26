@@ -1,6 +1,12 @@
 import { readFile, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { primaryAssembly, primaryProfile } from '@suptron/runtime';
+import {
+  briefAssembly,
+  briefUnits,
+  noneProfile,
+  primaryAssembly,
+  primaryProfile,
+} from '@suptron/runtime';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { testServer, type TestServer } from './helpers.js';
 
@@ -133,6 +139,41 @@ describe('Projects, Profiles, Assemblies and tools routes', () => {
       (await s.app.inject({ method: 'DELETE', url: '/api/projects/my-app/assemblies/copy' }))
         .statusCode,
     ).toBe(204);
+  });
+
+  it('rejects a Profile with a field of another kind and an Assembly its Workspace cannot run', async () => {
+    await s.cleanup();
+    s = await testServer({
+      units: briefUnits(),
+      projects: [{ profile: noneProfile(), assemblies: [briefAssembly()] }],
+    });
+    const stray = await s.app.inject({
+      method: 'PUT',
+      url: '/api/projects/research/profile?force=1',
+      payload: { ...noneProfile(), workspace: { kind: 'none', path: '/x' } },
+    });
+    expect(stray.statusCode).toBe(400);
+    expect(stray.json().issues[0].path).toBe('workspace');
+    const hostCheck = await s.app.inject({
+      method: 'PUT',
+      url: '/api/projects/research/assemblies/brief?force=1',
+      payload: {
+        ...briefAssembly(),
+        slots: [{ name: 'publisher', unit: 'publisher', exitPoint: true }],
+      },
+    });
+    expect(hostCheck.statusCode).toBe(400);
+    expect(hostCheck.json().issues[0]).toMatchObject({
+      code: 'check_unavailable',
+      slotName: 'publisher',
+      path: 'doneCondition[0]',
+    });
+    expect(
+      (await s.app.inject({ method: 'GET', url: '/api/projects/research/checkouts' })).json(),
+    ).toEqual({ reason: 'not_found', message: 'This Project has no Checkouts' });
+    expect(
+      (await s.app.inject({ method: 'GET', url: '/api/projects/research' })).json().assemblies,
+    ).toEqual([expect.objectContaining({ name: 'brief', status: 'valid' })]);
   });
 
   it('refuses to delete an Assembly or a Project with an active Mission', async () => {

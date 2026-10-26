@@ -22,13 +22,21 @@ import {
   type UnitFile,
 } from '../src/index.js';
 import {
+  briefAssembly,
+  briefUnits,
+  folderProfile,
+  noneProfile,
   primaryAssembly,
   primaryProfile,
   primaryUnits,
   writePrimaryHome,
 } from '../src/testing/index.js';
+import { capabilitiesOf, missingCapabilities, type Capability } from '../src/workspace/kinds.js';
 
-const units = primaryUnits().map((u) => ({ name: u.name }));
+const units = primaryUnits();
+const ALL: ReadonlySet<Capability> = new Set<Capability>(['files', 'git', 'host']);
+const NONE: ReadonlySet<Capability> = new Set();
+const NO_HOST: ReadonlySet<Capability> = new Set<Capability>(['files', 'git']);
 
 function assembly(overrides: Partial<AssemblyFile> = {}): AssemblyFile {
   return { ...primaryAssembly(), ...overrides };
@@ -36,7 +44,7 @@ function assembly(overrides: Partial<AssemblyFile> = {}): AssemblyFile {
 
 describe('validateAssembly', () => {
   it('accepts the primary scenario', () => {
-    const result = validateAssembly(primaryAssembly(), units);
+    const result = validateAssembly(primaryAssembly(), units, ALL);
     expect(result.errors).toEqual([]);
   });
 
@@ -93,13 +101,79 @@ describe('validateAssembly', () => {
     ],
     ['last_slot_not_exit_point', { slots: [{ name: 'a', unit: 'analyst', exitPoint: false }] }],
   ] as [string, Partial<AssemblyFile>][])('reports %s', (code, overrides) => {
-    const result = validateAssembly(assembly(overrides), units);
+    const result = validateAssembly(assembly(overrides), units, ALL);
     expect(result.errors.map((e) => e.code)).toContain(code);
   });
 
   it('warns about an unread Slot Output', () => {
-    const result = validateAssembly(primaryAssembly(), units);
+    const result = validateAssembly(primaryAssembly(), units, ALL);
     expect(result.warnings.map((w) => w.slotName)).toEqual(['implementer', 'publisher']);
+  });
+
+  it('rejects host Checks and Git conventions the Workspace does not provide', () => {
+    const none = validateAssembly(primaryAssembly(), units, NONE);
+    const codes = none.errors.map((e) => [e.code, e.slotName, e.path]);
+    expect(codes).toContainEqual(['check_unavailable', 'publisher', 'doneCondition[0]']);
+    expect(codes).toContainEqual(['check_unavailable', 'pr-reviewer', 'doneCondition[0]']);
+    expect(codes).toContainEqual(['check_unavailable', 'pr-reviewer', 'doneCondition[1]']);
+    expect(codes).toContainEqual([
+      'context_source_unavailable',
+      'implementer',
+      'context.gitConventions',
+    ]);
+    expect(none.errors.find((e) => e.slotName === 'publisher')?.message).toBe(
+      'Slot "publisher" uses the Check "Pull Request exists", which needs a host this Project\'s Workspace does not provide',
+    );
+    // command and llm_judgment need nothing (the reviewer only loses its Git conventions)
+    expect(codes.some(([code, slot]) => code === 'check_unavailable' && slot === 'reviewer')).toBe(
+      false,
+    );
+    expect(codes.some(([, slot]) => slot === 'tester')).toBe(false);
+    // a repository without a host keeps the Git conventions but loses the host Checks
+    const noHost = validateAssembly(primaryAssembly(), units, NO_HOST);
+    expect(noHost.errors.map((e) => e.code)).toEqual([
+      'check_unavailable',
+      'check_unavailable',
+      'check_unavailable',
+    ]);
+    // an Exit Condition and a Slot override are judged too; the Unit default is replaced by the override
+    const overridden = assembly({
+      slots: [
+        {
+          name: 'publisher',
+          unit: 'publisher',
+          doneCondition: [{ kind: 'command', command: 'true' }],
+        },
+        { name: 'tester', unit: 'tester', exitPoint: true, exitCondition: [{ kind: 'ci_green' }] },
+      ],
+    });
+    expect(validateAssembly(overridden, units, NONE).errors).toEqual([
+      expect.objectContaining({
+        code: 'check_unavailable',
+        slotName: 'tester',
+        path: 'exitCondition[0]',
+      }),
+    ]);
+    // null capabilities (invalid Profile): the capability rules are skipped
+    expect(validateAssembly(primaryAssembly(), units, null).errors).toEqual([]);
+    expect(validateAssembly(briefAssembly(), briefUnits(), NONE).errors).toEqual([]);
+  });
+});
+
+describe('capabilities', () => {
+  it('derives them from the Workspace kind and the host', () => {
+    expect([...capabilitiesOf({ kind: 'none' })]).toEqual([]);
+    expect([...capabilitiesOf({ kind: 'folder', path: '/x' })]).toEqual(['files']);
+    expect([...capabilitiesOf(primaryProfile('/repo').workspace)]).toEqual([
+      'files',
+      'git',
+      'host',
+    ]);
+    expect([
+      ...capabilitiesOf({ ...primaryProfile('/repo').workspace, host: 'none' } as never),
+    ]).toEqual(['files', 'git']);
+    expect(missingCapabilities(['host'], NO_HOST)).toEqual(['host']);
+    expect(missingCapabilities(['git'], NO_HOST)).toEqual([]);
   });
 });
 
@@ -168,9 +242,53 @@ describe('serialize round-trips', () => {
     }
   });
 
-  it('profile', () => {
-    const profile = primaryProfile('/repo');
-    expect(profileFileSchema.parse(serializeProfileToObject(profile))).toEqual(profile);
+  it('profile of every Workspace kind, with path and text Knowledge Sources', () => {
+    const repository = primaryProfile('/repo');
+    expect(profileFileSchema.parse(serializeProfileToObject(repository))).toEqual(repository);
+    const text = serializeProfile(repository);
+    expect(text).not.toContain('remote:');
+    expect(text).not.toContain('host:');
+    expect(text).not.toContain('engine:');
+    const folder = {
+      ...folderProfile('/notes'),
+      knowledgeSources: [
+        { path: 'conventions.md', title: 'Conventions' },
+        { text: 'Write short sentences.' },
+      ],
+    };
+    expect(profileFileSchema.parse(serializeProfileToObject(folder))).toEqual(folder);
+    const none = noneProfile();
+    expect(profileFileSchema.parse(serializeProfileToObject(none))).toEqual(none);
+    const noHost = {
+      ...repository,
+      workspace: { ...repository.workspace, host: 'none' as const, ciWaitTimeoutMinutes: 5 },
+    };
+    expect(serializeProfile(noHost)).toContain('host: none');
+    expect(profileFileSchema.parse(serializeProfileToObject(noHost))).toEqual(noHost);
+  });
+
+  it('rejects foreign fields of another kind and a relative path without a Workspace', () => {
+    const stray = profileFileSchema.safeParse({
+      name: 'x',
+      workspace: { kind: 'folder', path: '/x', protectedBranch: 'main' },
+    });
+    expect(stray.success).toBe(false);
+    const relative = profileFileSchema.safeParse({
+      name: 'x',
+      workspace: { kind: 'none' },
+      knowledgeSources: [{ path: 'README.md' }],
+    });
+    expect(relative.success).toBe(false);
+    if (!relative.success) {
+      expect(relative.error.issues[0]?.path).toEqual(['knowledgeSources', 0, 'path']);
+    }
+    expect(
+      profileFileSchema.safeParse({
+        name: 'x',
+        workspace: { kind: 'none' },
+        knowledgeSources: [{ path: '/abs/README.md' }, { text: 't' }],
+      }).success,
+    ).toBe(true);
   });
 
   it('assembly with every optional field', async () => {
@@ -188,7 +306,7 @@ describe('serialize round-trips', () => {
           model: 'sonnet',
           instructions: 'x',
           memoryMode: 'persistent',
-          context: { knowledgeSources: false, checkout: false, slotOutputs: ['analyst'] },
+          context: { knowledgeSources: false, gitConventions: true, slotOutputs: ['analyst'] },
           doneCondition: [],
           attemptLimit: 1,
           loop: { target: 'analyst', limit: 2 },
@@ -323,7 +441,9 @@ describe('templates', () => {
     ).toBe('add-login');
     expect(render('## {task_title}', values)).toBe('## Add Login');
     expect(slugify('Add  Login — v2!')).toBe('add-login-v2');
-    const text = renderGitConventions(primaryProfile('/repo'), values);
+    const workspace = primaryProfile('/repo').workspace;
+    if (workspace.kind !== 'repository') throw new Error('unexpected kind');
+    const text = renderGitConventions(workspace, values);
     expect(text).toContain('Branch convention: feature/ABC-12-add-login');
     expect(text).not.toMatch(/suggest/i);
     expect(text).toContain('## Add Login');

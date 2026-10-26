@@ -1,8 +1,7 @@
 import type { Check, CheckResult } from '../domain/check.js';
 import type { CoreAgent } from '../core-agent/index.js';
-import type { GitClient } from '../git/types.js';
-import type { RepoHost } from '../host/index.js';
 import { exec as defaultExec, type ExecFn } from '../process/exec.js';
+import type { HostFacet, Workspace } from '../workspace/workspace.js';
 
 export const DEFAULT_COMMAND_TIMEOUT_MS = 10 * 60 * 1000;
 export const DEFAULT_CI_POLL_INTERVAL_MS = 15_000;
@@ -10,13 +9,11 @@ export const DEFAULT_CI_POLL_INTERVAL_MS = 15_000;
 export const DEFAULT_CI_NONE_GRACE_MS = 2 * 60 * 1000;
 
 export interface CheckContext {
-  checkoutPath: string;
-  protectedBranch: string;
-  host: RepoHost;
-  git: GitClient;
+  workspace: Workspace;
   core: CoreAgent;
   slotOutput: string;
-  ciWaitTimeoutMs: number;
+  /** Overrides the Workspace's CI wait timeout (tests). */
+  ciWaitTimeoutMs?: number;
   ciPollIntervalMs?: number;
   ciNoneGraceMs?: number;
   commandTimeoutMs?: number;
@@ -51,7 +48,7 @@ const runCommand: CheckRunner = async (check, ctx) => {
       ? check.timeoutSeconds * 1000
       : (ctx.commandTimeoutMs ?? DEFAULT_COMMAND_TIMEOUT_MS);
   const result = await run('sh', ['-c', check.command], {
-    cwd: ctx.checkoutPath,
+    cwd: ctx.workspace.cwd,
     timeoutMs,
     ...(ctx.signal && { signal: ctx.signal }),
   });
@@ -70,15 +67,30 @@ const runCommand: CheckRunner = async (check, ctx) => {
   };
 };
 
-async function currentPullRequest(ctx: CheckContext) {
-  const branch = await ctx.git.currentBranch(ctx.checkoutPath);
+const NO_HOST: Omit<CheckResult, 'check'> = {
+  holds: false,
+  detail: 'This Workspace has no host',
+};
+
+/**
+ * Validation keeps host Checks out of Projects without a host, so this is unreachable in a
+ * valid Mission; the runner stays total and fails the Check instead of throwing.
+ */
+function requireHost(ctx: CheckContext): HostFacet | null {
+  return ctx.workspace.host;
+}
+
+async function currentPullRequest(ctx: CheckContext, host: HostFacet) {
+  const branch = (await ctx.workspace.repository?.currentBranch()) ?? null;
   if (branch === null) return { branch: null, pr: null };
-  const pr = await ctx.host.findPullRequest({ checkoutPath: ctx.checkoutPath, branch });
+  const pr = await host.findPullRequest();
   return { branch, pr };
 }
 
 const runPrExists: CheckRunner = async (check, ctx) => {
-  const { branch, pr } = await currentPullRequest(ctx);
+  const host = requireHost(ctx);
+  if (!host) return { check, ...NO_HOST };
+  const { branch, pr } = await currentPullRequest(ctx, host);
   if (branch === null) return { check, holds: false, detail: 'The Checkout is on a detached HEAD' };
   return pr
     ? { check, holds: true, detail: `Pull Request #${pr.number}: ${pr.url}` }
@@ -86,7 +98,9 @@ const runPrExists: CheckRunner = async (check, ctx) => {
 };
 
 const runPrNoOpenComments: CheckRunner = async (check, ctx) => {
-  const { branch, pr } = await currentPullRequest(ctx);
+  const host = requireHost(ctx);
+  if (!host) return { check, ...NO_HOST };
+  const { branch, pr } = await currentPullRequest(ctx, host);
   if (!pr) {
     return {
       check,
@@ -94,14 +108,16 @@ const runPrNoOpenComments: CheckRunner = async (check, ctx) => {
       detail: branch ? `No Pull Request found for branch ${branch}` : 'Detached HEAD',
     };
   }
-  const count = await ctx.host.countUnresolvedReviewThreads(pr, ctx.checkoutPath);
+  const count = await host.unresolvedThreads(pr);
   return count === 0
     ? { check, holds: true, detail: `No unresolved review threads on #${pr.number}` }
     : { check, holds: false, detail: `${count} unresolved review thread(s) on #${pr.number}` };
 };
 
 const runCiGreen: CheckRunner = async (check, ctx) => {
-  const { branch, pr } = await currentPullRequest(ctx);
+  const host = requireHost(ctx);
+  if (!host) return { check, ...NO_HOST };
+  const { branch, pr } = await currentPullRequest(ctx, host);
   if (!pr) {
     return {
       check,
@@ -111,22 +127,23 @@ const runCiGreen: CheckRunner = async (check, ctx) => {
   }
   const interval = ctx.ciPollIntervalMs ?? DEFAULT_CI_POLL_INTERVAL_MS;
   const grace = ctx.ciNoneGraceMs ?? DEFAULT_CI_NONE_GRACE_MS;
+  const timeoutMs = ctx.ciWaitTimeoutMs ?? host.ciWaitTimeoutMs;
   const started = Date.now();
   for (;;) {
     if (ctx.signal?.aborted) return { check, holds: false, detail: 'interrupted' };
-    const status = await ctx.host.getCiStatus(pr, ctx.checkoutPath);
+    const status = await host.ciStatus(pr);
     const elapsed = Date.now() - started;
     if (status === 'success') return { check, holds: true, detail: `CI green on #${pr.number}` };
     if (status === 'failure') return { check, holds: false, detail: `CI failed on #${pr.number}` };
     if (status === 'none' && elapsed >= grace) {
       return { check, holds: true, detail: `No CI checks reported on #${pr.number}` };
     }
-    if (elapsed >= ctx.ciWaitTimeoutMs) {
+    if (elapsed >= timeoutMs) {
       return {
         check,
         holds: false,
         timedOut: true,
-        detail: `CI still ${status} after ${Math.round(ctx.ciWaitTimeoutMs / 60000)} minutes on #${pr.number}`,
+        detail: `CI still ${status} after ${Math.round(timeoutMs / 60000)} minutes on #${pr.number}`,
       };
     }
     await sleep(interval, ctx.signal);
@@ -135,7 +152,7 @@ const runCiGreen: CheckRunner = async (check, ctx) => {
 
 const runLlmJudgment: CheckRunner = async (check, ctx) => {
   if (check.kind !== 'llm_judgment') throw new Error('wrong runner');
-  const diffSummary = await ctx.git.diffSummary(ctx.checkoutPath, ctx.protectedBranch);
+  const diffSummary = await ctx.workspace.changeSummary();
   const verdict = await ctx.core.judge({
     criterion: check.criterion,
     slotOutput: ctx.slotOutput,

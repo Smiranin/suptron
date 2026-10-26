@@ -1,0 +1,6 @@
+name: research
+workspace:
+  kind: none
+knowledgeSources:
+  - title: House style
+    text: Cite every claim with a dated source. Prefer primary sources over summaries.

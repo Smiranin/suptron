@@ -370,6 +370,62 @@ describe('Assembly editor: inspector', () => {
   });
 });
 
+describe('Assembly editor: capabilities of the Project', () => {
+  it('offers only the Checks and context sources a Project without a folder provides', async () => {
+    const { user } = await openEditor('/projects/research/assemblies/brief');
+    fireEvent.pointerDown(card('researcher'), {
+      clientX: 10,
+      clientY: 10,
+      button: 0,
+      pointerId: 1,
+    });
+    fireEvent.pointerUp(card('researcher'), { clientX: 10, clientY: 10, button: 0, pointerId: 1 });
+    const inspector = await screen.findByTestId('inspector');
+    await user.click(within(inspector).getByRole('tab', { name: 'Context' }));
+    expect(within(inspector).getByRole('switch', { name: 'Task documents' })).toBeInTheDocument();
+    expect(within(inspector).queryByRole('switch', { name: 'Git conventions' })).toBeNull();
+    expect(within(inspector).queryByRole('switch', { name: 'Checkout' })).toBeNull();
+    await user.click(within(inspector).getByRole('tab', { name: 'Done' }));
+    await user.click(within(inspector).getByRole('switch', { name: 'Override Done Condition' }));
+    await user.click(within(inspector).getByRole('combobox', { name: 'Check kind' }));
+    const options = await screen.findAllByRole('option');
+    expect(options.map((o) => o.textContent)).toEqual(['Command succeeds', 'LLM judgment']);
+  });
+
+  it('marks a Slot whose Check the Project cannot run as invalid', async () => {
+    const home = FakeHome.primary();
+    home.projects.get('research')!.assemblies.set('brief', {
+      doc: {
+        ...primaryAssembly('brief'),
+        slots: [{ name: 'publisher', unit: 'publisher', exitPoint: true }],
+      },
+    });
+    await openEditor('/projects/research/assemblies/brief', home);
+    expect(screen.getByTestId('issue-error')).toHaveTextContent(
+      'uses the Check "Pull Request exists", which needs a host',
+    );
+    expect(screen.getByTestId('save-button')).toBeDisabled();
+  });
+
+  it('keeps every Check and the Git conventions for a repository Project', async () => {
+    const { user } = await openEditor();
+    fireEvent.pointerDown(card('implementer'), {
+      clientX: 10,
+      clientY: 10,
+      button: 0,
+      pointerId: 1,
+    });
+    fireEvent.pointerUp(card('implementer'), { clientX: 10, clientY: 10, button: 0, pointerId: 1 });
+    const inspector = await screen.findByTestId('inspector');
+    await user.click(within(inspector).getByRole('tab', { name: 'Context' }));
+    expect(within(inspector).getByRole('switch', { name: 'Git conventions' })).toBeInTheDocument();
+    await user.click(within(inspector).getByRole('tab', { name: 'Done' }));
+    await user.click(within(inspector).getByRole('switch', { name: 'Override Done Condition' }));
+    await user.click(within(inspector).getByRole('combobox', { name: 'Check kind' }));
+    expect(await screen.findAllByRole('option')).toHaveLength(5);
+  });
+});
+
 describe('Assembly editor: save, validation and conflicts', () => {
   it('lists errors, disables Save with the reason, selects the Slot and enables Save once fixed', async () => {
     const { user } = await openEditor('/projects/my-app/assemblies/broken');

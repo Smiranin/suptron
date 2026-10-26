@@ -111,7 +111,7 @@ describe('Primary scenario end to end', () => {
       await s.app.inject({ method: 'GET', url: `/api/missions/${id}` })
     ).json() as MissionDetail;
     expect(detail.summary.state).toBe('completed');
-    expect(detail.summary.branch).toBe(branch);
+    expect(detail.summary.workspace.branch).toBe(branch);
     expect(detail.result).toMatchObject({
       exitSlot: 'pr-reviewer',
       report: '# Mission report\n\nDone.',

@@ -27,14 +27,14 @@ import { Textarea } from '@suptron/ui/components/textarea';
 import { useNavigate } from '@tanstack/react-router';
 import { ChevronDown, Rocket } from 'lucide-react';
 import { useMemo, useState } from 'react';
-import type { MissionTask } from '@suptron/runtime/browser';
+import { capabilitiesOf, type MissionTask } from '@suptron/runtime/browser';
 import {
-  CheckoutBusyError,
   MissionValidationError,
+  WorkspaceBusyError,
   missionsApi,
   type StartIssueField,
 } from '../../../api/missions';
-import { useAssembly, useCheckouts, useUnits } from '../../../api/queries';
+import { useAssembly, useCheckouts, useProject, useUnits } from '../../../api/queries';
 import type { CheckoutItem } from '../../../api/types';
 import { PathField, type PathStatus } from '../../../components/path-field';
 import { useMissionSummary } from '../MissionsProvider';
@@ -99,7 +99,10 @@ function CheckoutSelect({
   );
 }
 
-/** Starts a Mission in a few seconds: Checkout, Task location, Work Item ID, per-Slot toggles (FR-2 to FR-5). */
+/**
+ * Starts a Mission in a few seconds: Checkout (repository Projects only), Task location, Work Item
+ * ID, per-Slot toggles (FR-2 to FR-5; workspaces FR-17).
+ */
 export function StartMissionDialog({
   project,
   assembly,
@@ -107,7 +110,13 @@ export function StartMissionDialog({
   onOpenChange,
 }: StartMissionDialogProps) {
   const navigate = useNavigate();
-  const checkouts = useCheckouts(project, open);
+  const projectQuery = useProject(project);
+  // Only a Workspace with git has Checkouts to choose from; the select exists only then.
+  const hasCheckouts =
+    projectQuery.data?.profile !== undefined &&
+    projectQuery.data.profile !== null &&
+    capabilitiesOf(projectQuery.data.profile.workspace).has('git');
+  const checkouts = useCheckouts(project, open && hasCheckouts);
   const assemblyQuery = useAssembly(project, assembly, open);
   const units = useUnits();
   const defaults = useMemo(
@@ -146,8 +155,10 @@ export function StartMissionDialog({
   const taskPathMissing =
     taskPath.trim() === '' || (taskStatus !== null && !taskStatus.checking && !taskStatus.exists);
   const taskMissing = taskKind === 'path' ? taskPathMissing : taskText.trim() === '';
-  const canStart =
-    !starting && chosenCheckout?.busyMissionId === null && !taskMissing && !checkouts.isError;
+  const workspaceReady = hasCheckouts
+    ? chosenCheckout?.busyMissionId === null && !checkouts.isError
+    : projectQuery.isSuccess;
+  const canStart = !starting && workspaceReady && !taskMissing;
   const task: MissionTask =
     taskKind === 'path'
       ? { kind: 'path', path: taskPath.trim() }
@@ -162,12 +173,12 @@ export function StartMissionDialog({
         assembly,
         task,
         ...(workItemId.trim() && { workItemId: workItemId.trim() }),
-        checkoutPath,
+        ...(hasCheckouts && { checkoutPath }),
         mayAskCommander: toggles,
       });
       // A text Task is one-off; the last Task path stays prefilled for the next opening (FR-4).
       writePrefill(project, {
-        checkoutPath,
+        ...(hasCheckouts && { checkoutPath }),
         taskPath: taskKind === 'path' ? taskPath.trim() : (prefill?.taskPath ?? ''),
       });
       onOpenChange(false);
@@ -175,9 +186,13 @@ export function StartMissionDialog({
     } catch (error) {
       if (error instanceof MissionValidationError) {
         setErrors(Object.fromEntries(error.issues.map((i) => [i.field, i.message])));
-      } else if (error instanceof CheckoutBusyError) {
-        setErrors({ checkoutPath: 'This Checkout is busy with another Mission' });
-        void checkouts.refetch();
+      } else if (error instanceof WorkspaceBusyError) {
+        if (hasCheckouts) {
+          setErrors({ checkoutPath: 'This Checkout is busy with another Mission' });
+          void checkouts.refetch();
+        } else {
+          setErrors({ workspace: 'The folder is busy with another Mission' });
+        }
       } else {
         setErrors({ assembly: error instanceof Error ? error.message : String(error) });
       }
@@ -203,21 +218,23 @@ export function StartMissionDialog({
             if (canStart) void start();
           }}
         >
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="start-checkout">Checkout</Label>
-            {checkouts.isError ? (
-              <p className="text-destructive text-sm" role="alert">
-                The Checkouts cannot be read: {checkouts.error.message}
-              </p>
-            ) : (
-              <CheckoutSelect
-                checkouts={checkouts.data ?? []}
-                value={checkoutPath}
-                onChange={setCheckoutPath}
-                error={errors.checkoutPath}
-              />
-            )}
-          </div>
+          {hasCheckouts && (
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="start-checkout">Checkout</Label>
+              {checkouts.isError ? (
+                <p className="text-destructive text-sm" role="alert">
+                  The Checkouts cannot be read: {checkouts.error.message}
+                </p>
+              ) : (
+                <CheckoutSelect
+                  checkouts={checkouts.data ?? []}
+                  value={checkoutPath}
+                  onChange={setCheckoutPath}
+                  error={errors.checkoutPath}
+                />
+              )}
+            </div>
+          )}
           <Tabs value={taskKind} onValueChange={(v) => setTaskKind(v as MissionTask['kind'])}>
             <div className="flex items-center justify-between gap-3">
               <Label>Task</Label>
@@ -326,9 +343,9 @@ export function StartMissionDialog({
               </ul>
             </CollapsibleContent>
           </Collapsible>
-          {errors.assembly && (
+          {(errors.assembly ?? errors.workspace) && (
             <p className="text-destructive text-sm" role="alert">
-              {errors.assembly}
+              {errors.assembly ?? errors.workspace}
             </p>
           )}
           <DialogFooter>

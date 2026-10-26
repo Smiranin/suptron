@@ -13,7 +13,7 @@ describe('Hangar', () => {
     const home = useFakeHome();
     renderApp('/hangar', home.live);
     const rows = await screen.findAllByTestId('unit-row');
-    expect(rows).toHaveLength(6);
+    expect(rows).toHaveLength(8);
     const prReviewer = rows.find((r) => within(r).queryByRole('link', { name: 'pr-reviewer' }))!;
     expect(prReviewer).toHaveTextContent('no open PR comments · CI green');
     expect(prReviewer).toHaveTextContent('opus');

@@ -18,7 +18,7 @@ import { SaveBar } from '../../components/save-bar';
 import { useSaveFlow } from '../../components/use-save-flow';
 import { useSaveShortcut } from '../../lib/keyboard';
 import { AssembliesList } from './AssembliesList';
-import { ProfileForm, useProfileForm, usePathStatuses } from './ProfileForm';
+import { ProfileForm, emptyProfile, useProfileForm, usePathStatuses } from './ProfileForm';
 
 /** One Project: its Profile inline and its Assemblies (editors SPEC FR-1, FR-14 to FR-17). */
 export function ProjectPage({ project }: { project: string }) {
@@ -56,22 +56,7 @@ function ProjectEditor({ item }: { item: ProjectItem }) {
   const [redirectTo, setRedirectTo] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const paths = usePathStatuses();
-  const form = useProfileForm(
-    item.profile ?? {
-      name,
-      repository: { path: '', remote: 'origin', protectedBranch: 'main' },
-      knowledgeSources: [],
-      git: {
-        branchNameTemplate: 'feature/{work_item_id}-{task_slug}',
-        pullRequestTemplate: '',
-        labels: [],
-        reviewers: [],
-      },
-      host: 'github',
-      engine: 'claude-code',
-      ciWaitTimeoutMinutes: 30,
-    },
-  );
+  const form = useProfileForm(item.profile ?? emptyProfile('repository', name));
 
   const flow = useSaveFlow<ProfileFile>({
     etag,
@@ -87,11 +72,27 @@ function ProjectEditor({ item }: { item: ProjectItem }) {
         setEtag(result.etag);
         setNameError(null);
         form.reset(result.data);
-        void invalidate();
         toast.success(`Saved ${result.data.name}`);
         if (result.data.name !== name) setRedirectTo(result.data.name);
+        // A changed Workspace re-validates the Assemblies; say so when some became invalid (FR-3).
+        const before = new Map(item.assemblies.map((a) => [a.name, a.status]));
+        void invalidate().then(async () => {
+          try {
+            const after = await api.project(result.data.name);
+            const broken = after.assemblies.filter(
+              (a) => a.status === 'invalid' && before.get(a.name) === 'valid',
+            ).length;
+            if (broken > 0) {
+              toast.warning(
+                `${broken} ${broken === 1 ? 'Assembly is' : 'Assemblies are'} now invalid`,
+              );
+            }
+          } catch {
+            // The list below refetches on its own; the warning is a courtesy.
+          }
+        });
       },
-      [form, invalidate, name],
+      [form, invalidate, item.assemblies, name],
     ),
     onReload: useCallback(
       (current) => {
@@ -201,6 +202,7 @@ function ProjectEditor({ item }: { item: ProjectItem }) {
           form={form}
           paths={paths}
           nameError={nameError && nameError.name === watchedName ? nameError.message : null}
+          existing
         />
       </form>
       <Separator className="my-8" />

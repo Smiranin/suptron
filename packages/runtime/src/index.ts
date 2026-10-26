@@ -10,6 +10,7 @@ export * from './laws/index.js';
 export * from './process/exec.js';
 export * from './templates/index.js';
 export * from './testing/index.js';
+export * from './workspace/index.js';
 export * from './checks/runners.js';
 export * from './core-agent/index.js';
 export * from './runner/index.js';

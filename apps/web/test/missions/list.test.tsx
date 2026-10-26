@@ -4,8 +4,10 @@ import { describe, expect, it } from 'vitest';
 import { useFakeHome } from '../fake-server';
 import {
   completedDetail,
+  completedNoneDetail,
   interruptedDetail,
   runningDetail,
+  runningFolderDetail,
   waitingDetail,
 } from '../fixtures/missions';
 import { renderApp } from '../render';
@@ -50,6 +52,18 @@ describe('Missions list', () => {
       'href',
       '/missions/m-waiting',
     );
+  });
+
+  it('shows the branch for a repository, the folder for a folder and nothing for no folder', async () => {
+    const home = useFakeHome();
+    home.seedMissions(runningDetail(), runningFolderDetail(), completedNoneDetail());
+    renderApp('/missions', home.live);
+    const rows = await screen.findAllByTestId('mission-row');
+    const location = (id: string) =>
+      within(rows.find((r) => r.dataset.mission === id)!).queryByTestId('workspace-location');
+    expect(location('m-running')).toHaveTextContent('feature/my-task');
+    expect(location('m-notes')).toHaveTextContent('/notes');
+    expect(location('m-brief')).toBeNull();
   });
 
   it('shows the empty hint and the interrupted note', async () => {

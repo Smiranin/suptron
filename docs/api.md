@@ -20,6 +20,13 @@ Types named below (`UnitFile`, `ProfileFile`, `AssemblyFile`, `Issue`, `MissionS
 - **Refusals by use** → `409 { reason: 'in_use', usedBy: [{ project, assembly }] }` or
   `409 { reason: 'active_missions', count }`.
 - **Not found** → `404 { reason: 'not_found', message }`.
+- **Profile format** (`ProfileFile`): `{ name, workspace, knowledgeSources, engine }`. `workspace` is one of
+  `{ kind: 'none' }`, `{ kind: 'folder', path }` or `{ kind: 'repository', path, remote?, protectedBranch?, host?: 'github' | 'none', git: { branchNameTemplate, pullRequestTemplate?, labels?, reviewers? }, ciWaitTimeoutMinutes? }`;
+  a field of another kind is a validation error. A Knowledge Source is `{ path, title? }` (relative to the
+  Workspace root, or absolute; a relative path is invalid for kind `none`) or `{ text, title? }`.
+  Assemblies are validated against the Project's Workspace: a Check or context source it cannot provide is an
+  `Issue` with code `check_unavailable` or `context_source_unavailable` (Amended 2026-10-26 by
+  features/workspaces/SPEC.md).
 
 ## Health and models
 
@@ -48,7 +55,7 @@ POST   /api/projects                                        { profile: ProfileFi
 GET    /api/projects/:project                               { name, profile, etag, issues, assemblies, activeMissions }
 PUT    /api/projects/:project/profile                       body ProfileFile → { profile, etag }   (body.name ≠ :project renames the folder; 409 active_missions)
 DELETE /api/projects/:project                               204 | 409 active_missions
-GET    /api/projects/:project/checkouts                     { path, branch, isMainWorktree, busyMissionId }[] | 500 { reason: 'checkouts_unavailable', message }
+GET    /api/projects/:project/checkouts                     { path, branch, isMainWorktree, busyMissionId }[] | 404 { reason: 'not_found', message: 'This Project has no Checkouts' } (Workspace without git) | 500 { reason: 'checkouts_unavailable', message }
 GET    /api/projects/:project/assemblies/:assembly          { name, assembly: AssemblyFile | null, text?, etag, status: 'valid' | 'invalid' | 'unparseable', issues: { errors, warnings }, activeMissions }
 PUT    /api/projects/:project/assemblies/:assembly          body AssemblyFile → { assembly, etag, warnings }   (400 when validateAssembly reports errors)
 DELETE /api/projects/:project/assemblies/:assembly          204 | 409 active_missions
@@ -72,10 +79,11 @@ macOS; the path must be inside `SUPTRON_HOME`.
 
 ```
 GET    /api/missions                  MissionSummary[]   (every Mission since start; Completed, Stopped and interrupted stay until Dismiss)
-POST   /api/missions                  { project, assembly, task, workItemId?, checkoutPath, mayAskCommander?: Record<slot, boolean> } → 201 MissionSummary
+POST   /api/missions                  { project, assembly, task, workItemId?, checkoutPath?, mayAskCommander?: Record<slot, boolean> } → 201 MissionSummary
                                       task: { kind: 'path', path } | { kind: 'text', text }; text is stored as missions/<id>/task.md and that folder becomes the Task location
-                                      400 { issues: { field: 'taskPath' | 'taskText' | 'checkoutPath' | 'assembly' | 'workItemId', message }[] }
-                                      409 { reason: 'checkout_busy', missionId }
+                                      checkoutPath is required for a repository Project and refused for the other kinds (field 'checkoutPath')
+                                      400 { issues: { field: 'taskPath' | 'taskText' | 'checkoutPath' | 'workspace' | 'assembly' | 'workItemId', message }[] }
+                                      409 { reason: 'workspace_busy', missionId }   (the Checkout or the folder is in use; a Project without a folder is never busy)
 GET    /api/missions/:id              MissionDetail | 404
 POST   /api/missions/:id/stop         204
 POST   /api/missions/:id/retry        { note? } → 204 | 409 { reason: 'not_needs_attention' }
@@ -87,7 +95,8 @@ DELETE /api/missions/:id              204 | 404 | 409 { reason: 'not_finished' }
 
 ```ts
 interface MissionDetail {
-  summary: MissionSummary;          // id, projectName, assemblyName, taskPath, taskTitle, workItemId?, state, currentSlot, branch, checkoutPath, startedAt, cost (estimated), pr?, note?
+  summary: MissionSummary;          // id, projectName, assemblyName, taskPath, taskTitle, workItemId?, state, currentSlot, workspace: { kind, path, branch }, startedAt, cost (estimated), pr?, note?
+                                    // workspace.path: the Checkout or the folder, null for kind none; workspace.branch: the Checkout's branch, null otherwise
   assembly: AssemblyFile;           // the document at start, for the clock
   slots: SlotRecord[];              // Assembly order, then 'core': { name, attempts, loops, lastOutput?, cost, checkResults }
   transcript: TranscriptSection[];  // one section per execution: { execution: { slot, attempt, loopIteration?, loopFrom? }, entries, dropped }

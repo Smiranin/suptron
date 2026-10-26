@@ -1,4 +1,4 @@
-import type { ProfileFile } from '../config/schemas.js';
+import type { RepositoryWorkspaceFile } from '../config/schemas.js';
 
 export interface MissionValues {
   workItemId?: string;
@@ -47,22 +47,25 @@ export function render(template: string, values: MissionValues): string {
 }
 
 /**
- * The Profile's Git conventions, rendered once at Mission start for the Slots whose context
- * includes them. Stated as conventions, never as instructions: what a Pilot does with them is
- * decided by its Unit.
+ * The Git conventions of a `repository` Workspace, rendered once at Mission start for the Slots
+ * whose context includes them. Stated as conventions, never as instructions: what a Pilot does
+ * with them is decided by its Unit.
  */
-export function renderGitConventions(profile: ProfileFile, values: MissionValues): string {
-  const branch = render(profile.git.branchNameTemplate, values);
-  const prBody = render(profile.git.pullRequestTemplate, values).trim();
+export function renderGitConventions(
+  workspace: RepositoryWorkspaceFile,
+  values: MissionValues,
+): string {
+  const branch = render(workspace.git.branchNameTemplate, values);
+  const prBody = render(workspace.git.pullRequestTemplate, values).trim();
   const lines = [
-    `Protected branch: ${profile.repository.protectedBranch}`,
-    `Remote: ${profile.repository.remote}`,
+    `Protected branch: ${workspace.protectedBranch}`,
+    `Remote: ${workspace.remote}`,
     `Branch convention: ${branch}`,
   ];
-  if (profile.git.labels.length > 0)
-    lines.push(`Pull request labels: ${profile.git.labels.join(', ')}`);
-  if (profile.git.reviewers.length > 0) {
-    lines.push(`Pull request reviewers: ${profile.git.reviewers.join(', ')}`);
+  if (workspace.git.labels.length > 0)
+    lines.push(`Pull request labels: ${workspace.git.labels.join(', ')}`);
+  if (workspace.git.reviewers.length > 0) {
+    lines.push(`Pull request reviewers: ${workspace.git.reviewers.join(', ')}`);
   }
   if (prBody) lines.push('', 'Pull request convention:', '', prBody);
   return lines.join('\n');

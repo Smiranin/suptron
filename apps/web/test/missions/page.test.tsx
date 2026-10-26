@@ -5,8 +5,10 @@ import { useFakeHome } from '../fake-server';
 import {
   attentionDetail,
   completedDetail,
+  completedNoneDetail,
   interruptedDetail,
   runningDetail,
+  runningFolderDetail,
   waitingDetail,
 } from '../fixtures/missions';
 import { renderApp } from '../render';
@@ -206,6 +208,41 @@ describe('Mission page', () => {
     await waitFor(() => expect(screen.getByTestId('mission-banners')).toHaveTextContent('Stopped'));
     expect(screen.queryByRole('button', { name: /Stop/ })).toBeNull();
     expect(screen.getByRole('button', { name: /Dismiss/ })).toBeInTheDocument();
+  });
+
+  it('shows the Workspace per kind in the header and the Completed view', async () => {
+    const home = useFakeHome();
+    home.seedMissions(runningDetail(), runningFolderDetail(), completedNoneDetail());
+    const { router } = renderApp('/missions/m-running', home.live);
+    await screen.findByTestId('mission-page');
+    expect(
+      within(screen.getByTestId('mission-header')).getByTestId('workspace-location'),
+    ).toHaveTextContent('/repos/my-app @ feature/my-task');
+
+    await router.navigate({ to: '/missions/$id', params: { id: 'm-notes' } });
+    await waitFor(() =>
+      expect(screen.getByTestId('mission-header')).toHaveTextContent('notes / brief'),
+    );
+    expect(
+      within(screen.getByTestId('mission-header')).getByTestId('workspace-location'),
+    ).toHaveTextContent('/notes');
+    expect(screen.getByTestId('mission-header')).not.toHaveTextContent('@');
+
+    await router.navigate({ to: '/missions/$id', params: { id: 'm-brief' } });
+    await waitFor(() =>
+      expect(screen.getByTestId('mission-header')).toHaveTextContent('research / brief'),
+    );
+    expect(
+      within(screen.getByTestId('mission-header')).queryByTestId('workspace-location'),
+    ).toBeNull();
+    expect(within(screen.getByTestId('mission-header')).queryByTestId('pr-link')).toBeNull();
+    const view = screen.getByTestId('mission-level-view');
+    expect(within(view).getByTestId('workspace-outcome')).toHaveTextContent(
+      'Produced next to the Task: /home/me/.suptron/missions/m-brief',
+    );
+    expect(within(view).getByTestId('final-report')).toHaveTextContent(
+      'BRIEF.md sits next to the Task',
+    );
   });
 
   it('handles absence, the lost transcript, connection loss, resync and Dismiss', async () => {

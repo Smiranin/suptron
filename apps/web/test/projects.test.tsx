@@ -13,7 +13,16 @@ describe('Projects overview', () => {
     const home = useFakeHome();
     renderApp('/projects', home.live);
     const items = await screen.findAllByTestId('assembly-item');
-    expect(items).toHaveLength(2);
+    expect(items).toHaveLength(4);
+    // each Project shows its kind next to its name, and its path or "No folder" (FR-20)
+    const cards = screen.getAllByTestId('project-card');
+    expect(cards.map((c) => within(c).getByTestId('project-kind').textContent)).toEqual([
+      'Repository',
+      'Folder',
+      'No folder',
+    ]);
+    expect(cards[1]).toHaveTextContent('/notes');
+    expect(cards[2]).toHaveTextContent('No folder');
     const feature = items.find((i) => within(i).queryByRole('link', { name: 'feature' }))!;
     expect(within(feature).getByTestId('launch-button')).toBeInTheDocument();
     expect(feature).toHaveTextContent('Valid');
@@ -50,17 +59,54 @@ describe('Projects overview', () => {
     expect(post.body).toEqual({
       profile: {
         name: 'other',
-        repository: { path: '/repos/other', remote: 'origin', protectedBranch: 'develop' },
-        knowledgeSources: [],
-        git: {
-          branchNameTemplate: 'feature/{work_item_id}-{task_slug}',
-          pullRequestTemplate: '## {task_title}\n\n### Summary\n\n### Testing\n',
-          labels: [],
-          reviewers: [],
+        workspace: {
+          kind: 'repository',
+          path: '/repos/other',
+          remote: 'origin',
+          protectedBranch: 'develop',
+          host: 'github',
+          git: {
+            branchNameTemplate: 'feature/{work_item_id}-{task_slug}',
+            pullRequestTemplate: '## {task_title}\n\n### Summary\n\n### Testing\n',
+            labels: [],
+            reviewers: [],
+          },
+          ciWaitTimeoutMinutes: 30,
         },
-        host: 'github',
+        knowledgeSources: [],
         engine: 'claude-code',
-        ciWaitTimeoutMinutes: 30,
+      },
+    });
+  });
+
+  it('creates a Project without a folder: no git fields, a text Knowledge Source, no path checks', async () => {
+    const home = useFakeHome();
+    const user = userEvent.setup();
+    const { router } = renderApp('/projects', home.live);
+    await user.click(await screen.findByRole('button', { name: /New Project/ }));
+    const dialog = await screen.findByRole('dialog');
+    await user.type(within(dialog).getByLabelText('Name'), 'trips');
+    await user.click(within(dialog).getByRole('combobox', { name: 'Project type' }));
+    await user.click(await screen.findByRole('option', { name: 'No folder' }));
+    // a new Project changes its type without a confirmation
+    expect(screen.queryByRole('alertdialog')).toBeNull();
+    expect(within(dialog).getByTestId('workspace-fields')).toHaveAttribute('data-kind', 'none');
+    expect(within(dialog).queryByLabelText('Repository path')).toBeNull();
+    expect(within(dialog).queryByLabelText('Protected branch')).toBeNull();
+    expect(within(dialog).queryByLabelText('Branch name template')).toBeNull();
+    await user.click(within(dialog).getByRole('button', { name: /Add Knowledge Source/ }));
+    await user.click(within(dialog).getByRole('combobox', { name: 'Knowledge Source 1 type' }));
+    await user.click(await screen.findByRole('option', { name: 'Text' }));
+    await user.type(within(dialog).getByLabelText('Knowledge Source 1 title'), 'Airlines');
+    await user.type(within(dialog).getByLabelText('Knowledge Source 1'), 'Prefer direct flights.');
+    await user.click(within(dialog).getByRole('button', { name: 'Create Project' }));
+    await waitFor(() => expect(router.state.location.pathname).toBe('/projects/trips'));
+    expect(home.requestsTo('POST', '/api/projects')[0]!.body).toEqual({
+      profile: {
+        name: 'trips',
+        workspace: { kind: 'none' },
+        knowledgeSources: [{ text: 'Prefer direct flights.', title: 'Airlines' }],
+        engine: 'claude-code',
       },
     });
   });
@@ -123,10 +169,57 @@ describe('Project page', () => {
     );
     const put = home.requestsTo('PUT', '/api/projects/my-app/profile')[0]!;
     expect(put.headers['if-match']).toBeDefined();
-    expect((put.body as { knowledgeSources: string[] }).knowledgeSources).toEqual([
-      'README.md',
-      'docs/adr',
+    expect((put.body as { knowledgeSources: unknown[] }).knowledgeSources).toEqual([
+      { path: 'README.md' },
+      { path: 'docs/adr' },
     ]);
+  });
+
+  it('changes the kind of an existing Project after a confirmation and warns about Assemblies that became invalid', async () => {
+    const home = useFakeHome();
+    // the relative Knowledge Source README.md resolves against the new folder once the kind changes
+    home.existingPaths.set('/notes/README.md', 'file');
+    const user = userEvent.setup();
+    renderApp('/projects/my-app', home.live);
+    const form = await screen.findByRole('form', { name: 'Project Profile' });
+    expect(within(form).getByLabelText('Repository path')).toHaveValue('/repos/my-app');
+    await user.click(within(form).getByRole('combobox', { name: 'Project type' }));
+    await user.click(await screen.findByRole('option', { name: 'Folder' }));
+    const confirm = await screen.findByRole('alertdialog');
+    expect(confirm).toHaveTextContent('The fields of the Repository type are dropped');
+    await user.click(within(confirm).getByRole('button', { name: 'Cancel' }));
+    expect(within(form).getByTestId('workspace-fields')).toHaveAttribute('data-kind', 'repository');
+    await user.click(within(form).getByRole('combobox', { name: 'Project type' }));
+    await user.click(await screen.findByRole('option', { name: 'Folder' }));
+    await user.click(
+      within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Change type' }),
+    );
+    await waitFor(() =>
+      expect(within(form).getByTestId('workspace-fields')).toHaveAttribute('data-kind', 'folder'),
+    );
+    expect(within(form).queryByLabelText('Protected branch')).toBeNull();
+    await user.type(within(form).getByLabelText('Folder path'), '/notes');
+    // two debounced path checks (the folder, then the Knowledge Source against it) run first
+    await waitFor(() => expect(screen.getByTestId('save-button')).toBeEnabled(), {
+      timeout: 3000,
+    });
+    await user.click(screen.getByTestId('save-button'));
+    await waitFor(() =>
+      expect(home.requestsTo('PUT', '/api/projects/my-app/profile')).toHaveLength(1),
+    );
+    const put = home.requestsTo('PUT', '/api/projects/my-app/profile')[0]!;
+    expect((put.body as { workspace: unknown }).workspace).toEqual({
+      kind: 'folder',
+      path: '/notes',
+    });
+    // `feature` uses host Checks a folder cannot run: the save says so (FR-3)
+    expect(await screen.findByText('1 Assembly is now invalid')).toBeInTheDocument();
+    await waitFor(() =>
+      expect(home.projectItem('my-app', home.projects.get('my-app')!).assemblies).toEqual([
+        expect.objectContaining({ name: 'feature', status: 'invalid' }),
+        expect.objectContaining({ name: 'broken', status: 'invalid' }),
+      ]),
+    );
   });
 
   it('refuses to delete an Assembly with active Missions and shows the count', async () => {

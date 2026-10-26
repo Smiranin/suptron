@@ -1,17 +1,18 @@
-import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdtemp, readdir, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
-  CheckoutBusyError,
   MissionRegistry,
   MissionStartError,
   MissionStateError,
   RealGitClient,
+  WorkspaceBusyError,
   type AssemblyFile,
   type Check,
   type MissionEvent,
   type MissionTask,
+  type ProfileFile,
   type UnitFile,
 } from '../src/index.js';
 import {
@@ -19,6 +20,8 @@ import {
   FakeHost,
   coreCallInput,
   coreCallName,
+  folderProfile,
+  noneProfile,
   primaryProfile,
   tempRepo,
   writeHome,
@@ -42,10 +45,15 @@ function unit(name: string, doneCondition: Check[] = [], extra: Partial<UnitFile
 const PASS: Check = { kind: 'command', command: 'true' };
 const FAIL: Check = { kind: 'command', command: 'false' };
 
+type WorkspaceKind = 'repository' | 'folder' | 'none';
+
 interface Harness {
   repo: TempRepo;
   home: string;
   taskDir: string;
+  /** The Workspace folder of a `folder` Project; unused for the other kinds. */
+  folder: string;
+  kind: WorkspaceKind;
   engine: FakeEngine;
   host: FakeHost;
   registry: MissionRegistry;
@@ -53,7 +61,7 @@ interface Harness {
   start(
     assembly?: string,
     overrides?: {
-      checkoutPath?: string;
+      checkoutPath?: string | null;
       toggles?: Record<string, boolean>;
       workItemId?: string;
       task?: MissionTask;
@@ -64,15 +72,27 @@ interface Harness {
   types(id?: string): string[];
 }
 
-async function harness(units: UnitFile[], assemblies: AssemblyFile[]): Promise<Harness> {
+/** The Project is named `my-app` whatever its kind, so every test starts the same way. */
+async function harness(
+  units: UnitFile[],
+  assemblies: AssemblyFile[],
+  kind: WorkspaceKind = 'repository',
+  profileOverrides: Partial<ProfileFile> = {},
+): Promise<Harness> {
   const repo = await tempRepo();
   const home = await mkdtemp(join(tmpdir(), 'suptron-home-'));
   const taskDir = await mkdtemp(join(tmpdir(), 'suptron-task-'));
+  const folder = await mkdtemp(join(tmpdir(), 'suptron-folder-'));
   await writeFile(join(taskDir, 'SPEC.md'), '# Add login\n');
-  await writeHome(home, {
-    units,
-    projects: [{ profile: primaryProfile(repo.clonePath), assemblies }],
-  });
+  const profile: ProfileFile = {
+    ...(kind === 'repository'
+      ? primaryProfile(repo.clonePath)
+      : kind === 'folder'
+        ? folderProfile(folder, 'my-app')
+        : noneProfile('my-app')),
+    ...profileOverrides,
+  };
+  await writeHome(home, { units, projects: [{ profile, assemblies }] });
   const engine = new FakeEngine();
   const host = new FakeHost();
   const registry = new MissionRegistry({
@@ -99,16 +119,25 @@ async function harness(units: UnitFile[], assemblies: AssemblyFile[]): Promise<H
     repo,
     home,
     taskDir,
+    folder,
+    kind,
     engine,
     host,
     registry,
     events,
     start: async (assembly = 'feature', overrides = {}) => {
+      // A repository Project gets the clone unless the test says otherwise; null sends no Checkout.
+      const checkoutPath =
+        overrides.checkoutPath === undefined
+          ? kind === 'repository'
+            ? repo.clonePath
+            : undefined
+          : (overrides.checkoutPath ?? undefined);
       const summary = await registry.start({
         project: 'my-app',
         assembly,
         task: overrides.task ?? { kind: 'path', path: taskDir },
-        checkoutPath: overrides.checkoutPath ?? repo.clonePath,
+        ...(checkoutPath !== undefined && { checkoutPath }),
         ...(overrides.workItemId !== undefined && { workItemId: overrides.workItemId }),
         ...(overrides.toggles && { mayAskCommander: overrides.toggles }),
       });
@@ -130,6 +159,7 @@ async function cleanup(h: Harness | undefined) {
     h.repo.cleanup(),
     rm(h.home, { recursive: true, force: true }),
     rm(h.taskDir, { recursive: true, force: true }),
+    rm(h.folder, { recursive: true, force: true }),
   ]);
 }
 
@@ -186,6 +216,17 @@ describe('Runner scenarios', () => {
     );
     expect(h.registry.isCheckoutBusy(h.repo.clonePath)).toBeNull();
     expect(h.registry.get(id)!.summary.taskTitle).toBe(basename(h.taskDir));
+    // git reports the Checkout by its realpath (/private/var on macOS)
+    expect(h.registry.get(id)!.summary.workspace).toEqual({
+      kind: 'repository',
+      path: await realpath(h.repo.clonePath),
+      branch: 'main',
+    });
+    // every Mission has its folder, also for a path Task; Dismiss removes it
+    const missionDir = join(h.home, 'missions', id);
+    expect((await stat(missionDir)).isDirectory()).toBe(true);
+    await h.registry.dismiss(id);
+    await expect(stat(missionDir)).rejects.toMatchObject({ code: 'ENOENT' });
   });
 
   it('stores a text Task in the Mission folder, titles it from the first line, removes it on Dismiss', async () => {
@@ -488,15 +529,22 @@ describe('Runner scenarios', () => {
     const worktree = join(h.repo.root, 'wt');
     await h.repo.git(['worktree', 'add', '-q', '-b', 'feature/wt', worktree]);
     const first = await h.start();
-    await expect(h.start()).rejects.toBeInstanceOf(CheckoutBusyError);
+    await expect(h.start()).rejects.toBeInstanceOf(WorkspaceBusyError);
     const second = await h.start('feature', { checkoutPath: worktree });
-    expect(h.registry.get(second)?.summary.branch).toBe('feature/wt');
-    const checkouts = await h.registry.listCheckouts('my-app');
+    expect(h.registry.get(second)?.summary.workspace.branch).toBe('feature/wt');
+    const checkouts = (await h.registry.listCheckouts('my-app'))!;
     expect(checkouts.map((c) => c.busyMissionId)).toEqual([first, second]);
     release();
     await h.waitFor((es) => es.filter((e) => e.type === 'mission.completed').length === 2);
     await expect(h.start('feature', { checkoutPath: '/nowhere' })).rejects.toBeInstanceOf(
       MissionStartError,
+    );
+    await expect(h.start('feature', { checkoutPath: null })).rejects.toMatchObject({
+      issues: [{ field: 'checkoutPath', message: 'Pick a Checkout' }],
+    });
+    // a failed start leaves no Mission folder behind; the two Completed ones keep theirs until Dismiss
+    expect((await readdir(join(h.home, 'missions'))).sort()).toEqual(
+      ['active.json', first, second].sort(),
     );
     await expect(h.start('missing')).rejects.toMatchObject({ issues: [{ field: 'assembly' }] });
     await expect(h.start('feature', { workItemId: 'has space' })).rejects.toMatchObject({
@@ -535,7 +583,7 @@ describe('Runner scenarios', () => {
     );
     const pr = h.host.seedPullRequest('feature/pr', { ci: 'pending', unresolvedThreads: 1 });
     await h.waitFor((es) => es.some((e) => e.type === 'slot.done' && e.slot === 'pub'));
-    expect(h.registry.get(id)?.summary.branch).toBe('feature/pr');
+    expect(h.registry.get(id)?.summary.workspace.branch).toBe('feature/pr');
     await h.waitFor((es) =>
       es.some(
         (e) =>
@@ -594,7 +642,7 @@ describe('Runner scenarios', () => {
       { result: { output: 'ok' } },
     ]);
     const id = await h.start();
-    expect(h.registry.get(id)?.summary.branch).toBe('feature/existing');
+    expect(h.registry.get(id)?.summary.workspace.branch).toBe('feature/existing');
     await h.waitFor((es) => es.some((e) => e.type === 'mission.completed'));
     expect((await h.repo.git(['log', '--oneline'])).split('\n').filter(Boolean)).toHaveLength(2);
   });
@@ -641,5 +689,142 @@ describe('Runner scenarios', () => {
     await h.registry.dismiss(running);
     expect(h.registry.list()).toEqual([]);
     expect(h.events.at(-1)).toMatchObject({ type: 'mission.dismissed', missionId: running });
+  });
+});
+
+describe('Runner scenarios on a folder and on no folder', () => {
+  let h: Harness | undefined;
+  afterEach(() => cleanup(h));
+
+  const judgeInputs = (engine: FakeEngine) =>
+    engine
+      .callsFor('core', 'core')
+      .filter((c) => coreCallName(c.prompt) === 'judge')
+      .map((c) => coreCallInput(c.prompt) as { diffSummary: string | null });
+
+  it('completes a none Mission with command and llm_judgment Checks, judged without a diff', async () => {
+    h = await harness(
+      [unit('a', [PASS]), unit('b', [{ kind: 'llm_judgment', criterion: 'BRIEF.md exists.' }])],
+      [
+        linear([
+          { name: 'a', unit: 'a' },
+          { name: 'b', unit: 'b', context: { slotOutputs: ['a'] } },
+        ]),
+      ],
+      'none',
+    );
+    h.engine.script('pilot', 'b', [
+      { shell: 'echo brief > BRIEF.md' },
+      { result: { output: 'ok' } },
+    ]);
+    const id = await h.start();
+    await h.waitFor((es) => es.some((e) => e.type === 'mission.completed'));
+    const summary = h.registry.get(id)!.summary;
+    expect(summary.workspace).toEqual({ kind: 'none', path: null, branch: null });
+    expect(judgeInputs(h.engine).map((i) => i.diffSummary)).toEqual([null]);
+    // the Mission folder is the working directory: the Pilot's file landed there
+    const missionDir = join(h.home, 'missions', id);
+    expect(await readFile(join(missionDir, 'BRIEF.md'), 'utf8')).toBe('brief\n');
+    expect(h.engine.callsFor('pilot', 'b')[0]?.spec.cwd).toBe(missionDir);
+    expect(h.engine.callsFor('pilot', 'b')[0]?.spec.guard).toMatchObject({
+      cwd: missionDir,
+      writeRoots: [missionDir],
+      protectedBranch: null,
+      taskPath: h.taskDir,
+    });
+    // the text Knowledge Source reaches the Core verbatim and the fragment names the folder
+    const bundle = (
+      coreCallInput(composeCalls(h.engine, 'a')[0]!.prompt) as {
+        bundle: { knowledgeSources: unknown[]; workspace: string; gitConventions: null };
+      }
+    ).bundle;
+    expect(bundle.knowledgeSources).toEqual([
+      {
+        kind: 'text',
+        title: 'House style',
+        text: 'Cite every claim with a dated source. Prefer primary sources over summaries.',
+      },
+    ]);
+    expect(bundle.workspace).toContain(missionDir);
+    expect(bundle.gitConventions).toBeNull();
+    const report = h.engine
+      .callsFor('core', 'core')
+      .find((c) => coreCallName(c.prompt) === 'finalReport')!;
+    expect(
+      (coreCallInput(report.prompt) as { workspace: string; pr?: unknown }).workspace,
+    ).toContain(missionDir);
+    expect(h.events.find((e) => e.type === 'mission.completed')).toMatchObject({ pr: null });
+    expect(await h.registry.listCheckouts('my-app')).toBeNull();
+  });
+
+  it('runs two none Missions at once and refuses a Checkout', async () => {
+    h = await harness([unit('a', [PASS])], [linear([{ name: 'a', unit: 'a' }])], 'none');
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    h.engine.script('pilot', 'a', [{ wait: gate }, { result: { output: 'ok' } }]);
+    const first = await h.start();
+    const second = await h.start();
+    expect(h.registry.list().map((m) => m.state)).toEqual(['running', 'running']);
+    await expect(h.start('feature', { checkoutPath: h.repo.clonePath })).rejects.toMatchObject({
+      issues: [{ field: 'checkoutPath' }],
+    });
+    release();
+    await h.waitFor((es) => es.filter((e) => e.type === 'mission.completed').length === 2);
+    expect([first, second].every((id) => h!.registry.get(id)?.summary.state === 'completed')).toBe(
+      true,
+    );
+  });
+
+  it('runs a folder Mission in the folder, refuses a second one while it runs, and allows one after it stopped', async () => {
+    h = await harness([unit('a', [PASS])], [linear([{ name: 'a', unit: 'a' }])], 'folder', {
+      knowledgeSources: [{ path: 'conventions.md' }],
+    });
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    h.engine.script('pilot', 'a', [
+      { shell: 'echo notes > NOTES.md' },
+      { wait: gate },
+      { result: { output: 'ok' } },
+    ]);
+    const first = await h.start();
+    expect(h.registry.get(first)?.summary.workspace).toEqual({
+      kind: 'folder',
+      path: h.folder,
+      branch: null,
+    });
+    await h.waitFor((es) => es.some((e) => e.type === 'agent.tool_result'));
+    expect(await readFile(join(h.folder, 'NOTES.md'), 'utf8')).toBe('notes\n');
+    await expect(h.start()).rejects.toBeInstanceOf(WorkspaceBusyError);
+    expect(h.registry.isCheckoutBusy(h.folder)).toBe(first);
+    // a relative Knowledge Source resolves against the folder
+    const bundle = (
+      coreCallInput(composeCalls(h.engine, 'a')[0]!.prompt) as {
+        bundle: { knowledgeSources: unknown[]; workspace: string };
+      }
+    ).bundle;
+    expect(bundle.knowledgeSources).toEqual([
+      { kind: 'path', path: join(h.folder, 'conventions.md') },
+    ]);
+    expect(bundle.workspace).toContain(h.folder);
+    await h.registry.stop(first);
+    expect(h.registry.isCheckoutBusy(h.folder)).toBeNull();
+    release();
+    const second = await h.start();
+    await h.waitFor((es) =>
+      es.some((e) => e.type === 'mission.completed' && e.missionId === second),
+    );
+    await expect(h.start('feature', { checkoutPath: h.folder })).rejects.toMatchObject({
+      issues: [{ field: 'checkoutPath' }],
+    });
+  });
+
+  it('refuses to start on a folder that does not exist', async () => {
+    h = await harness([unit('a', [PASS])], [linear([{ name: 'a', unit: 'a' }])], 'folder', {
+      workspace: { kind: 'folder', path: '/nowhere/at/all' },
+    });
+    await expect(h.start()).rejects.toMatchObject({
+      issues: [{ field: 'workspace', message: expect.stringContaining('/nowhere/at/all') }],
+    });
+    expect(await readdir(join(h.home, 'missions')).catch(() => [])).toEqual([]);
   });
 });

@@ -1,6 +1,7 @@
 import {
   assemblyFileSchema,
   assemblyRelPath,
+  capabilitiesOf,
   issuesFromZod,
   nameSchema,
   parseAssemblyText,
@@ -11,9 +12,11 @@ import {
   serializeAssembly,
   serializeProfile,
   validateAssembly,
+  type Capability,
   type LoadedAssembly,
   type LoadedConfig,
   type LoadedProject,
+  type UnitFile,
 } from '@suptron/runtime';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
@@ -24,8 +27,13 @@ import { checkPrecondition, putWithPreconditions } from './put-semantics.js';
 const duplicateSchema = z.object({ newName: nameSchema });
 const createProjectSchema = z.object({ profile: profileFileSchema });
 
-function unitNames(config: LoadedConfig): string[] {
-  return config.units.flatMap((u) => (u.unit ? [u.name] : []));
+function validUnits(config: LoadedConfig): UnitFile[] {
+  return config.units.flatMap((u) => (u.unit ? [u.unit] : []));
+}
+
+/** What the Project's Workspace provides; null while its Profile is invalid. */
+function capabilities(project: LoadedProject): ReadonlySet<Capability> | null {
+  return project.profile ? capabilitiesOf(project.profile.workspace) : null;
 }
 
 export function registerProjectRoutes(app: FastifyInstance, ctx: ServerContext): void {
@@ -135,6 +143,12 @@ export function registerProjectRoutes(app: FastifyInstance, ctx: ServerContext):
       if (!project?.profile) return notFound(reply, 'Project');
       try {
         const checkouts = await ctx.registry.listCheckouts(project.name);
+        if (checkouts === null) {
+          return fail(reply, 404, {
+            reason: 'not_found',
+            message: 'This Project has no Checkouts',
+          });
+        }
         return checkouts.map((c) => ({
           path: c.path,
           branch: c.branch,
@@ -179,15 +193,14 @@ export function registerProjectRoutes(app: FastifyInstance, ctx: ServerContext):
       const assembly = parsed.data;
       const { config, project } = await ctx.config.project(request.params.project);
       if (!project) return notFound(reply, 'Project');
-      const validation = validateAssembly(
-        assembly,
-        unitNames(config).map((name) => ({ name })),
-      );
+      const units = validUnits(config);
+      const provided = capabilities(project);
+      const validation = validateAssembly(assembly, units, provided);
       if (validation.errors.length > 0) return badRequest(reply, validation.errors);
       const text = serializeAssembly(assembly);
       const oldName = request.params.assembly;
       const parseCurrent = (name: string) => (current: string) =>
-        parseAssemblyText(name, current, unitNames(config)).assembly;
+        parseAssemblyText(name, current, units, provided).assembly;
       if (assembly.name !== oldName) {
         const existing = project.assemblies.find((a) => a.name === oldName);
         if (!existing) return notFound(reply, 'Assembly');

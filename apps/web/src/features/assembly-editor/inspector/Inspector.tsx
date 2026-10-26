@@ -1,7 +1,10 @@
 import {
+  CONTEXT_SOURCE_REQUIREMENTS,
   DEFAULTS,
+  missingCapabilities,
   summarizeCondition,
   type AssemblyFile,
+  type Capability,
   type Check,
   type SlotFile,
 } from '@suptron/runtime/browser';
@@ -34,6 +37,8 @@ import { OverrideField } from './OverrideField';
 export interface InspectorProps {
   doc: AssemblyFile;
   units: UnitIndex;
+  /** What the Project's Workspace provides; null while its Profile is invalid (everything is offered). */
+  capabilities: ReadonlySet<Capability> | null;
   issues: EditorIssues;
   selected: string | 'core';
   tab: InspectorTab;
@@ -77,9 +82,17 @@ export function Inspector(props: InspectorProps) {
   );
 }
 
+const CONTEXT_SWITCHES = ['taskDocuments', 'knowledgeSources', 'gitConventions'] as const;
+const CONTEXT_LABELS: Record<(typeof CONTEXT_SWITCHES)[number], string> = {
+  taskDocuments: 'Task documents',
+  knowledgeSources: 'Knowledge Sources',
+  gitConventions: 'Git conventions',
+};
+
 function SlotInspector({
   doc,
   units,
+  capabilities,
   issues,
   slot,
   tab,
@@ -94,6 +107,12 @@ function SlotInspector({
   const patch = (p: Partial<Omit<SlotFile, 'name' | 'unit'>>) =>
     dispatch({ type: 'patchSlot', name: slot.name, patch: p });
   const defaultLoopLimit = doc.core.defaultLoopLimit ?? DEFAULTS.core.defaultLoopLimit;
+  // A source the Workspace cannot feed is not offered (SPEC FR-7); a file that still names it is invalid.
+  const contextSwitches = CONTEXT_SWITCHES.filter(
+    (key) =>
+      capabilities === null ||
+      missingCapabilities(CONTEXT_SOURCE_REQUIREMENTS[key], capabilities).length === 0,
+  );
 
   return (
     <div className="flex flex-col gap-4">
@@ -188,34 +207,26 @@ function SlotInspector({
         </TabsContent>
 
         <TabsContent value="context" className="flex flex-col gap-3 pt-2">
-          {(['taskDocuments', 'knowledgeSources', 'checkout', 'gitConventions'] as const).map(
-            (key) => {
-              const labels = {
-                taskDocuments: 'Task documents',
-                knowledgeSources: 'Knowledge Sources',
-                checkout: 'Checkout',
-                gitConventions: 'Git conventions',
-              };
-              const value = slot.context?.[key] ?? DEFAULTS.slot.context[key];
-              return (
-                <label key={key} className="flex items-center justify-between gap-2 text-sm">
-                  {labels[key]}
-                  <Switch
-                    checked={value}
-                    aria-label={labels[key]}
-                    onCheckedChange={(v) =>
-                      patch({
-                        context: cleanContext({
-                          ...slot.context,
-                          [key]: v === DEFAULTS.slot.context[key] ? undefined : v,
-                        }),
-                      })
-                    }
-                  />
-                </label>
-              );
-            },
-          )}
+          {contextSwitches.map((key) => {
+            const value = slot.context?.[key] ?? DEFAULTS.slot.context[key];
+            return (
+              <label key={key} className="flex items-center justify-between gap-2 text-sm">
+                {CONTEXT_LABELS[key]}
+                <Switch
+                  checked={value}
+                  aria-label={CONTEXT_LABELS[key]}
+                  onCheckedChange={(v) =>
+                    patch({
+                      context: cleanContext({
+                        ...slot.context,
+                        [key]: v === DEFAULTS.slot.context[key] ? undefined : v,
+                      }),
+                    })
+                  }
+                />
+              </label>
+            );
+          })}
           <div className="flex flex-col gap-2 pt-2">
             <Label>Slot Outputs of earlier Slots</Label>
             {earlier.length === 0 && (
@@ -260,6 +271,7 @@ function SlotInspector({
               value={slot.doneCondition ?? []}
               onChange={(doneCondition: Check[]) => patch({ doneCondition })}
               label="Done Condition"
+              capabilities={capabilities}
             />
           </OverrideField>
         </TabsContent>
@@ -387,6 +399,7 @@ function SlotInspector({
               }
               disabled={!last && slot.exitPoint !== true}
               label="Exit Condition"
+              capabilities={capabilities}
             />
           </div>
         </TabsContent>

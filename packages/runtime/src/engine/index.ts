@@ -10,8 +10,12 @@ export type HealthStatus = { ok: true } | { ok: false; reason: string };
 
 /** What the Laws hook and the PATH shims need to evaluate a command or a path. */
 export interface GuardContext {
-  protectedBranch: string;
-  checkoutPath: string;
+  /** Relative paths resolve against it: the Engine's working directory (the Workspace). */
+  cwd: string;
+  /** The Laws allow writes inside these roots and the Task location, nowhere else. */
+  writeRoots: readonly string[];
+  /** null when the Workspace knows no protected branch; the branch Laws are then skipped. */
+  protectedBranch: string | null;
   taskPath: string;
   configHome: string;
 }
@@ -25,7 +29,7 @@ export interface AgentSpec {
   model: string;
   /** 'pilot' appends to the Claude Code preset; 'core' is a custom prompt with no file tools. */
   systemPrompt: { rules: string; instructions: string };
-  /** The Checkout for 'pilot'; the Task folder for 'core'. */
+  /** The Workspace's working directory for 'pilot'; the Task folder for 'core'. */
   cwd: string;
   additionalDirectories: string[];
   /** false removes AskUserQuestion from the agent. */

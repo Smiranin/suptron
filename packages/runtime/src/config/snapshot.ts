@@ -12,7 +12,6 @@ import type {
 export interface ResolvedContext {
   taskDocuments: boolean;
   knowledgeSources: boolean;
-  checkout: boolean;
   gitConventions: boolean;
   slotOutputs: string[];
 }
@@ -84,7 +83,6 @@ export function resolveSlot(
     context: {
       taskDocuments: slot.context?.taskDocuments ?? DEFAULTS.slot.context.taskDocuments,
       knowledgeSources: slot.context?.knowledgeSources ?? DEFAULTS.slot.context.knowledgeSources,
-      checkout: slot.context?.checkout ?? DEFAULTS.slot.context.checkout,
       gitConventions: slot.context?.gitConventions ?? DEFAULTS.slot.context.gitConventions,
       slotOutputs: [...(slot.context?.slotOutputs ?? [])],
     },

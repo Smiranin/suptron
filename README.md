@@ -16,15 +16,15 @@ Status: POC implemented (runtime, Claude Engine adapter, GitHub host, local serv
 
 Configuration (what you edit):
 
-| Term                 | Meaning                                                                                                                                                         |
-| -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Unit**             | A reusable agent definition: model, Rules (never broken), Instructions (how to work) and a Done Condition. Units live in the **Hangar**.                        |
-| **Assembly**         | An ordered ring of Slots with the Core in the centre; one Assembly is one way of carrying a Task from start to finish.                                          |
-| **Slot**             | One position in an Assembly: which Unit is mounted, what context it receives, its Loop and whether it is an Exit Point.                                         |
-| **Core Directives**  | The Core's model and standing instructions, part of the Assembly.                                                                                               |
-| **Project Profile**  | One per Project: where the repository is, its protected branch, Knowledge Sources, Git conventions, host and CI timeout. Every Assembly of the Project uses it. |
-| **Knowledge Source** | A document or folder of the repository that Slots may read as background.                                                                                       |
-| **Laws**             | What the system never lets any agent do, regardless of configuration: push to or change the protected branch, force-push, delete or rename branches, and so on. |
+| Term                 | Meaning                                                                                                                                                                                                           |
+| -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Unit**             | A reusable agent definition: model, Rules (never broken), Instructions (how to work) and a Done Condition. Units live in the **Hangar**.                                                                          |
+| **Assembly**         | An ordered ring of Slots with the Core in the centre; one Assembly is one way of carrying a Task from start to finish.                                                                                            |
+| **Slot**             | One position in an Assembly: which Unit is mounted, what context it receives, its Loop and whether it is an Exit Point.                                                                                           |
+| **Core Directives**  | The Core's model and standing instructions, part of the Assembly.                                                                                                                                                 |
+| **Project Profile**  | One per Project: its Workspace (a repository with its protected branch, Git conventions, host and CI timeout; a plain folder; or no folder), Knowledge Sources and Engine. Every Assembly of the Project uses it. |
+| **Knowledge Source** | A document or folder (or a text in the Profile) that Slots may read as background.                                                                                                                                |
+| **Laws**             | What the system never lets any agent do, regardless of configuration: push to or change the protected branch, force-push, delete or rename branches, and so on.                                                   |
 
 Execution (what happens when you press Launch):
 
@@ -117,7 +117,8 @@ $SUPTRON_HOME/
    ```sh
    export SUPTRON_HOME="$HOME/.suptron"
    cp -R examples/suptron-home "$SUPTRON_HOME"
-   # edit $SUPTRON_HOME/projects/my-app/profile.yaml: set repository.path to an absolute path of a clone
+   # edit $SUPTRON_HOME/projects/my-app/profile.yaml: set workspace.path to an absolute path of a clone
+   # (projects/research is a second example that needs no repository at all)
    ```
 
 2. Make sure `gh auth status` succeeds and Claude Code is logged in on this machine (`claude` works in a

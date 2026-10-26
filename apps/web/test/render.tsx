@@ -1,3 +1,4 @@
+import { Toaster } from '@suptron/ui/components/sonner';
 import { TooltipProvider } from '@suptron/ui/components/tooltip';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { RouterProvider, createMemoryHistory } from '@tanstack/react-router';
@@ -12,7 +13,7 @@ export interface RenderedApp extends RenderResult {
   queryClient: QueryClient;
 }
 
-/** Renders the whole app at a route with the Query provider and a FakeLiveEvents. */
+/** Renders the whole app at a route with the Query provider, a FakeLiveEvents and the Toaster (so toasts are observable). */
 export function renderApp(route: string, live: FakeLiveEvents): RenderedApp {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
   const router = createAppRouter(queryClient, createMemoryHistory({ initialEntries: [route] }));
@@ -22,6 +23,7 @@ export function renderApp(route: string, live: FakeLiveEvents): RenderedApp {
         <MissionsProvider>
           <TooltipProvider>
             <RouterProvider router={router} />
+            <Toaster />
           </TooltipProvider>
         </MissionsProvider>
       </LiveEventsProvider>

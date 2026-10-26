@@ -20,13 +20,27 @@ export function titleFromTaskPath(path: string, isFile: boolean): string {
   return (isFile ? basename(path, extname(path)) : basename(path)) || FALLBACK_TITLE;
 }
 
+/** The folder of one Mission, under `SUPTRON_HOME`. */
+export function missionFolder(home: string, id: string): string {
+  return join(home, missionRelDir(id));
+}
+
+/**
+ * Creates `missions/<id>/` for a Mission of any kind (SPEC FR-11): the Task document of a text
+ * Task lives there, a Pilot may leave notes there, and a Workspace of kind `none` works there.
+ */
+export async function createMissionFolder(home: string, id: string): Promise<string> {
+  const dir = missionFolder(home, id);
+  await mkdir(dir, { recursive: true });
+  return dir;
+}
+
 /**
  * Stores a text Task as `missions/<id>/task.md` and returns the Mission folder, which becomes
  * the Task location: the Pilot reads the document there and may leave notes next to it.
  */
 export async function storeTaskText(home: string, id: string, text: string): Promise<string> {
-  const dir = join(home, missionRelDir(id));
-  await mkdir(dir, { recursive: true });
+  const dir = await createMissionFolder(home, id);
   const body = text.endsWith('\n') ? text : `${text}\n`;
   await writeFile(join(home, missionTaskRelPath(id)), body, 'utf8');
   return dir;
@@ -58,7 +72,7 @@ export async function listTaskDocuments(taskPath: string, isFile: boolean): Prom
   return files.length > 0 ? files : [taskPath];
 }
 
-/** Removes the Mission folder; a no-op when the Task was given as a path. */
+/** Removes the Mission folder with everything a Pilot left there (on Dismiss or a failed start). */
 export async function removeMissionFolder(home: string, id: string): Promise<void> {
-  await rm(join(home, missionRelDir(id)), { recursive: true, force: true });
+  await rm(missionFolder(home, id), { recursive: true, force: true });
 }

@@ -6,7 +6,8 @@ export const startMissionTaskSchema = z.discriminatedUnion('kind', [
 ]);
 
 export const startMissionSchema = z.object({
-  checkoutPath: z.string().min(1, 'Pick a Checkout'),
+  /** Required for a repository Project; absent otherwise. */
+  checkoutPath: z.string().min(1, 'Pick a Checkout').optional(),
   task: startMissionTaskSchema,
   workItemId: z.string().trim().optional(),
   mayAskCommander: z.record(z.string(), z.boolean()),

@@ -3,6 +3,7 @@ import type { CheckResult } from './check.js';
 import type { Cost } from './cost.js';
 import type { PullRequestRef } from './host.js';
 import type { Question, TranscriptSection } from './transcript.js';
+import type { WorkspaceSummary } from '../workspace/kinds.js';
 
 export type MissionState =
   'running' | 'waiting_for_owner' | 'needs_attention' | 'stopped' | 'completed';
@@ -40,9 +41,8 @@ export interface MissionSummary {
   workItemId?: string;
   state: MissionState;
   currentSlot: string | null;
-  /** The Checkout's current branch, read at start and refreshed after every Slot. */
-  branch: string | null;
-  checkoutPath: string;
+  /** Where the Mission works, read at start and refreshed after every Slot (FR-18). */
+  workspace: WorkspaceSummary;
   startedAt: string;
   cost: Cost & { estimated: true };
   pr?: PullRequestRef;

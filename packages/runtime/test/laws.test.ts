@@ -2,13 +2,16 @@ import { describe, expect, it } from 'vitest';
 import { evaluateCommand, evaluatePath, type CommandContext } from '../src/laws/index.js';
 
 const ctx: CommandContext = {
+  cwd: '/work/repo',
+  writeRoots: ['/work/repo'],
   protectedBranch: 'main',
-  checkoutPath: '/work/repo',
   taskPath: '/work/tasks/t1',
   configHome: '/home/me/.suptron',
   currentBranch: 'feature/x',
 };
 const onMain: CommandContext = { ...ctx, currentBranch: 'main' };
+/** A Workspace without a protected branch (a folder, or no folder at all). */
+const noProtected: CommandContext = { ...ctx, protectedBranch: null, currentBranch: 'main' };
 
 /** This table doubles as the readable specification of the Laws. */
 const commandTable: [command: string, context: CommandContext, allowed: boolean][] = [
@@ -115,6 +118,15 @@ const commandTable: [command: string, context: CommandContext, allowed: boolean]
     ctx,
     true,
   ],
+  // without a protected branch only the history and remote Laws remain
+  ['git commit -m "notes"', noProtected, true],
+  ['git push', noProtected, true],
+  ['git push origin main', noProtected, true],
+  ['git merge feature/x', noProtected, true],
+  ['git push --force', noProtected, false],
+  ['git branch -D feature/x', noProtected, false],
+  ['git remote set-url origin git@evil', noProtected, false],
+  ['gh pr merge 12 --squash', noProtected, false],
   // unrelated commands
   ['pnpm test', onMain, true],
   ['ls -la', onMain, true],
@@ -160,6 +172,41 @@ describe('evaluatePath', () => {
   });
 });
 
+describe('evaluatePath with two write roots', () => {
+  const twoRoots: CommandContext = { ...ctx, writeRoots: ['/work/repo', '/work/notes'] };
+  it.each([
+    ['/work/notes/draft.md', 'create', true],
+    ['/work/notes/draft.md', 'write', true],
+    ['/work/notes/vendor/.git/config', 'write', false],
+    ['/work/notes/.git/HEAD', 'read', true],
+    ['/work/repo/src/a.ts', 'write', true],
+    ['/work/other/x.md', 'create', false],
+  ] as [string, 'read' | 'write' | 'create', boolean][])('%s (%s) → %s', (path, mode, allowed) => {
+    expect(evaluatePath(path, mode, twoRoots).allowed).toBe(allowed);
+  });
+});
+
+describe('evaluatePath with the Mission folder as the write root (kind none)', () => {
+  const none: CommandContext = {
+    ...ctx,
+    cwd: '/home/me/.suptron/missions/m1',
+    writeRoots: ['/home/me/.suptron/missions/m1'],
+    taskPath: '/work/tasks/t1',
+    protectedBranch: null,
+  };
+  it.each([
+    ['/home/me/.suptron/missions/m1/RESEARCH.md', 'create', true],
+    ['RESEARCH.md', 'create', true],
+    ['/home/me/.suptron/missions/m1/RESEARCH.md', 'write', true],
+    ['/home/me/.suptron/missions/active.json', 'write', false],
+    ['/home/me/.suptron/missions/m2/x.md', 'create', false],
+    ['/home/me/.suptron/hangar/analyst.md', 'read', false],
+    ['/work/tasks/t1/notes.md', 'create', true],
+  ] as [string, 'read' | 'write' | 'create', boolean][])('%s (%s) → %s', (path, mode, allowed) => {
+    expect(evaluatePath(path, mode, none).allowed).toBe(allowed);
+  });
+});
+
 describe('evaluatePath with a text Task stored in the configuration home', () => {
   const textTask: CommandContext = { ...ctx, taskPath: '/home/me/.suptron/missions/m1' };
   it.each([
@@ -185,7 +232,8 @@ describe('evaluatePath with symlinked roots', () => {
     await symlink(real, link);
     const linked: CommandContext = {
       ...ctx,
-      checkoutPath: link,
+      cwd: link,
+      writeRoots: [link],
       taskPath: join(root, 'task'),
       configHome: join(root, 'home'),
     };

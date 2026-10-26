@@ -13,7 +13,8 @@ import {
   type UnitFile,
 } from './schemas.js';
 import { parseUnitMarkdown } from './unit-markdown.js';
-import { validateAssembly } from './validate-assembly.js';
+import { capabilitiesOf, type Capability } from '../workspace/kinds.js';
+import { validateAssembly, type ValidationUnit } from './validate-assembly.js';
 
 export interface LoadedUnit {
   name: string;
@@ -122,10 +123,15 @@ export async function loadUnits(home: string): Promise<LoadedUnit[]> {
   return Promise.all(files.map((file) => loadUnit(join(dir, file))));
 }
 
+/**
+ * Parses and validates one Assembly against the Units it may place and the capabilities of its
+ * Project's Workspace (`null` when the Profile is invalid: the capability rules are skipped).
+ */
 export function parseAssemblyText(
   name: string,
   text: string,
-  unitNames: readonly string[],
+  units: readonly ValidationUnit[],
+  capabilities: ReadonlySet<Capability> | null,
 ): Omit<LoadedAssembly, 'name' | 'path' | 'text' | 'etag'> {
   const yaml = parseYamlObject(text);
   if (yaml.error !== undefined) {
@@ -146,10 +152,7 @@ export function parseAssemblyText(
   const errors: Issue[] = [];
   const mismatch = nameMismatch(name, parsed.data.name);
   if (mismatch) errors.push(mismatch);
-  const validation = validateAssembly(
-    parsed.data,
-    unitNames.map((n) => ({ name: n })),
-  );
+  const validation = validateAssembly(parsed.data, units, capabilities);
   errors.push(...validation.errors);
   return {
     assembly: parsed.data,
@@ -160,11 +163,18 @@ export function parseAssemblyText(
 
 export async function loadAssembly(
   path: string,
-  unitNames: readonly string[],
+  units: readonly ValidationUnit[],
+  capabilities: ReadonlySet<Capability> | null,
 ): Promise<LoadedAssembly> {
   const name = basename(path, '.yaml');
   const text = await readFile(path, 'utf8');
-  return { name, path, text, etag: etagOf(text), ...parseAssemblyText(name, text, unitNames) };
+  return {
+    name,
+    path,
+    text,
+    etag: etagOf(text),
+    ...parseAssemblyText(name, text, units, capabilities),
+  };
 }
 
 export function parseProfileText(
@@ -182,10 +192,11 @@ export function parseProfileText(
   return { profile: parsed.data, issues: [] };
 }
 
+/** The Profile is read first: its Workspace decides which Checks the Assemblies may use. */
 export async function loadProject(
   home: string,
   name: string,
-  unitNames: readonly string[],
+  units: readonly ValidationUnit[],
 ): Promise<LoadedProject> {
   const path = join(home, PROJECTS_DIR, name);
   const profilePath = join(path, PROFILE_FILE);
@@ -198,10 +209,11 @@ export async function loadProject(
   } catch {
     issues = [{ code: 'missing_profile', message: `${PROFILE_FILE} is missing` }];
   }
+  const capabilities = profile ? capabilitiesOf(profile.workspace) : null;
   const assembliesDir = join(path, ASSEMBLIES_DIR);
   const files = await listFiles(assembliesDir, '.yaml');
   const assemblies = await Promise.all(
-    files.map((file) => loadAssembly(join(assembliesDir, file), unitNames)),
+    files.map((file) => loadAssembly(join(assembliesDir, file), units, capabilities)),
   );
   return { name, path, profilePath, text, etag: etagOf(text), profile, issues, assemblies };
 }
@@ -209,8 +221,8 @@ export async function loadProject(
 /** Reads the whole `SUPTRON_HOME`. Never throws for a broken file: every problem is an Issue. */
 export async function loadConfig(home: string): Promise<LoadedConfig> {
   const units = await loadUnits(home);
-  const unitNames = units.filter((u) => u.unit).map((u) => u.name);
+  const validUnits = units.flatMap((u) => (u.unit ? [u.unit] : []));
   const projectNames = await listDirectories(join(home, PROJECTS_DIR));
-  const projects = await Promise.all(projectNames.map((n) => loadProject(home, n, unitNames)));
+  const projects = await Promise.all(projectNames.map((n) => loadProject(home, n, validUnits)));
   return { home, units, projects };
 }

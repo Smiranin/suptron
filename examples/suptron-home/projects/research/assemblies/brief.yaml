@@ -1,0 +1,19 @@
+name: brief
+core:
+  model: opus
+  instructions: |-
+    Compose each Slot prompt from the Task documents, the Knowledge Sources and the Slot
+    Outputs it is given. Judge Checks strictly against their criterion. Report at the end
+    what was written and where it is.
+slots:
+  - name: researcher
+    unit: researcher
+  - name: brief-writer
+    unit: brief-writer
+    context:
+      slotOutputs:
+        - researcher
+    loop:
+      target: researcher
+      limit: 2
+    exitPoint: true

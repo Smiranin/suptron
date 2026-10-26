@@ -6,6 +6,7 @@
 **Source:** supersedes "Suptron PRD, Draft v0.1" (2026-10-21). Vocabulary follows ../../GLOSSARY.md.
 **Amended:** 2026-10-22 by ../../adr/0002-assembly-editors.md: Exit Condition renamed Done Condition, Exit Points and Checks introduced, Mission state Done renamed Completed, OQ-2 closed.
 **Amended:** 2026-10-22 by ./PLAN.md: FR-19 (the system performs no git operations; Git conventions are given to Slots), FR-25 (Loop feedback), FR-42 (no branch deletion at all).
+**Amended:** 2026-10-26 by ../workspaces/SPEC.md: FR-4 (the Profile declares a Workspace of kind `none`, `folder` or `repository`; git fields belong to the `repository` kind), FR-6, FR-16 to FR-19 (Checkouts and Git conventions only for `repository`), FR-41 (the Pull Request link only when there is one), FR-43 (permission-free work inside the Workspace).
 
 ## Problem Statement
 
@@ -100,9 +101,9 @@ Units
 
 Project Profiles
 
-- FR-4. A Project Profile holds: the repository's local location and remote, its Knowledge Sources (documents and folders), its Git conventions (default branch, branch name template, Pull Request description template, optional labels or reviewers), the repository host, the CI wait timeout and the Engine.
+- FR-4. A Project Profile holds: its Workspace of one kind (`none`: no folder; `folder`: a fixed directory; `repository`: the repository's local location and remote, its Git conventions (protected branch, branch name template, Pull Request description template, optional labels or reviewers), the repository host and the CI wait timeout), its Knowledge Sources (documents, folders or inline texts) and the Engine. Amended 2026-10-26 by ../workspaces/SPEC.md FR-1, FR-2.
 - FR-5. Project Profiles are stored by the system, outside the repository, and can be created, edited and deleted in the UI.
-- FR-6. All Checkouts of one repository share one Project Profile.
+- FR-6. All Checkouts of one repository share one Project Profile (a `repository` Workspace). Amended 2026-10-26 by ../workspaces/SPEC.md.
 
 Assemblies
 
@@ -118,10 +119,10 @@ Assemblies
 
 Missions
 
-- FR-16. A Mission is started from the UI with: an Assembly, a Task location (folder or single document) on local disk, an optional Work Item ID, a Checkout and the per-Slot "may ask the Commander" toggles prefilled from the Assembly.
-- FR-17. The list of Checkouts offered for a Project is discovered from the repository; the Commander selects one. A Checkout busy with an active Mission cannot be selected. The system never creates or deletes Checkouts.
-- FR-18. Several Missions may be active at the same time, including on the same Project in different Checkouts.
-- FR-19. A Mission works under the Project Profile's Git conventions. The system renders the conventions (branch name template with the Work Item ID, if given, and a slug derived from the Task; Pull Request description template; labels; reviewers) and gives them to every Slot as context. The system itself never creates, switches, pushes or deletes branches; a Slot creates the branch when its Instructions say so, and the Commander may start a Mission in a Checkout that is already on the intended branch.
+- FR-16. A Mission is started from the UI with: an Assembly, a Task location (folder or single document) on local disk, an optional Work Item ID, a Checkout (only for a `repository` Project) and the per-Slot "may ask the Commander" toggles prefilled from the Assembly. Amended 2026-10-26 by ../workspaces/SPEC.md FR-9, FR-17.
+- FR-17. For a `repository` Project the list of Checkouts is discovered from the repository; the Commander selects one. A Checkout busy with an active Mission cannot be selected. The system never creates or deletes Checkouts. A `folder` Project is busy while any of its Missions is active; a `none` Project is never busy. Amended 2026-10-26 by ../workspaces/SPEC.md FR-10.
+- FR-18. Several Missions may be active at the same time, including on the same `repository` Project in different Checkouts and any number on a `none` Project. Amended 2026-10-26 by ../workspaces/SPEC.md.
+- FR-19. A Mission of a `repository` Project works under the Profile's Git conventions. The system renders the conventions (branch name template with the Work Item ID, if given, and a slug derived from the Task; Pull Request description template; labels; reviewers) and gives them to the Slots whose context asks for them. The system itself never creates, switches, pushes or deletes branches; a Slot creates the branch when its Instructions say so, and the Commander may start a Mission in a Checkout that is already on the intended branch. Every Slot of every kind receives the Workspace's own fragment (the Checkout and branch, the folder, or the Mission folder). Amended 2026-10-26 by ../workspaces/SPEC.md FR-15.
 - FR-20. A Mission uses a snapshot of its Assembly, Units and Project Profile taken at start; later edits do not affect it.
 - FR-21. The Core runs Slots strictly in order. Before moving on it checks the current Slot's Done Condition; every Check is deterministic except the LLM-judgment Check, which is used only when configured. Done Conditions and Exit Conditions are lists of Checks from the system's fixed catalogue.
 - FR-22. Every Slot execution is performed by a Pilot created from the Slot's Unit. The Pilot for a reviewer Slot is never the Pilot that implemented.
@@ -146,12 +147,12 @@ UI
 - FR-38. The Mission page shows pending questions and lets the Commander answer them. The UI is the only notification channel.
 - FR-39. The Mission page offers Stop at any time and Retry with a note in Needs Attention.
 - FR-40. The Mission page shows cost so far in dollars (tokens secondary) for the Mission and per Slot, taken from the Engine.
-- FR-41. The Completed page shows the Pull Request link, Slots with Attempt and Loop counts, costs and the Core's final report.
+- FR-41. The Completed page shows the Pull Request link when the Mission knows one, otherwise where the result was produced (the folder, or next to the Task), Slots with Attempt and Loop counts, costs and the Core's final report. Amended 2026-10-26 by ../workspaces/SPEC.md FR-16, FR-19.
 
 Safety
 
 - FR-42. The Laws are enforced by the system, not by instructions to agents, and cannot be changed by any configuration: no push to or merge into the default branch, no force-push or rewriting of shared history, no deletion or renaming of any branch, local or remote, including the Mission's own, no deployment, no change to repository, CI or secret settings, no marking a Pull Request ready for review.
-- FR-43. Inside its Checkout a Pilot works without permission prompts.
+- FR-43. Inside its Workspace (the Checkout, the folder or the Mission folder) a Pilot works without permission prompts. Amended 2026-10-26 by ../workspaces/SPEC.md FR-12.
 - FR-44. Agents cannot modify Units, Assemblies, Project Profiles or Core Directives.
 
 ### Non-functional

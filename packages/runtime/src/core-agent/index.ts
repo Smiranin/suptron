@@ -6,11 +6,16 @@ import type { PullRequestRef } from '../domain/host.js';
 import type { NeedsAttentionCause, SlotRecord } from '../domain/mission.js';
 import type { AgentEvent, AgentHandle, Engine, GuardContext } from '../engine/index.js';
 
+/** A Knowledge Source as the Core receives it: a path to read, or a text given verbatim. */
+export type KnowledgeSourceRef =
+  { kind: 'path'; path: string; title?: string } | { kind: 'text'; text: string; title?: string };
+
 export interface ContextBundle {
   taskDocuments: string[];
-  knowledgeSources: string[];
-  checkoutPath: string | null;
-  /** The Profile's Git conventions rendered with the Mission's values; null when the Slot does not read them. */
+  knowledgeSources: KnowledgeSourceRef[];
+  /** The Workspace's own fragment: where the Pilot works and where results go (SPEC FR-15). */
+  workspace: string;
+  /** The Git conventions rendered with the Mission's values; null when the Slot does not read them. */
   gitConventions: string | null;
   slotOutputs: { slotName: string; output: string }[];
 }
@@ -29,14 +34,20 @@ export interface CoreAgent {
   judge(input: {
     criterion: string;
     slotOutput: string;
-    diffSummary: string;
+    /** The Workspace's change summary; null when it has none (SPEC FR-14). */
+    diffSummary: string | null;
   }): Promise<{ holds: boolean; reason: string }>;
   explainNeedsAttention(input: {
     cause: NeedsAttentionCause;
     slot: ResolvedSlot;
     failedChecks: CheckResult[];
   }): Promise<string>;
-  finalReport(input: { slots: SlotRecord[]; pr?: PullRequestRef }): Promise<string>;
+  finalReport(input: {
+    slots: SlotRecord[];
+    pr?: PullRequestRef;
+    /** The Workspace fragment, so the report says where the result is (SPEC FR-16). */
+    workspace: string;
+  }): Promise<string>;
   /** Interrupts a call in flight (Stop). */
   interrupt(): Promise<void>;
 }
@@ -60,20 +71,22 @@ object the call asks for and nothing else.
 
 Calls:
 - composeSlotPrompt: write the complete prompt for a Slot's Pilot from the Slot's instructions, the context
-  bundle (paths the Pilot can read itself), the Git conventions when given, and any feedback. Return { "prompt": string }.
-- judge: decide whether a criterion holds for a Slot Output and a diff summary. Return { "holds": boolean, "reason": string }.
+  bundle (paths the Pilot can read itself, texts given verbatim, the Workspace fragment), the Git conventions
+  when given, and any feedback. Return { "prompt": string }.
+- judge: decide whether a criterion holds for a Slot Output and, when given, a change summary of the Workspace.
+  Return { "holds": boolean, "reason": string }.
 - explainNeedsAttention: explain in two or three sentences why the Mission needs the Commander and what to do. Return { "reason": string }.
 - finalReport: write a Markdown report of the Mission for the Commander. Return { "report": string }.`;
 
 const CALL_INSTRUCTIONS: Record<string, string> = {
   composeSlotPrompt:
-    'Compose the prompt for this Slot. Include the Slot instructions verbatim, list the paths of the Task documents and Knowledge Sources, quote the Git conventions when they are given (never mention them otherwise), include every Slot Output given, and when feedback is present put it under a heading that names its source (Loop feedback from <Slot>, or the previous Attempt) with the failed Checks and the Commander note.',
+    'Compose the prompt for this Slot. Include the Slot instructions verbatim, list the paths of the Task documents and of the Knowledge Sources given as paths, quote a Knowledge Source given as text under its title, state the Workspace fragment so the Pilot knows where it works and where results go, quote the Git conventions when they are given (never mention them otherwise), include every Slot Output given, and when feedback is present put it under a heading that names its source (Loop feedback from <Slot>, or the previous Attempt) with the failed Checks and the Commander note.',
   judge:
-    'Judge the criterion against the Slot Output and the diff summary. Be strict: holds is true only when the criterion is clearly satisfied.',
+    'Judge the criterion against the Slot Output and the change summary. A null change summary means the Workspace keeps none: judge on the Slot Output alone. Be strict: holds is true only when the criterion is clearly satisfied.',
   explainNeedsAttention:
     'Explain why this Mission needs the Commander and what they can do (Retry with a note, or Stop).',
   finalReport:
-    'Write the final report: what was built, how it was verified, the Pull Request if any, costs and open points.',
+    'Write the final report: what was produced and where it is (the Workspace fragment names the place; the Pull Request when there is one), how it was verified, costs and open points.',
 };
 
 export interface EngineCoreAgentOptions {
@@ -104,7 +117,7 @@ export class EngineCoreAgent implements CoreAgent {
     return (await this.call('composeSlotPrompt', input, composeSchema)).prompt;
   }
 
-  async judge(input: { criterion: string; slotOutput: string; diffSummary: string }) {
+  async judge(input: { criterion: string; slotOutput: string; diffSummary: string | null }) {
     return this.call('judge', input, judgeSchema);
   }
 
@@ -116,7 +129,11 @@ export class EngineCoreAgent implements CoreAgent {
     return (await this.call('explainNeedsAttention', input, explainSchema)).reason;
   }
 
-  async finalReport(input: { slots: SlotRecord[]; pr?: PullRequestRef }): Promise<string> {
+  async finalReport(input: {
+    slots: SlotRecord[];
+    pr?: PullRequestRef;
+    workspace: string;
+  }): Promise<string> {
     return (await this.call('finalReport', input, reportSchema)).report;
   }
 

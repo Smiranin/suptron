@@ -6,6 +6,7 @@
 **Source:** implements POC SPEC FR-16 to FR-18, FR-26, FR-32 to FR-41 (../suptron-poc/SPEC.md) in the UI shell of ../assembly-editors/SPEC.md. Vocabulary follows ../../GLOSSARY.md.
 **Amends:** POC PLAN HTTP contract (`GET /api/missions` returns every Mission known since the application started; a Dismiss call is added); editors SPEC FR-1 (the Projects page shows each Project expanded with its Assemblies and a Launch button).
 **Amended:** 2026-10-22 by ./PLAN.md: the Constraints line on the contract (the Mission page's reload data is part of the contract).
+**Amended:** 2026-10-26 by ../workspaces/SPEC.md: FR-2 and FR-3 (the Checkout select only for a `repository` Project; a folder Project refuses a second Mission), FR-7 and FR-14 (the list row and the header show the branch, the folder or nothing, per Workspace kind; the Completed view names where the result was produced when there is no Pull Request).
 
 ## Problem Statement
 
@@ -107,15 +108,15 @@ Connection
 Starting a Mission
 
 - FR-1. The Projects page lists every Project expanded with its Assemblies. Each valid Assembly has a Launch button; an invalid or unparseable Assembly has none and shows why. The Assembly editor header has the same Launch button when the Assembly is valid and has no unsaved changes.
-- FR-2. Mission opens a Start Mission dialog over the current page. The dialog holds: Checkout (select), Task location (typed absolute path, file or folder, checked to exist), Work Item ID (optional text), and an Advanced section, collapsed by default, with one "may ask the Commander" toggle per Slot prefilled from the Assembly and marked when changed from the Assembly's value.
-- FR-3. The Checkout select lists every Checkout of the Project with its path and current branch. A Checkout busy with an active Mission is shown disabled with that Mission named. A Project whose Checkouts cannot be read shows the error in place of the list and cannot start.
+- FR-2. Mission opens a Start Mission dialog over the current page. The dialog holds: Checkout (select, only for a `repository` Project; amended 2026-10-26 by ../workspaces/SPEC.md FR-17), Task location (typed absolute path, file or folder, checked to exist), Work Item ID (optional text), and an Advanced section, collapsed by default, with one "may ask the Commander" toggle per Slot prefilled from the Assembly and marked when changed from the Assembly's value.
+- FR-3. The Checkout select lists every Checkout of the Project with its path and current branch. A Checkout busy with an active Mission is shown disabled with that Mission named. A Project whose Checkouts cannot be read shows the error in place of the list and cannot start. A `folder` Project whose folder is busy with an active Mission reports the refusal in the dialog; a `none` Project is never busy. Amended 2026-10-26 by ../workspaces/SPEC.md FR-10.
 - FR-4. The dialog prefills Checkout and Task location with the values last used for this Project on this browser, when the Checkout is not busy. This is a convenience; nothing depends on it.
 - FR-5. Start creates the Mission and navigates to its page. A validation refusal is shown at the field it concerns; a busy-Checkout refusal is shown at the Checkout field with the list refreshed.
 
 Missions list
 
 - FR-6. The Missions list shows every Mission the application knows since it started, in three groups in this order: Needs you (Waiting for Commander, Needs Attention), Running, Finished (Completed, Stopped). Within a group, newest start first.
-- FR-7. Each row shows: Project and Assembly, Task (folder or file name, with the Work Item ID when given), the Checkout's current branch, the current Slot (none for finished Missions), the state, the cost so far in dollars, and the start time as a relative time. Hovering the cost shows tokens. Clicking a row opens the Mission page.
+- FR-7. Each row shows: Project and Assembly, Task (folder or file name, with the Work Item ID when given), the Checkout's current branch for a `repository` Project, the folder for a `folder` Project and nothing for `none` (amended 2026-10-26 by ../workspaces/SPEC.md FR-18), the current Slot (none for finished Missions), the state, the cost so far in dollars, and the start time as a relative time. Hovering the cost shows tokens. Clicking a row opens the Mission page.
 - FR-8. The list updates in real time from the Mission events; no manual refresh exists.
 - FR-9. Finished Missions have a Dismiss action in the row. Dismiss removes the Mission from the list and from the application; it is available only for Completed and Stopped Missions. The list offers no other action: no Start, no Stop.
 - FR-10. Missions interrupted by an application shutdown appear in Finished as Stopped with an "interrupted" note.
@@ -125,7 +126,7 @@ Missions list
 Mission page: layout and clock
 
 - FR-13. Every Mission has one page at one address for its whole life; the layout changes with the state, the address does not.
-- FR-14. The page header shows: Project and Assembly, Task (name and Work Item ID), Checkout path and current branch, state, Mission cost so far in dollars with tokens on hover and marked as an estimate, the Pull Request link as soon as the Mission knows one, and the Stop button in every non-terminal state.
+- FR-14. The page header shows: Project and Assembly, Task (name and Work Item ID), the Checkout path and current branch, the folder, or nothing, per Workspace kind (amended 2026-10-26 by ../workspaces/SPEC.md FR-18; the Completed view shows where the result was produced when there is no Pull Request, FR-19), state, Mission cost so far in dollars with tokens on hover and marked as an estimate, the Pull Request link as soon as the Mission knows one, and the Stop button in every non-terminal state.
 - FR-15. The page shows the Mission's Assembly as the clock of the editors SPEC in a read-only form: no palette, no inspector, no dragging, no editing; zoom, pan and Fit remain.
 - FR-16. Each Slot card shows its state: pending, running (visibly animated), done, or failed Attempt; the current Slot is marked. A Slot that is waiting for the Commander or that caused Needs Attention is marked distinctly. Cards show the Attempt counter when the Slot has been attempted more than once and the Slot's cost so far.
 - FR-17. Each Loop chord shows its iteration counter against its limit and is highlighted when the Loop fires. The Exit arrow through which the Mission was Completed is highlighted.

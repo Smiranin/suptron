@@ -35,21 +35,22 @@ function isInside(target: string, root: string): boolean {
   return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel));
 }
 
-function isGitInternal(target: string, checkoutPath: string): boolean {
-  const rel = relative(checkoutPath, target);
-  return rel === '.git' || rel.startsWith(`.git${sep}`);
+/** True when any directory on the way from `root` to `target` is a `.git` directory. */
+function isGitInternal(target: string, root: string): boolean {
+  return relative(root, target).split(sep).includes('.git');
 }
 
 /**
  * Denies any access to the configuration home, writes to existing Task documents (new files
- * only), writes outside the Checkout and the Task location, and writes to `.git` internals.
+ * only), writes outside the write roots and the Task location, and writes to `.git` internals
+ * wherever a `.git` directory sits under a write root.
  *
- * The Task location is decided first: a Task given as text lives in the Mission folder inside the
- * configuration home, and the Pilot must still read it and may leave notes next to it.
+ * The Task location and the write roots are decided before the configuration home, because
+ * both may live inside it: a text Task is stored in the Mission folder, and a Workspace of
+ * kind `none` works in that same folder.
  */
 export function evaluatePath(path: string, mode: PathMode, ctx: GuardContext): PathVerdict {
-  const checkoutPath = canonicalPath(ctx.checkoutPath);
-  const target = canonicalPath(isAbsolute(path) ? path : resolve(ctx.checkoutPath, path));
+  const target = canonicalPath(isAbsolute(path) ? path : resolve(ctx.cwd, path));
   if (isInside(target, canonicalPath(ctx.taskPath))) {
     if (mode === 'write') {
       return {
@@ -59,18 +60,19 @@ export function evaluatePath(path: string, mode: PathMode, ctx: GuardContext): P
     }
     return { allowed: true };
   }
+  const root = ctx.writeRoots.map(canonicalPath).find((r) => isInside(target, r));
+  if (root !== undefined) {
+    if (mode !== 'read' && isGitInternal(target, root)) {
+      return { allowed: false, reason: 'Writes to .git internals are forbidden' };
+    }
+    return { allowed: true };
+  }
   if (isInside(target, canonicalPath(ctx.configHome))) {
     return { allowed: false, reason: 'Agents may not touch the Suptron configuration home' };
   }
   if (mode === 'read') return { allowed: true };
-  if (!isInside(target, checkoutPath)) {
-    return {
-      allowed: false,
-      reason: 'Writes are allowed only inside the Checkout and the Task location',
-    };
-  }
-  if (isGitInternal(target, checkoutPath)) {
-    return { allowed: false, reason: 'Writes to .git internals are forbidden' };
-  }
-  return { allowed: true };
+  return {
+    allowed: false,
+    reason: 'Writes are allowed only inside the Workspace and the Task location',
+  };
 }

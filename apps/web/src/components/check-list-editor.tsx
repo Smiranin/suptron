@@ -1,6 +1,8 @@
 import {
   CHECK_CATALOGUE,
+  missingCapabilities,
   summarizeCheck,
+  type Capability,
   type Check,
   type CheckKind,
 } from '@suptron/runtime/browser';
@@ -23,6 +25,8 @@ export interface CheckListEditorProps {
   onChange: (checks: Check[]) => void;
   disabled?: boolean;
   label?: string;
+  /** What the Project's Workspace provides; the picker offers only Checks it can run. null: every Check (the Hangar). */
+  capabilities?: ReadonlySet<Capability> | null;
 }
 
 function blankCheck(kind: CheckKind): Check {
@@ -42,9 +46,13 @@ export function CheckListEditor({
   onChange,
   disabled,
   label = 'Checks',
+  capabilities = null,
 }: CheckListEditorProps) {
   const [kind, setKind] = useState<CheckKind>('command');
   const baseId = useId();
+  const offered = CHECK_CATALOGUE.filter(
+    (d) => capabilities === null || missingCapabilities(d.requires, capabilities).length === 0,
+  );
   const update = (index: number, check: Check) =>
     onChange(value.map((c, i) => (i === index ? check : c)));
   const move = (index: number, delta: number) => {
@@ -158,7 +166,7 @@ export function CheckListEditor({
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            {CHECK_CATALOGUE.map((d) => (
+            {offered.map((d) => (
               <SelectItem key={d.kind} value={d.kind}>
                 {d.label}
               </SelectItem>

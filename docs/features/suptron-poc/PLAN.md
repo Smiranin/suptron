@@ -7,6 +7,7 @@
 **Amended:** 2026-10-22 by ../missions-ui/SPEC.md: `GET /api/missions` returns every Mission known since start (terminal Missions stay until Dismiss); `DELETE /api/missions/:id` (Dismiss) added.
 **Amended:** 2026-10-22 by ../missions-ui/PLAN.md: `MissionSummary` gains `taskPath`, `workItemId?` and `cost.estimated`; the transcript model (`ExecutionKey`, `TranscriptEntry`, `TranscriptSection`, `Question`) is defined; `GET /api/missions/:id` returns `MissionDetail`; every `MissionEvent` carries `seq`, with new fields on `slot.started`, `question.answered`, `mission.state`, `mission.completed` and a new `mission.dismissed`; `GET /api/events` accepts `after=` and may send `resync`; error bodies of `POST /api/missions` and `DELETE /api/missions/:id` fixed; the ledger entry is `{ summary, assembly, slots }`. Details in the sections marked "(missions-ui)".
 **Amended:** 2026-10-22 by ../../adr/0004-robot-vocabulary.md: the product is named Suptron and the main nouns are renamed (Brick → Unit, Workflow → Assembly, Node → Slot, Master Agent → Core, Master Rules → Core Directives, Node Agent → Pilot, Run → Mission, Owner → Commander, Never-list → Laws); the `core` package is `runtime`.
+**Amended:** 2026-10-26 by ../workspaces/PLAN.md: the Profile file declares a `workspace` (`none` | `folder` | `repository`) and Knowledge Sources as path-or-text objects; the Slot context source `checkout` is removed (the Workspace fragment is always in the bundle); `GuardContext` takes `cwd`, `writeRoots` and a nullable `protectedBranch`; `ContextBundle.workspace` and `KnowledgeSourceRef`; `judge` takes a nullable `diffSummary`, `finalReport` the Workspace fragment; `MissionSummary.workspace` replaces `branch` and `checkoutPath`; `POST /api/missions` takes an optional `checkoutPath` and answers `409 workspace_busy`; `GET /api/projects/:project/checkouts` answers `404` for a Project without git. Details in the sections marked "(workspaces)".
 **Scope note:** this plan covers the runtime (configuration loading, Runner, Core, Checks, Engine Adapter, GitHub host, Laws) and the local server API that a UI will consume. The UI (Missions screens) and the editors for Units, Assemblies and Project Profiles are planned separately (../assembly-editors/SPEC.md and a dedicated UI SPEC). This plan fixes the API contract they will build on.
 
 ## Summary
@@ -190,29 +191,34 @@ Never edit source files. ...
 Review the diff against the default branch ...
 ```
 
-Project Profile (`profile.yaml`):
+Project Profile (`profile.yaml`) (workspaces: amended 2026-10-26; the former `repository`, `git`, `host` and `ciWaitTimeoutMinutes` top-level fields moved under `workspace` of kind `repository`):
 
 ```yaml
 name: my-app
-repository:
+workspace:
+  kind: repository           # none | folder | repository; a kind has only its own fields
   path: /absolute/path/to/main/clone
-  remote: origin
-  defaultBranch: main
-knowledgeSources:            # paths relative to the repository root, files or folders
-  - CLAUDE.md
-  - docs/adr
-git:                         # conventions only; rendered and given to Slots, never executed by the system
-  branchNameTemplate: "feature/{work_item_id}-{task_slug}"
-  pullRequestTemplate: |
-    ## {task_title}
-    ### Summary
-    ### Testing
-  labels: []                 # optional
-  reviewers: []              # optional
-host: github
+  remote: origin             # default
+  protectedBranch: main      # default
+  host: github               # github | none (none removes the host Checks), default github
+  git:                       # conventions only; rendered and given to Slots, never executed by the system
+    branchNameTemplate: "feature/{work_item_id}-{task_slug}"
+    pullRequestTemplate: |
+      ## {task_title}
+      ### Summary
+      ### Testing
+    labels: []               # optional
+    reviewers: []            # optional
+  ciWaitTimeoutMinutes: 30   # default
+knowledgeSources:            # { path } relative to the Workspace root or absolute (absolute only for kind none), or { text } with an optional title
+  - path: CLAUDE.md
+  - path: docs/adr
+  - title: House style
+    text: Short sentences.
 engine: claude-code
-ciWaitTimeoutMinutes: 30
 ```
+
+A `folder` Workspace is `{ kind: folder, path }`; `none` is `{ kind: none }`.
 
 Assembly (`assemblies/<name>.yaml`):
 
@@ -233,7 +239,7 @@ slots:
     context:
       taskDocuments: true   # default true
       knowledgeSources: true
-      checkout: true
+      gitConventions: true  # default false; only for a repository Workspace (workspaces: `checkout` removed, the Workspace fragment is always given)
       slotOutputs: [analyst]  # earlier Slots only
   - name: reviewer
     unit: reviewer
@@ -288,7 +294,7 @@ interface AgentSpec {
   outputSchema?: JsonSchema;                               // structured output ('core' calls)
 }
 
-interface GuardContext { defaultBranch: string; checkoutPath: string; taskPath: string; configHome: string; }
+interface GuardContext { cwd: string; writeRoots: string[]; protectedBranch: string | null; taskPath: string; configHome: string; }   // (workspaces) built by buildGuard(workspace, ...)
 
 interface AgentHandle {
   readonly sessionId: Promise<string>;
@@ -333,11 +339,12 @@ interface Checkout { path: string; branch: string | null; isMainWorktree: boolea
 ```ts
 interface CoreAgent {
   composeSlotPrompt(input: { slot: ResolvedSlot; bundle: ContextBundle; feedback?: Feedback }): Promise<string>;
-  judge(input: { criterion: string; slotOutput: string; diffSummary: string }): Promise<{ holds: boolean; reason: string }>;
+  judge(input: { criterion: string; slotOutput: string; diffSummary: string | null }): Promise<{ holds: boolean; reason: string }>;   // (workspaces) null when the Workspace keeps no change summary
   explainNeedsAttention(input: { cause: NeedsAttentionCause; slot: ResolvedSlot; failedChecks: CheckResult[] }): Promise<string>;
-  finalReport(input: { slots: SlotRecord[]; pr?: PullRequestRef }): Promise<string>;
+  finalReport(input: { slots: SlotRecord[]; pr?: PullRequestRef; workspace: string }): Promise<string>;   // (workspaces) the fragment says where the result is
 }
-type ContextBundle = { taskDocuments: string[]; knowledgeSources: string[]; checkoutPath: string | null; gitConventions: string; slotOutputs: { slotName: string; output: string }[] };
+type KnowledgeSourceRef = { kind: 'path'; path: string; title?: string } | { kind: 'text'; text: string; title?: string };   // (workspaces)
+type ContextBundle = { taskDocuments: string[]; knowledgeSources: KnowledgeSourceRef[]; workspace: string; gitConventions: string | null; slotOutputs: { slotName: string; output: string }[] };   // (workspaces) `workspace` is the Workspace fragment, always given
 // gitConventions: the Profile's Git conventions rendered with the Mission's values (suggested branch name, PR description template, labels, reviewers, default branch), as text
 type Feedback = { kind: 'loop'; fromSlot: string; output: string; failedChecks: CheckResult[] } | { kind: 'attempt'; failedChecks: CheckResult[]; note?: string };
 ```
@@ -350,8 +357,8 @@ The Core is one persistent session per Mission (`resumeSessionId`), created from
 type MissionState = 'running' | 'waiting_for_owner' | 'needs_attention' | 'stopped' | 'completed';
 type NeedsAttentionCause = 'attempt_limit' | 'loop_limit' | 'last_exit_condition_failed' | 'ci_timeout' | 'engine_error';
 
-interface MissionSummary { id; projectName; assemblyName; taskPath: string; workItemId?: string; state; currentSlot: string | null; branch: string | null; checkoutPath; startedAt; cost: Cost & { estimated: true }; pr?: PullRequestRef; note?: string }
-// branch: the Checkout's current branch, read at start and refreshed after every Slot
+interface MissionSummary { id; projectName; assemblyName; taskPath: string; workItemId?: string; state; currentSlot: string | null; workspace: { kind: 'none' | 'folder' | 'repository'; path: string | null; branch: string | null }; startedAt; cost: Cost & { estimated: true }; pr?: PullRequestRef; note?: string }
+// workspace (workspaces, replaces branch and checkoutPath): the Checkout and its current branch (read at start and refreshed after every Slot), the folder, or nothing
 interface SlotRecord { name; attempts: number; loops: number; lastOutput?: string; cost: Cost; checkResults: CheckResult[] }
 
 // (missions-ui) every event carries seq: number, monotonic per Mission from 1; the server assigns it at emission
@@ -404,10 +411,10 @@ GET  /api/health                         { engine: { ok, reason? }, configHome }
 GET  /api/models                         ModelInfo[]
 GET  /api/units                         Unit[] (+ per-file validation issues)
 GET  /api/projects                       { profile, assemblies: [{ name, status: 'valid'|'invalid', issues }] }[]
-GET  /api/projects/:project/checkouts    { path, branch, busyMissionId: string | null }[]
+GET  /api/projects/:project/checkouts    { path, branch, busyMissionId: string | null }[] | 404 { reason: 'not_found', message: 'This Project has no Checkouts' }   (workspaces: a Project without git)
 GET  /api/missions                           MissionSummary[]                      (every Mission known since start; Completed, Stopped and interrupted stay until Dismiss)
-POST /api/missions                           { project, assembly, taskPath, workItemId?, checkoutPath, mayAskCommander: Record<slotName, boolean> } → 201 MissionSummary
-                                         400 { issues: { field: 'taskPath' | 'checkoutPath' | 'assembly' | 'workItemId'; message }[] }; 409 { reason: 'checkout_busy', missionId }
+POST /api/missions                           { project, assembly, taskPath, workItemId?, checkoutPath?, mayAskCommander: Record<slotName, boolean> } → 201 MissionSummary   (workspaces: checkoutPath only for a repository Project)
+                                         400 { issues: { field: 'taskPath' | 'checkoutPath' | 'workspace' | 'assembly' | 'workItemId'; message }[] }; 409 { reason: 'workspace_busy', missionId }   (workspaces: was checkout_busy)
 GET  /api/missions/:id                       MissionDetail | 404                   (missions-ui; see the transcript model above)
 POST /api/missions/:id/stop                  204
 POST /api/missions/:id/retry                 { note?: string } → 204           (409 unless Needs Attention)
@@ -428,13 +435,13 @@ evaluatePath(path: string, mode: 'read' | 'write' | 'create', ctx: GuardContext)
 
 `evaluateCommand` tokenizes with `shell-quote`, splits on `&&`, `||`, `;`, `|`, and inspects every simple command whose program basename is `git` or `gh` (so `/usr/bin/git` is caught too). Deny rules:
 
-- git: any branch deletion, without exception: `branch -D|-d|--delete`, `push --delete`/`-d`, any `:ref` refspec (empty source), `update-ref -d`, `worktree remove|prune`, `branch -m|-M` (rename removes the old name); `push` with `--force`, `-f`, `--force-with-lease`, a `+` refspec, `--mirror`; `push` whose destination ref is `ctx.defaultBranch` explicitly, or implicitly (no refspec, or `HEAD`, while the current branch is `defaultBranch`; the hook reads the current branch in `cwd` before evaluating and passes it in); `commit`, `merge`, `rebase`, `cherry-pick`, `reset`, `am` while the current branch is `defaultBranch` (a Slot that forgot to create a branch fails here, and its Done Condition fails with a readable denial); `remote set-url`/`remote remove`; `config` touching `remote.*` or `hooks*`. Creating and switching branches, committing and pushing on any other branch are allowed.
+- git: any branch deletion, without exception: `branch -D|-d|--delete`, `push --delete`/`-d`, any `:ref` refspec (empty source), `update-ref -d`, `worktree remove|prune`, `branch -m|-M` (rename removes the old name); `push` with `--force`, `-f`, `--force-with-lease`, a `+` refspec, `--mirror`; `push` whose destination ref is `ctx.protectedBranch` explicitly, or implicitly (no refspec, or `HEAD`, while the current branch is `protectedBranch`; the hook reads the current branch in `cwd` before evaluating and passes it in); `commit`, `merge`, `rebase`, `cherry-pick`, `reset`, `am` while the current branch is `protectedBranch` (a Slot that forgot to create a branch fails here, and its Done Condition fails with a readable denial); the protected-branch rules are skipped when `ctx.protectedBranch` is null (workspaces: a Workspace that is not a repository); every other rule applies to every kind; `remote set-url`/`remote remove`; `config` touching `remote.*` or `hooks*`. Creating and switching branches, committing and pushing on any other branch are allowed.
 - gh: `pr ready`, `pr merge`, `pr close`, `repo edit|delete|archive|rename`, `secret *`, `variable *`, `workflow *`, `run rerun|cancel`, `release *`, `api` with a method other than GET whose path contains `/merge`, `/merges`, `/branches/*/protection`, `/actions/`, `/secrets`, `/deployments`, `/hooks`; `api` with method DELETE on any path containing `/git/refs/`; `api graphql` whose input contains `mergePullRequest`, `markPullRequestReadyForReview`, `deleteRef`, `updateRef`, `enablePullRequestAutoMerge`; `pr close --delete-branch` or `pr merge` in any form (the latter is already denied above).
 - A `git`/`gh` command that cannot be tokenized is denied with reason `unparseable`.
 
-`evaluatePath` denies any access to `ctx.configHome`, denies `write` to existing files under `ctx.taskPath` (FR-27: new files only), and denies `write`/`create` outside `ctx.checkoutPath` and `ctx.taskPath`.
+`evaluatePath` (workspaces, amended 2026-10-26) resolves a relative path against `ctx.cwd`; inside `ctx.taskPath` a write to an existing file is denied and a new file allowed (FR-27); inside any of `ctx.writeRoots` everything is allowed except writes into a `.git` directory; any other access to `ctx.configHome` is denied (the Task location and the write roots are judged first, because a text Task and a `none` Workspace live in the Mission folder inside it); reads elsewhere are allowed and writes elsewhere denied.
 
-The policy is enforced twice: in the Engine's PreToolUse hook for `Bash`, `Edit`, `Write`, `MultiEdit`, `NotebookEdit`, and by the `git`/`gh` shims on `PATH`, which read `ctx` from environment variables (`SUPTRON_GUARD_DEFAULT_BRANCH`, `SUPTRON_GUARD_RUN_BRANCH`, `SUPTRON_GUARD_CHECKOUT`, `SUPTRON_GUARD_TASK`, `SUPTRON_GUARD_CONFIG_HOME`, `SUPTRON_REAL_GIT`, `SUPTRON_REAL_GH`) and `exec` the real binary when allowed.
+The policy is enforced twice: in the Engine's PreToolUse hook for `Bash`, `Edit`, `Write`, `MultiEdit`, `NotebookEdit`, and by the `git`/`gh` shims on `PATH`, which read `ctx` from environment variables (`SUPTRON_GUARD_CWD`, `SUPTRON_GUARD_WRITE_ROOTS` joined with the PATH delimiter, `SUPTRON_GUARD_PROTECTED_BRANCH` (empty for null), `SUPTRON_GUARD_TASK`, `SUPTRON_GUARD_CONFIG_HOME`, `SUPTRON_REAL_GIT`, `SUPTRON_REAL_GH`; the shim is active when `SUPTRON_GUARD_CONFIG_HOME` is set) and `exec` the real binary when allowed.
 
 ## Testing Strategy
 

@@ -7,7 +7,7 @@ A personal system that assembles specialized AI agents into one robot that carri
 The main nouns follow one metaphor: a combining robot. Units wait in the Hangar, are mounted into the Slots of an Assembly, are flown by Pilots under the Core, and go out on a Mission given by the Commander; the Laws hold whatever happens. The mechanics (Done Condition, Exit Point, Loop, Attempt, Check, Checkout) keep plain names on purpose. The former names are listed under _Avoid_ so that old text is recognisable.
 
 **Project**:
-The place the system works on, described by its Project Profile. In the POC a Project is always one code repository.
+The place the system works on, described by its Project Profile. Its Workspace says what kind of place it is: a code repository, a plain folder, or no folder at all.
 _Avoid_: Repo (when the profile is meant), codebase
 
 **Task**:
@@ -87,11 +87,15 @@ The agent instance that performs the work of one Slot, created from the Slot's U
 _Avoid_: Step agent, worker, sub-agent, Node Agent (former name)
 
 **Project Profile**:
-The rarely changing facts about one Project shared by all its Assemblies: where the repository is, its Knowledge Sources and its Git conventions.
+The rarely changing facts about one Project shared by all its Assemblies: its Workspace (and, for a repository, its Git conventions, host and CI timeout), its Knowledge Sources and its Engine.
 _Avoid_: Project config, project settings
 
+**Workspace**:
+Where the Missions of a Project work, declared once in the Project Profile as exactly one kind: `none` (the Mission folder in `SUPTRON_HOME`), `folder` (a fixed directory, git in it ignored) or `repository` (a Checkout of a git repository). The kind decides what a Mission is given (the working directory, the write roots of the Laws, the Checks and context sources an Assembly may use, whether a Checkout is picked at Launch) and what the screens show; nothing else configures these.
+_Avoid_: Environment, target, location (when the kind is meant)
+
 **Knowledge Source**:
-A document or folder listed in a Project Profile that tells agents how the Project works: conventions, architecture notes, ADRs.
+A document or folder listed in a Project Profile (as a path, relative to the Workspace root or absolute), or a text written into the Profile, that tells agents how the Project works: conventions, architecture notes, ADRs.
 _Avoid_: Context files, docs, rules (rules belong to Units)
 
 **Human Checkpoint**:
@@ -99,12 +103,12 @@ The moment a Pilot asks the Commander a question and the Mission waits for the a
 _Avoid_: Approval gate, pause point, manual step, autonomy level
 
 **Mission**:
-One execution of an Assembly for one Task in one Checkout, under the Project's Git conventions; the system itself never creates or switches branches, a Slot does when its Instructions say so. Several Missions may be active at the same time, also on the same Project, each in a different Checkout.
+One execution of an Assembly for one Task in the Project's Workspace: a Checkout for a repository (under the Project's Git conventions; the system itself never creates or switches branches, a Slot does when its Instructions say so), the folder, or the Mission folder. Every Mission has a Mission folder `missions/<id>/` in `SUPTRON_HOME`, removed on Dismiss. Several Missions may be active at the same time, also on the same Project: in different Checkouts, or any number on a Project without a folder.
 _Avoid_: Job, execution, session, Run (former name)
 
 **Checkout**:
-An existing working copy (the main clone or a git worktree) of a Project that the Commander picks when starting a Mission. A Checkout is busy while a Mission uses it; the system never creates or deletes Checkouts.
-_Avoid_: Working copy, worktree (a worktree is one kind of Checkout), workspace
+An existing working copy (the main clone or a git worktree) of a Project whose Workspace is a repository, picked by the Commander when starting a Mission. A Checkout is busy while a Mission uses it; the system never creates or deletes Checkouts.
+_Avoid_: Working copy, worktree (a worktree is one kind of Checkout)
 
 **Needs Attention**:
 The state of a Mission that cannot continue without the Commander: a Slot exhausted its Attempts, a Loop reached its limit, or the Core met a situation it may not resolve alone. Nothing runs while a Mission is in Needs Attention; the Mission waits, it does not end.
@@ -127,7 +131,7 @@ The single user of the system: the person who starts Missions, answers Human Che
 _Avoid_: User, developer, operator, Owner (former name)
 
 **Laws**:
-The set of actions the system never performs regardless of configuration. In the POC, where every Project is a code repository, they are: pushing to or merging into the protected branch, force-pushing, deleting or renaming any branch, deploying, changing repository, CI or secret settings, marking a Pull Request ready for review. Like the laws of robotics, they are built into the system and no configuration can change them.
+The set of actions the system never performs regardless of configuration: writing outside the Workspace and the Task location, touching the configuration home, pushing to or merging into the protected branch (where the Workspace knows one), force-pushing, deleting or renaming any branch, deploying, changing repository, CI or secret settings, marking a Pull Request ready for review. Like the laws of robotics, they are built into the system and no configuration can change them.
 _Avoid_: Guardrails, safety rules, Never-list (former name)
 
 **Engine**:

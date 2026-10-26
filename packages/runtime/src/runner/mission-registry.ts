@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { realpath, stat } from 'node:fs/promises';
+import { stat } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { loadConfig as defaultLoadConfig, type LoadedConfig } from '../config/load.js';
 import type { AssemblyFile } from '../config/schemas.js';
@@ -20,10 +20,20 @@ import type { MissionEvent, MissionEventInput } from '../events/mission-event.js
 import { TypedEmitter } from '../events/typed-emitter.js';
 import type { Checkout, GitClient } from '../git/types.js';
 import type { RepoHost } from '../host/index.js';
-import { renderGitConventions, slugify } from '../templates/index.js';
+import { slugify } from '../templates/index.js';
+import { capabilitiesOf } from '../workspace/kinds.js';
+import { busyKeyOf, openWorkspace } from '../workspace/open.js';
+import {
+  WorkspaceOpenError,
+  buildGuard,
+  type Workspace,
+  type WorkspaceIssueField,
+} from '../workspace/workspace.js';
+import { resolveKnowledgeSources } from './context.js';
 import { Ledger, type LedgerEntry } from './ledger.js';
 import { MissionStateError, Runner } from './runner.js';
 import {
+  createMissionFolder,
   listTaskDocuments,
   removeMissionFolder,
   storeTaskText,
@@ -37,11 +47,13 @@ export interface StartMissionInput {
   assembly: string;
   task: MissionTask;
   workItemId?: string;
-  checkoutPath: string;
+  /** Required for a `repository` Project, refused for the other kinds (SPEC FR-9). */
+  checkoutPath?: string;
   mayAskCommander?: Record<string, boolean>;
 }
 
-export type StartIssueField = 'taskPath' | 'taskText' | 'checkoutPath' | 'assembly' | 'workItemId';
+export type StartIssueField =
+  'taskPath' | 'taskText' | 'assembly' | 'workItemId' | WorkspaceIssueField;
 
 export class MissionStartError extends Error {
   constructor(readonly issues: { field: StartIssueField; message: string }[]) {
@@ -50,10 +62,11 @@ export class MissionStartError extends Error {
   }
 }
 
-export class CheckoutBusyError extends Error {
+/** The Workspace (a Checkout or a folder) is in use by an active Mission (SPEC FR-10). */
+export class WorkspaceBusyError extends Error {
   constructor(readonly missionId: string) {
-    super(`The Checkout is busy with Mission ${missionId}`);
-    this.name = 'CheckoutBusyError';
+    super(`The Workspace is busy with Mission ${missionId}`);
+    this.name = 'WorkspaceBusyError';
   }
 }
 
@@ -75,6 +88,8 @@ interface Entry {
   recovered: LedgerEntry | null;
   assembly: AssemblyFile;
   snapshot: MissionSnapshot | null;
+  /** The open Workspace of a running Mission; null for a recovered one (its key is not rebuilt). */
+  workspace: Workspace | null;
   seq: number;
 }
 
@@ -97,7 +112,7 @@ export interface CheckoutStatus extends Checkout {
 
 const WORK_ITEM_ID = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 
-/** Every Mission known since start: starts, controls, Checkout busy-ness, the ledger. */
+/** Every Mission known since start: starts, controls, Workspace busy-ness, the ledger. */
 export class MissionRegistry {
   readonly events = new TypedEmitter<MissionEvent>();
   private readonly entries = new Map<string, Entry>();
@@ -151,15 +166,21 @@ export class MissionRegistry {
     return structuredClone(entry.runner ? entry.runner.summary : entry.recovered!.summary);
   }
 
-  /** The id of the active Mission using this Checkout, if any. */
-  isCheckoutBusy(checkoutPath: string): string | null {
+  /** The id of the active Mission whose Workspace has this busy key, if any. */
+  isWorkspaceBusy(busyKey: string | null): string | null {
+    if (busyKey === null) return null;
     for (const [id, entry] of this.entries) {
       const summary = entry.runner?.summary;
-      if (summary && isActiveState(summary.state) && samePath(summary.checkoutPath, checkoutPath)) {
+      if (summary && isActiveState(summary.state) && entry.workspace?.busyKey === busyKey) {
         return id;
       }
     }
     return null;
+  }
+
+  /** The id of the active Mission using this Checkout or folder, if any. */
+  isCheckoutBusy(path: string): string | null {
+    return this.isWorkspaceBusy(busyKeyOf(path));
   }
 
   /** Active Missions whose snapshot matches: a Unit in a Slot, an Assembly of a Project, or a Project. */
@@ -180,11 +201,15 @@ export class MissionRegistry {
     return count;
   }
 
-  async listCheckouts(project: string): Promise<CheckoutStatus[]> {
+  /** The Checkouts of a repository Project, or null when its Workspace has no git. */
+  async listCheckouts(project: string): Promise<CheckoutStatus[] | null> {
     const config = await this.loadConfig(this.deps.home);
     const profile = config.projects.find((p) => p.name === project)?.profile;
     if (!profile) throw new MissionStateError('not_found', `Unknown Project ${project}`);
-    const checkouts = await this.deps.git.listCheckouts(profile.repository.path);
+    if (profile.workspace.kind !== 'repository' || !capabilitiesOf(profile.workspace).has('git')) {
+      return null;
+    }
+    const checkouts = await this.deps.git.listCheckouts(profile.workspace.path);
     return checkouts.map((c) => ({ ...c, busyMissionId: this.isCheckoutBusy(c.path) }));
   }
 
@@ -228,30 +253,7 @@ export class MissionRegistry {
     } else if (input.task.text.trim() === '') {
       issues.push({ field: 'taskText', message: 'The Task text is empty' });
     }
-    let checkout: Checkout | undefined;
-    if (project?.profile) {
-      try {
-        const checkouts = await this.deps.git.listCheckouts(project.profile.repository.path);
-        const wanted = await realpathOr(input.checkoutPath);
-        checkout = checkouts.find((c) => samePath(c.path, wanted));
-        if (!checkout) {
-          issues.push({
-            field: 'checkoutPath',
-            message: `Not a Checkout of ${project.profile.repository.path}: ${input.checkoutPath}`,
-          });
-        }
-      } catch (error) {
-        issues.push({
-          field: 'checkoutPath',
-          message: `Cannot read the Checkouts: ${String(error)}`,
-        });
-      }
-    }
     if (issues.length > 0) throw new MissionStartError(issues);
-
-    const checkoutPath = checkout!.path;
-    const busy = this.isCheckoutBusy(checkoutPath);
-    if (busy) throw new CheckoutBusyError(busy);
 
     const profile = project!.profile!;
     const document = assembly!.assembly!;
@@ -260,34 +262,86 @@ export class MissionRegistry {
     const workItemId = input.workItemId?.trim() || undefined;
     const id = (this.deps.newId ?? randomUUID)();
     const task = input.task;
-    const taskPath =
-      task.kind === 'path'
-        ? resolve(task.path)
-        : await storeTaskText(this.deps.home, id, task.text);
+
+    // Every Mission has its folder before the Workspace opens: kind `none` works in it (FR-11).
+    const missionDir = await createMissionFolder(this.deps.home, id);
+    let workspace: Workspace;
+    try {
+      const taskPath =
+        task.kind === 'path'
+          ? resolve(task.path)
+          : await storeTaskText(this.deps.home, id, task.text);
+      workspace = await openWorkspace(
+        profile,
+        {
+          missionDir,
+          ...(input.checkoutPath !== undefined && { checkoutPath: input.checkoutPath }),
+        },
+        { git: this.deps.git, host: this.deps.host },
+      );
+      const busy = this.isWorkspaceBusy(workspace.busyKey);
+      if (busy) throw new WorkspaceBusyError(busy);
+      return await this.launch({
+        id,
+        profile,
+        document,
+        snapshot,
+        task,
+        taskPath,
+        taskIsFile,
+        workItemId,
+        workspace,
+      });
+    } catch (error) {
+      await removeMissionFolder(this.deps.home, id);
+      if (error instanceof WorkspaceOpenError) throw new MissionStartError(error.issues);
+      throw error;
+    }
+  }
+
+  private async launch(args: {
+    id: string;
+    profile: NonNullable<LoadedConfig['projects'][number]['profile']>;
+    document: AssemblyFile;
+    snapshot: MissionSnapshot;
+    task: MissionTask;
+    taskPath: string;
+    taskIsFile: boolean;
+    workItemId: string | undefined;
+    workspace: Workspace;
+  }): Promise<MissionSummary> {
+    const { id, profile, document, snapshot, task, taskPath, taskIsFile, workItemId, workspace } =
+      args;
     const taskTitle =
       task.kind === 'path' ? titleFromTaskPath(taskPath, taskIsFile) : titleFromTaskText(task.text);
     const taskDocuments =
       task.kind === 'path'
         ? await listTaskDocuments(taskPath, taskIsFile)
         : [textTaskDocument(taskPath)];
-    const gitConventions = renderGitConventions(profile, {
+    const gitConventions = workspace.gitConventions({
       ...(workItemId !== undefined && { workItemId }),
       taskTitle,
       taskSlug: slugify(taskTitle) || 'task',
     });
-    const entry: Entry = { runner: null, recovered: null, assembly: document, snapshot, seq: 0 };
+    const entry: Entry = {
+      runner: null,
+      recovered: null,
+      assembly: document,
+      snapshot,
+      workspace,
+      seq: 0,
+    };
     this.entries.set(id, entry);
     const emit = (event: MissionEventInput) => this.emit(id, event);
     const core = new EngineCoreAgent(this.deps.engine, {
       model: snapshot.assembly.core.model,
       instructions: snapshot.assembly.core.instructions,
       cwd: taskIsFile ? resolve(taskPath, '..') : taskPath,
-      guard: {
-        protectedBranch: profile.repository.protectedBranch,
-        checkoutPath,
+      guard: buildGuard(workspace, {
+        cwd: taskIsFile ? resolve(taskPath, '..') : taskPath,
         taskPath,
         configHome: this.deps.home,
-      },
+      }),
       onCost: (cost) => entry.runner?.addCoreCost(cost),
     });
     const runner = new Runner(
@@ -300,16 +354,14 @@ export class MissionRegistry {
         taskTitle,
         taskDocuments,
         ...(workItemId !== undefined && { workItemId }),
-        checkoutPath,
         configHome: this.deps.home,
         gitConventions,
+        knowledgeSources: resolveKnowledgeSources(profile.knowledgeSources, workspace.cwd),
         startedAt: (this.deps.now ?? (() => new Date()))().toISOString(),
-        branch: checkout!.branch,
       },
       {
         engine: this.deps.engine,
-        host: this.deps.host,
-        git: this.deps.git,
+        workspace,
         core,
         emit,
         ...(this.deps.ciPollIntervalMs !== undefined && {
@@ -380,6 +432,7 @@ export class MissionRegistry {
         recovered: { summary, assembly: raw.assembly, slots: raw.slots ?? [] },
         assembly: raw.assembly,
         snapshot: null,
+        workspace: null,
         seq: 0,
       });
       recovered.push(structuredClone(summary));
@@ -431,16 +484,4 @@ export class MissionRegistry {
     }
     return this.ledger.write(content);
   }
-}
-
-async function realpathOr(path: string): Promise<string> {
-  try {
-    return await realpath(path);
-  } catch {
-    return resolve(path);
-  }
-}
-
-function samePath(a: string, b: string): boolean {
-  return resolve(a) === resolve(b);
 }

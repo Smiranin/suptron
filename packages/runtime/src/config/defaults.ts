@@ -18,7 +18,6 @@ export const DEFAULTS = {
     context: {
       taskDocuments: true,
       knowledgeSources: true,
-      checkout: true,
       // Off by default: only the Slots that branch, commit or open Pull Requests need them.
       gitConventions: false,
       slotOutputs: [] as const,
@@ -27,11 +26,15 @@ export const DEFAULTS = {
     exitCondition: [] as const,
   },
   profile: {
-    repository: { remote: 'origin', protectedBranch: 'main' },
+    /** Defaults of the `repository` Workspace kind; the other kinds have no optional fields. */
+    repository: {
+      remote: 'origin',
+      protectedBranch: 'main',
+      host: 'github' as const,
+      git: { pullRequestTemplate: '', labels: [] as const, reviewers: [] as const },
+      ciWaitTimeoutMinutes: 30,
+    },
     knowledgeSources: [] as const,
-    git: { pullRequestTemplate: '', labels: [] as const, reviewers: [] as const },
-    host: 'github' as const,
     engine: 'claude-code' as const,
-    ciWaitTimeoutMinutes: 30,
   },
 } as const;

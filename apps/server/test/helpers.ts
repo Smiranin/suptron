@@ -11,7 +11,9 @@ import {
   primaryUnits,
   tempRepo,
   writeHome,
+  type AssemblyFile,
   type MissionEvent,
+  type ProfileFile,
   type TempRepo,
   type UnitFile,
 } from '@suptron/runtime';
@@ -44,14 +46,24 @@ export function runnableUnits(): UnitFile[] {
   }));
 }
 
-export async function testServer(): Promise<TestServer> {
+export interface TestServerOptions {
+  /** Extra Projects beside `my-app` (the primary scenario). */
+  projects?: { profile: ProfileFile; assemblies: AssemblyFile[] }[];
+  /** Extra Units beside the primary ones. */
+  units?: UnitFile[];
+}
+
+export async function testServer(options: TestServerOptions = {}): Promise<TestServer> {
   const repo = await tempRepo();
   const home = await mkdtemp(join(tmpdir(), 'suptron-home-'));
   const taskDir = await mkdtemp(join(tmpdir(), 'suptron-task-'));
   await writeFile(join(taskDir, 'SPEC.md'), '# My task\n');
   await writeHome(home, {
-    units: runnableUnits(),
-    projects: [{ profile: primaryProfile(repo.clonePath), assemblies: [primaryAssembly()] }],
+    units: [...runnableUnits(), ...(options.units ?? [])],
+    projects: [
+      { profile: primaryProfile(repo.clonePath), assemblies: [primaryAssembly()] },
+      ...(options.projects ?? []),
+    ],
   });
   const engine = new FakeEngine();
   const host = new FakeHost();

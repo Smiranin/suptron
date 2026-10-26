@@ -114,7 +114,7 @@ function NewProjectForm({
       <DialogHeader>
         <DialogTitle>New Project</DialogTitle>
         <DialogDescription>
-          Where the repository is, its Knowledge Sources and its Git conventions.
+          The type of place the Project works in, its fields and its Knowledge Sources.
         </DialogDescription>
       </DialogHeader>
       <ProfileForm form={form} paths={paths} nameError={nameError} />

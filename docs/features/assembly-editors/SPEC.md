@@ -6,6 +6,7 @@
 **Source:** closes OQ-2 of ../suptron-poc/SPEC.md. Vocabulary follows ../../GLOSSARY.md.
 **Amended:** 2026-10-22 by ./PLAN.md: success criterion 2 (semantic equivalence; comments and formatting are not preserved), FR-14 and FR-15 (paths are typed, no native dialogs), OQ-1 closed.
 **Amended:** 2026-10-22 by ../missions-ui/SPEC.md: FR-1 (the Projects page shows each Project expanded with its Assemblies and a Launch button per valid Assembly; the Assembly editor header has the same button).
+**Amended:** 2026-10-26 by ../workspaces/SPEC.md: FR-14 (the Profile form is kind-first; the repository fields and the git defaults lookup belong to the `repository` kind), FR-15 (Knowledge Sources are path-or-text rows), FR-33 (the Context tab loses Checkout and offers Git conventions only when the Workspace has git; the Check picker offers only what the Workspace provides).
 
 ## Problem Statement
 
@@ -122,8 +123,8 @@ Unit editor
 
 Project Profile editor
 
-- FR-14. The repository location is typed as an absolute path and checked by the system to exist; the remote and default branch are read from the repository and remain editable.
-- FR-15. Knowledge Sources are typed as paths relative to the repository and checked by the system to exist.
+- FR-14. The Profile form asks for the Project type first (`none`, `folder`, `repository`) and shows the fields of that type only. A folder or repository location is typed as an absolute path and checked by the system to exist; for a repository the remote and protected branch are read from it and remain editable. Amended 2026-10-26 by ../workspaces/SPEC.md FR-3, FR-4.
+- FR-15. Knowledge Sources are rows of a path (relative to the Workspace root, or absolute; checked by the system to exist) or an inline text, each with an optional title. A relative path is invalid for a Project without a folder. Amended 2026-10-26 by ../workspaces/SPEC.md FR-2.
 - FR-16. Branch name template and Pull Request description template are text fields with named placeholders (at least the Work Item ID and the Task slug).
 - FR-17. The form also holds the repository host, the Engine and the CI wait timeout, as in POC FR-4.
 
@@ -147,7 +148,7 @@ Assembly editor: inspector
 
 - FR-31. Selecting a Slot opens an inspector with tabs: General (name, Unit, model, Memory Mode, "may ask the Commander", additional Instructions), Context, Done Condition, Loop, Exit.
 - FR-32. Fields inherited from the Unit (model, Instructions, Done Condition, "may ask the Commander") show the Unit's value greyed out with an Override switch; the field becomes editable only when Override is on.
-- FR-33. The Context tab offers Task documents, Knowledge Sources and Checkout (on by default) and one checkbox per earlier Slot's Slot Output (off by default).
+- FR-33. The Context tab offers Task documents and Knowledge Sources (on by default), Git conventions (off by default, only when the Project's Workspace has git) and one checkbox per earlier Slot's Slot Output (off by default). The Checkout switch is gone: every Slot receives the Workspace's own fragment. The Check picker lists only the Checks the Workspace can run. Amended 2026-10-26 by ../workspaces/SPEC.md FR-6, FR-7, FR-15.
 - FR-34. The Loop tab offers a target among earlier Slots and an iteration limit (default 3).
 - FR-35. The Exit tab offers the Exit Point flag and an Exit Condition (Check list). On the last Slot the flag is on and not editable; its Exit Condition is optional.
 - FR-36. Every Slot name must be unique within the Assembly.

@@ -1,7 +1,8 @@
 import type { MissionDetail, MissionSummary, MissionTask } from '@suptron/runtime/browser';
 import { HttpError, NotFoundError, request } from './client';
 
-export type StartIssueField = 'taskPath' | 'taskText' | 'checkoutPath' | 'assembly' | 'workItemId';
+export type StartIssueField =
+  'taskPath' | 'taskText' | 'checkoutPath' | 'workspace' | 'assembly' | 'workItemId';
 
 export class MissionValidationError extends Error {
   constructor(readonly issues: { field: StartIssueField; message: string }[]) {
@@ -10,10 +11,11 @@ export class MissionValidationError extends Error {
   }
 }
 
-export class CheckoutBusyError extends Error {
+/** The Checkout or the folder is in use by another Mission (`409 workspace_busy`). */
+export class WorkspaceBusyError extends Error {
   constructor(readonly missionId: string) {
-    super('The Checkout is busy with another Mission');
-    this.name = 'CheckoutBusyError';
+    super('The Workspace is busy with another Mission');
+    this.name = 'WorkspaceBusyError';
   }
 }
 
@@ -22,7 +24,8 @@ export interface StartMissionRequest {
   assembly: string;
   task: MissionTask;
   workItemId?: string;
-  checkoutPath: string;
+  /** Only for a repository Project. */
+  checkoutPath?: string;
   mayAskCommander: Record<string, boolean>;
 }
 
@@ -35,7 +38,7 @@ export const missionsApi = {
     } catch (error) {
       if (error instanceof HttpError && error.status === 409) {
         const payload = error.body as { missionId?: string } | undefined;
-        throw new CheckoutBusyError(payload?.missionId ?? '');
+        throw new WorkspaceBusyError(payload?.missionId ?? '');
       }
       if (error && typeof error === 'object' && 'issues' in error) {
         const issues = (error as { issues: { field: StartIssueField; message: string }[] }).issues;

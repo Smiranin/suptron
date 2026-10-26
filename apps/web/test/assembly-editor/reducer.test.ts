@@ -47,7 +47,7 @@ describe('reduce', () => {
     ]);
     expect(doc.slots[0]?.exitPoint).toBe(true);
     expect(doc.slots.at(-1)).toMatchObject({ name: 'publisher', exitPoint: true });
-    expect(validate(doc, primaryUnits()).errors.map((e) => e.code)).toContain(
+    expect(validate(doc, primaryUnits(), null).errors.map((e) => e.code)).toContain(
       'exit_condition_required',
     );
     expect(reduce(primaryAssembly(), { type: 'moveSlot', name: 'nope', toIndex: 1 }, ctx)).toEqual(
@@ -163,7 +163,7 @@ describe('selectors', () => {
       name: 'analyst',
       patch: { loop: { target: 'tester', limit: 3 } },
     });
-    const issues = validate(doc, primaryUnits());
+    const issues = validate(doc, primaryUnits(), null);
     expect(issues.bySlot.get('analyst')?.[0]?.code).toBe('loop_target_not_earlier');
     expect(issues.errors).toHaveLength(1);
   });

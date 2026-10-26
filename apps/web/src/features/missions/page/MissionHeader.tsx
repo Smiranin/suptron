@@ -19,7 +19,7 @@ export function useStopMission(id: string) {
   return { open, request: () => setOpen(true), cancel: () => setOpen(false), confirm };
 }
 
-/** Project / Assembly, Task, Checkout, state, cost, PR link, Stop or Dismiss (FR-14, FR-33). */
+/** Project / Assembly, Task, Workspace, state, cost, PR link, Stop or Dismiss (FR-14, FR-33). */
 export function MissionHeader({ state, onStop }: { state: ReadyMissionState; onStop: () => void }) {
   const navigate = useNavigate();
   const { summary } = state;
@@ -46,10 +46,12 @@ export function MissionHeader({ state, onStop }: { state: ReadyMissionState; onS
           <span>
             Task: <span className="text-foreground font-medium">{taskName(summary)}</span>
           </span>
-          <span className="font-mono text-xs">
-            {summary.checkoutPath}
-            {summary.branch ? ` @ ${summary.branch}` : ''}
-          </span>
+          {summary.workspace.path !== null && (
+            <span className="font-mono text-xs" data-testid="workspace-location">
+              {summary.workspace.path}
+              {summary.workspace.branch ? ` @ ${summary.workspace.branch}` : ''}
+            </span>
+          )}
           <span>
             Cost: <CostLabel cost={summary.cost} /> <span className="text-xs">(estimate)</span>
           </span>

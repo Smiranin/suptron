@@ -97,12 +97,28 @@ export function installShims(): Promise<ShimInstall> {
   return installation;
 }
 
-/** The environment variables the shims read to rebuild the GuardContext. */
+/**
+ * The environment variables the shims read to rebuild the GuardContext. The write roots travel
+ * joined with the platform's PATH delimiter; a null protected branch is the empty string.
+ */
 export function guardEnv(ctx: GuardContext): Record<string, string> {
   return {
-    SUPTRON_GUARD_PROTECTED_BRANCH: ctx.protectedBranch,
-    SUPTRON_GUARD_CHECKOUT: ctx.checkoutPath,
+    SUPTRON_GUARD_CWD: ctx.cwd,
+    SUPTRON_GUARD_WRITE_ROOTS: ctx.writeRoots.join(delimiter),
+    SUPTRON_GUARD_PROTECTED_BRANCH: ctx.protectedBranch ?? '',
     SUPTRON_GUARD_TASK: ctx.taskPath,
     SUPTRON_GUARD_CONFIG_HOME: ctx.configHome,
+  };
+}
+
+/** The inverse of `guardEnv`; null when no Mission context is set (the shim is then transparent). */
+export function guardFromEnv(env: NodeJS.ProcessEnv): GuardContext | null {
+  if (!env.SUPTRON_GUARD_CONFIG_HOME) return null;
+  return {
+    cwd: env.SUPTRON_GUARD_CWD || process.cwd(),
+    writeRoots: (env.SUPTRON_GUARD_WRITE_ROOTS ?? '').split(delimiter).filter((r) => r !== ''),
+    protectedBranch: env.SUPTRON_GUARD_PROTECTED_BRANCH || null,
+    taskPath: env.SUPTRON_GUARD_TASK ?? '',
+    configHome: env.SUPTRON_GUARD_CONFIG_HOME,
   };
 }

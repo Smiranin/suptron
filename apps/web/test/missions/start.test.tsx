@@ -147,6 +147,48 @@ describe('Start Mission dialog', () => {
     });
   });
 
+  it('starts on a Project without Checkouts: no Checkout select, no checkoutPath in the request', async () => {
+    const home = useFakeHome();
+    const user = userEvent.setup();
+    const { router } = renderInApp(<LaunchButton project="notes" assembly="brief" />, home.live);
+    await user.click(await screen.findByTestId('launch-button'));
+    const dialog = await screen.findByRole('dialog');
+    await user.type(within(dialog).getByLabelText('Task location'), '/tasks/my-task');
+    expect(await within(dialog).findByText('Found folder')).toBeInTheDocument();
+    expect(within(dialog).queryByRole('combobox', { name: 'Checkout' })).toBeNull();
+    expect(home.requestsTo('GET', '/api/projects/notes/checkouts')).toHaveLength(0);
+    await waitFor(() =>
+      expect(within(dialog).getByRole('button', { name: /Start/ })).toBeEnabled(),
+    );
+    await user.click(within(dialog).getByRole('button', { name: /Start/ }));
+    await waitFor(() => expect(home.requestsTo('POST', '/api/missions')).toHaveLength(1));
+    expect(home.requestsTo('POST', '/api/missions')[0]!.body).toEqual({
+      project: 'notes',
+      assembly: 'brief',
+      task: { kind: 'path', path: '/tasks/my-task' },
+      mayAskCommander: { researcher: false, 'brief-writer': false },
+    });
+    await waitFor(() => expect(router.state.location.pathname).toBe('/missions/m1'));
+    expect(home.missions.get('m1')!.summary.workspace).toEqual({
+      kind: 'folder',
+      path: '/notes',
+      branch: null,
+    });
+    expect(JSON.parse(window.localStorage.getItem('suptron.startMission.notes')!)).toEqual({
+      taskPath: '/tasks/my-task',
+    });
+
+    // the folder is busy now: a second start is refused at the dialog level
+    await router.navigate({ to: '/' });
+    await user.click(await screen.findByTestId('launch-button'));
+    const again = await screen.findByRole('dialog');
+    await within(again).findByText('Found folder');
+    await user.click(within(again).getByRole('button', { name: /Start/ }));
+    expect(
+      await within(again).findByText('The folder is busy with another Mission'),
+    ).toBeInTheDocument();
+  });
+
   it('shows a Checkouts read error in place of the list', async () => {
     const home = useFakeHome();
     home.projects.get('my-app')!.checkoutsError = 'not a git repository';

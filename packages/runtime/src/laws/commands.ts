@@ -3,7 +3,7 @@ import type { GuardContext } from '../engine/index.js';
 
 export type Verdict = { allowed: true } | { allowed: false; reason: string };
 
-/** The GuardContext plus the branch the Checkout is on when the command runs. */
+/** The GuardContext plus the branch the working directory is on when the command runs. */
 export interface CommandContext extends GuardContext {
   currentBranch: string | null;
 }
@@ -136,7 +136,12 @@ function evaluateGit(args: string[], ctx: CommandContext): Verdict {
   const parsed = gitSubcommand(args);
   if (!parsed) return allow;
   const { sub, rest } = parsed;
-  const onDefault = ctx.currentBranch !== null && ctx.currentBranch === ctx.protectedBranch;
+  // Without a protected branch (a Workspace that is not a repository) only the history and
+  // remote Laws apply; a commit on `main` is then an ordinary commit.
+  const onDefault =
+    ctx.protectedBranch !== null &&
+    ctx.currentBranch !== null &&
+    ctx.currentBranch === ctx.protectedBranch;
 
   switch (sub) {
     case 'branch': {
@@ -177,7 +182,7 @@ function evaluateGit(args: string[], ctx: CommandContext): Verdict {
         if (spec.startsWith(':')) return deny('The Laws forbid deleting branches (:ref refspec)');
         const [src, dst] = spec.split(':');
         const destination = refName(dst ?? src!);
-        if (destination === ctx.protectedBranch) {
+        if (ctx.protectedBranch !== null && destination === ctx.protectedBranch) {
           return deny(`The Laws forbid pushing to the protected branch (${ctx.protectedBranch})`);
         }
         if (dst === undefined && src === 'HEAD' && onDefault) {

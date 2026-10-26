@@ -1,7 +1,7 @@
 import {
-  CheckoutBusyError,
   MissionStartError,
   MissionStateError,
+  WorkspaceBusyError,
   type MissionDetail,
   type StartIssueField,
 } from '@suptron/runtime';
@@ -20,7 +20,8 @@ const startSchema = z.object({
   assembly: z.string().min(1),
   task: taskSchema,
   workItemId: z.string().optional(),
-  checkoutPath: z.string().min(1),
+  /** Required for a repository Project; the registry decides per Workspace kind. */
+  checkoutPath: z.string().min(1).optional(),
   mayAskCommander: z.record(z.string(), z.boolean()).optional(),
 });
 
@@ -72,17 +73,18 @@ export function registerMissionRoutes(app: FastifyInstance, ctx: ServerContext):
       });
     }
     try {
-      const { workItemId, mayAskCommander, ...rest } = parsed.data;
+      const { workItemId, mayAskCommander, checkoutPath, ...rest } = parsed.data;
       const summary = await ctx.registry.start({
         ...rest,
+        ...(checkoutPath !== undefined && { checkoutPath }),
         ...(workItemId !== undefined && { workItemId }),
         ...(mayAskCommander !== undefined && { mayAskCommander }),
       });
       return reply.status(201).send(summary);
     } catch (error) {
       if (error instanceof MissionStartError) return fail(reply, 400, { issues: error.issues });
-      if (error instanceof CheckoutBusyError) {
-        return fail(reply, 409, { reason: 'checkout_busy', missionId: error.missionId });
+      if (error instanceof WorkspaceBusyError) {
+        return fail(reply, 409, { reason: 'workspace_busy', missionId: error.missionId });
       }
       throw error;
     }

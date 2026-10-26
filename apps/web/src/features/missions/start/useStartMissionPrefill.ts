@@ -1,5 +1,6 @@
 export interface StartMissionPrefill {
-  checkoutPath: string;
+  /** Only for a repository Project. */
+  checkoutPath?: string;
   taskPath: string;
 }
 
@@ -11,8 +12,11 @@ export function readPrefill(project: string): StartMissionPrefill | null {
     const raw = window.localStorage.getItem(prefillKey(project));
     if (!raw) return null;
     const parsed = JSON.parse(raw) as Partial<StartMissionPrefill>;
-    if (typeof parsed.checkoutPath !== 'string' || typeof parsed.taskPath !== 'string') return null;
-    return { checkoutPath: parsed.checkoutPath, taskPath: parsed.taskPath };
+    if (typeof parsed.taskPath !== 'string') return null;
+    return {
+      taskPath: parsed.taskPath,
+      ...(typeof parsed.checkoutPath === 'string' && { checkoutPath: parsed.checkoutPath }),
+    };
   } catch {
     return null;
   }

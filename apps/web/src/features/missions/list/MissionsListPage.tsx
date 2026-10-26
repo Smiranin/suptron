@@ -31,6 +31,8 @@ export function DismissButton({ mission }: { mission: MissionSummary }) {
 
 function MissionRow({ mission }: { mission: MissionSummary }) {
   const finished = mission.state === 'completed' || mission.state === 'stopped';
+  // The branch for a repository, the folder for a folder, nothing for no folder (FR-18).
+  const location = mission.workspace.branch ?? mission.workspace.path;
   return (
     <li
       className="border-border bg-card grid grid-cols-[1fr_auto] items-center gap-3 rounded-xl border px-4 py-3"
@@ -50,7 +52,11 @@ function MissionRow({ mission }: { mission: MissionSummary }) {
           <StateBadge state={mission.state} note={mission.note} />
         </span>
         <span className="text-muted-foreground flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
-          {mission.branch && <span className="font-mono">{mission.branch}</span>}
+          {location !== null && (
+            <span className="font-mono" data-testid="workspace-location">
+              {location}
+            </span>
+          )}
           {!finished && mission.currentSlot && (
             <span data-testid="current-slot">Slot: {mission.currentSlot}</span>
           )}

@@ -28,6 +28,7 @@ describe.skipIf(process.env.SUPTRON_LIVE !== '1')('ClaudeEngine (live)', () => {
         writeRoots: [dir],
         protectedBranch: 'main',
         taskPath: join(dir, 'task'),
+        taskDocuments: [],
         configHome: join(dir, 'home'),
       },
     });
@@ -64,6 +65,7 @@ describe.skipIf(process.env.SUPTRON_LIVE !== '1')('ClaudeEngine (live)', () => {
         writeRoots: [dir],
         protectedBranch: 'main',
         taskPath: join(dir, 'task'),
+        taskDocuments: [],
         configHome: join(dir, 'home'),
       },
     });
@@ -100,6 +102,7 @@ describe.skipIf(process.env.SUPTRON_LIVE !== '1')('ClaudeEngine (live)', () => {
         writeRoots: [dir],
         protectedBranch: 'main',
         taskPath: join(dir, 'task'),
+        taskDocuments: [],
         configHome: join(dir, 'home'),
       },
     });
@@ -132,6 +135,7 @@ describe.skipIf(process.env.SUPTRON_LIVE !== '1')('ClaudeEngine (live)', () => {
         writeRoots: [missionDir],
         protectedBranch: null,
         taskPath: join(dir, 'task'),
+        taskDocuments: [],
         configHome: home,
       },
     });

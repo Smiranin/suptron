@@ -7,6 +7,7 @@ const ctx: GuardContext = {
   writeRoots: ['/work/repo'],
   protectedBranch: 'main',
   taskPath: '/work/tasks/t1',
+  taskDocuments: ['/work/tasks/t1/SPEC.md'],
   configHome: '/home/me/.suptron',
 };
 const exists = (path: string) =>
@@ -56,6 +57,17 @@ describe('decideToolUse', () => {
       exists,
     );
     expect(decision.allowed).toBe(false);
+  });
+
+  it('allows a Slot to rewrite its own file next to the Task', () => {
+    const decision = decideToolUse(
+      'Edit',
+      { file_path: '/work/tasks/t1/OUTLINE.md', old_string: 'a', new_string: 'b' },
+      ctx,
+      null,
+      exists,
+    );
+    expect(decision).toEqual({ allowed: true });
   });
 
   it('allows writing a new file next to the Task and in the Checkout', () => {

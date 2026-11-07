@@ -41,9 +41,10 @@ function isGitInternal(target: string, root: string): boolean {
 }
 
 /**
- * Denies any access to the configuration home, writes to existing Task documents (new files
- * only), writes outside the write roots and the Task location, and writes to `.git` internals
- * wherever a `.git` directory sits under a write root.
+ * Denies any access to the configuration home, writes to the Commander's Task documents (a Slot's
+ * own files next to them, such as OUTLINE.md, may be rewritten), writes outside the write roots
+ * and the Task location, and writes to `.git` internals wherever a `.git` directory sits under a
+ * write root.
  *
  * The Task location and the write roots are decided before the configuration home, because
  * both may live inside it: a text Task is stored in the Mission folder, and a Workspace of
@@ -52,10 +53,10 @@ function isGitInternal(target: string, root: string): boolean {
 export function evaluatePath(path: string, mode: PathMode, ctx: GuardContext): PathVerdict {
   const target = canonicalPath(isAbsolute(path) ? path : resolve(ctx.cwd, path));
   if (isInside(target, canonicalPath(ctx.taskPath))) {
-    if (mode === 'write') {
+    if (mode !== 'read' && ctx.taskDocuments.some((doc) => canonicalPath(doc) === target)) {
       return {
         allowed: false,
-        reason: 'Existing Task documents are never modified; create a new file instead',
+        reason: "The Commander's Task documents are never modified; write a new file next to them",
       };
     }
     return { allowed: true };
@@ -71,8 +72,10 @@ export function evaluatePath(path: string, mode: PathMode, ctx: GuardContext): P
     return { allowed: false, reason: 'Agents may not touch the Suptron configuration home' };
   }
   if (mode === 'read') return { allowed: true };
-  return {
-    allowed: false,
-    reason: 'Writes are allowed only inside the Workspace and the Task location',
-  };
+  return { allowed: false, reason: outsideWriteReason(ctx) };
+}
+
+/** Names the Task folder so a Slot that wanted a scratch file (run 4: `/tmp`) knows where it goes. */
+export function outsideWriteReason(ctx: GuardContext): string {
+  return `Writes are allowed only inside the Workspace and the Task folder; keep working files in ${ctx.taskPath}`;
 }

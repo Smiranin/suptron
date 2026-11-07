@@ -5,6 +5,7 @@ import {
   groupMissions,
   initMissionPage,
   initialMissionsListState,
+  liveRow,
   missionDecorations,
   missionTitle,
   needsYouCount,
@@ -188,6 +189,29 @@ describe('mission page reducer', () => {
     expect(decorations.slots.tester!.state).toBe('pending');
     expect(decorations.loops.reviewer).toEqual({ iterations: 1, limit: 3 });
     expect(decorations.exitLit).toBeNull();
+  });
+
+  it('the clock centre shows the cost of the Core itself, the header the Mission total', () => {
+    const state = ready(
+      play(
+        initMissionPage(runningDetail()),
+        [
+          {
+            type: 'cost.updated',
+            slot: 'core',
+            cost: { usd: 0.5, inputTokens: 500, outputTokens: 50 },
+            missionTotal: { usd: 9, inputTokens: 9000, outputTokens: 900 },
+          },
+        ],
+        12,
+      ),
+    );
+    expect(missionDecorations(state).core.cost).toEqual({
+      usd: 0.5,
+      inputTokens: 500,
+      outputTokens: 50,
+    });
+    expect(state.summary.cost).toMatchObject({ usd: 9, estimated: true });
   });
 
   it('reviewer fails three times: the chord shows 3 of 3, then Needs Attention with the Attention tab and the reviewer failed', () => {
@@ -391,6 +415,97 @@ describe('mission page reducer', () => {
     expect(r.pendingQuestion).toBeUndefined();
     expect(r.panel.tab).toBe('main');
     expect(r.sections.at(-1)!.entries.map((e) => e.kind)).toEqual(['text', 'question', 'answer']);
+    // The answer sends the Commander to the Slot that asked, following it again.
+    expect(r.panel).toMatchObject({
+      selection: { kind: 'slot', name: 'implementer' },
+      follow: true,
+    });
+  });
+
+  it('an answer selects the asking Slot even when another one was pinned', () => {
+    let state: MissionPageState = initMissionPage(waitingDetail());
+    state = reduceMissionPage(state, { type: 'selectSlot', name: 'analyst' });
+    expect(ready(state).panel.follow).toBe(false);
+    state = play(
+      state,
+      [
+        {
+          type: 'question.answered',
+          slot: 'implementer',
+          questionId: ready(state).pendingQuestion!.id,
+          answers: { q: 'a' },
+        },
+      ],
+      ready(state).seq + 1,
+      'm-waiting',
+    );
+    expect(ready(state).panel).toMatchObject({
+      selection: { kind: 'slot', name: 'implementer' },
+      follow: true,
+      tab: 'main',
+    });
+  });
+
+  it('the live row follows the activity of the current Slot and any entry resets it', () => {
+    const detail = runningDetail();
+    let state: MissionPageState = initMissionPage(detail, undefined, 1000);
+    expect(liveRow(ready(state), 5000)).toEqual({ text: 'Working… 4 s', stale: false });
+    state = play(
+      state,
+      [
+        {
+          type: 'agent.activity',
+          slot: 'implementer',
+          payload: { type: 'activity', phase: 'thinking' },
+        },
+      ],
+      12,
+    );
+    // play() stamps now = 1000 + index: the phase began at 1000.
+    expect(ready(state).activity).toMatchObject({
+      slot: 'implementer',
+      phase: 'thinking',
+      since: 1000,
+    });
+    expect(liveRow(ready(state), 25_000)).toEqual({ text: 'Thinking… 24 s', stale: false });
+    state = play(
+      state,
+      [
+        {
+          type: 'agent.activity',
+          slot: 'implementer',
+          payload: { type: 'activity', phase: 'thinking' },
+        },
+        {
+          type: 'agent.activity',
+          slot: 'implementer',
+          payload: { type: 'activity', phase: 'tool', detail: 'Read' },
+        },
+      ],
+      13,
+    );
+    expect(ready(state).activity).toMatchObject({ phase: 'tool', detail: 'Read', since: 1001 });
+    expect(liveRow(ready(state), 3001)).toEqual({ text: 'Running Read… 2 s', stale: false });
+    state = play(
+      state,
+      [{ type: 'agent.text', slot: 'implementer', payload: { type: 'text', text: 'Read it.' } }],
+      15,
+    );
+    expect(ready(state).activity).toBeUndefined();
+    expect(ready(state).lastEventAt).toBe(1000);
+    expect(ready(state).sections.at(-1)!.entries.at(-1)).toMatchObject({
+      kind: 'text',
+      text: 'Read it.',
+    });
+  });
+
+  it('the live row warns after two minutes of silence and hides when the Mission is not running', () => {
+    const state = ready(initMissionPage(runningDetail(), undefined, 1000));
+    expect(liveRow(state, 1000 + 119_999)).toEqual({ text: 'Working… 119 s', stale: false });
+    expect(liveRow(state, 1000 + 120_000)).toEqual({ text: 'No activity for 2 min', stale: true });
+    expect(liveRow(state, 1000 + 185_000)).toEqual({ text: 'No activity for 3 min', stale: true });
+    expect(liveRow(ready(initMissionPage(waitingDetail())), Date.now())).toBeNull();
+    expect(liveRow(ready(initMissionPage(completedDetail())), Date.now())).toBeNull();
   });
 
   it('Completed selects the Mission view and lights the Exit arrow; Stopped shows the note', () => {

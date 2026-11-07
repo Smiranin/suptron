@@ -1,7 +1,9 @@
 import {
+  CORE_SLOT_NAME,
   DEFAULTS,
   executionId,
   isActiveState,
+  ZERO_COST,
   type Cost,
   type ExecutionKey,
   type MissionState,
@@ -113,7 +115,8 @@ export function missionDecorations(state: ReadyMissionState): MissionDecorations
     slots,
     loops,
     exitLit: state.result?.exitSlot ?? null,
-    core: { state: state.summary.state, cost: state.summary.cost },
+    // The centre of the clock is the Core: its own spend, not the Mission total (that is in the header).
+    core: { state: state.summary.state, cost: state.slots[CORE_SLOT_NAME]?.cost ?? ZERO_COST },
   };
 }
 
@@ -131,4 +134,46 @@ export function isCurrentSection(state: ReadyMissionState, section: TranscriptSe
 
 export function totalCost(state: ReadyMissionState): Cost {
   return state.summary.cost;
+}
+
+/** Two minutes without any event: the Commander should know the Pilot may be stuck. */
+export const SILENCE_AFTER_MS = 120_000;
+
+export interface LiveRow {
+  text: string;
+  /** True when nothing arrived for `SILENCE_AFTER_MS`: the row warns instead of reassuring. */
+  stale: boolean;
+}
+
+function seconds(ms: number): string {
+  return `${Math.max(0, Math.floor(ms / 1000))} s`;
+}
+
+/**
+ * The live row under the current Slot's transcript while the Mission runs: what the Pilot is
+ * doing and for how long, or a warning when nothing has arrived for two minutes. Null when the
+ * Mission is not running (waiting for the Commander, Needs Attention, finished).
+ */
+export function liveRow(state: ReadyMissionState, now: number): LiveRow | null {
+  if (state.summary.state !== 'running') return null;
+  const silence = now - state.lastEventAt;
+  if (silence >= SILENCE_AFTER_MS) {
+    return { text: `No activity for ${Math.floor(silence / 60_000)} min`, stale: true };
+  }
+  const activity = state.activity;
+  if (activity === undefined) return { text: `Working… ${seconds(silence)}`, stale: false };
+  const elapsed = seconds(now - activity.since);
+  switch (activity.phase) {
+    case 'thinking':
+      return { text: `Thinking… ${elapsed}`, stale: false };
+    case 'writing':
+      return { text: `Writing… ${elapsed}`, stale: false };
+    case 'tool':
+      return {
+        text: activity.detail
+          ? `Running ${activity.detail}… ${elapsed}`
+          : `Running a tool… ${elapsed}`,
+        stale: false,
+      };
+  }
 }

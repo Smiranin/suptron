@@ -22,7 +22,9 @@ export class EventHub {
   publish(event: MissionEvent): void {
     if (event.type === 'mission.dismissed') {
       this.buffers.delete(event.missionId);
-    } else {
+    } else if (event.type !== 'agent.activity') {
+      // A sign of life is worthless after the fact: never replayed, never crowding the buffer.
+      // (It still takes a seq; a replay simply skips those numbers.)
       const buffer = this.buffers.get(event.missionId) ?? [];
       buffer.push(event);
       if (buffer.length > BUFFER_PER_MISSION) buffer.splice(0, buffer.length - BUFFER_PER_MISSION);

@@ -42,6 +42,7 @@ export function QuestionTab({ state }: { state: ReadyMissionState }) {
     setSending(true);
     try {
       await missionsApi.answer(state.summary.id, pending.id, answers);
+      toast.success(`Answer sent to ${pending.slot}`);
     } catch (error) {
       toast.error(`Could not answer: ${error instanceof Error ? error.message : String(error)}`);
     } finally {

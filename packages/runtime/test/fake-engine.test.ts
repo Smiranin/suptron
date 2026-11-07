@@ -15,6 +15,7 @@ const spec: AgentSpec = {
     writeRoots: ['/tmp'],
     protectedBranch: 'main',
     taskPath: '/tmp',
+    taskDocuments: ['/tmp/task.md'],
     configHome: '/tmp',
   },
 };
@@ -63,9 +64,16 @@ describe('FakeEngine', () => {
 
   it('reuses a resumed session id', async () => {
     const engine = new FakeEngine();
-    const first = engine.createAgent(spec);
-    const id = await first.sessionId;
-    const second = engine.createAgent({ ...spec, resumeSessionId: id });
-    expect(await second.sessionId).toBe(id);
+    const id = await sessionIdOf(engine.createAgent(spec));
+    expect(await sessionIdOf(engine.createAgent({ ...spec, resumeSessionId: id }))).toBe(id);
   });
 });
+
+/** Runs a handle through one empty turn and returns the session id its result reports. */
+async function sessionIdOf(handle: ReturnType<FakeEngine['createAgent']>): Promise<string> {
+  handle.send('go');
+  for await (const event of handle.events()) {
+    if (event.type === 'result') return event.sessionId;
+  }
+  throw new Error('no result');
+}

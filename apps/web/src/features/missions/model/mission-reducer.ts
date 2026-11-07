@@ -69,6 +69,7 @@ function statusFromDetail(detail: MissionDetail): Record<string, SlotVisualState
 export function initMissionPage(
   detail: MissionDetail,
   previous?: MissionPageState,
+  now: number = Date.now(),
 ): ReadyMissionState {
   const prior = previous?.status === 'ready' ? previous : null;
   const keepSelection =
@@ -94,11 +95,16 @@ export function initMissionPage(
     ...(detail.attention && { attention: detail.attention }),
     ...(detail.result && { result: detail.result }),
     loopFiredAt: prior?.loopFiredAt ?? {},
+    lastEventAt: now,
     seq: detail.seq,
     connection: previous?.connection ?? 'connecting',
     panel,
   };
 }
+
+/** The transcript row of a Slot that is done through its Loop's Accept Condition. */
+export const ACCEPTED_AT_LIMIT_NOTE =
+  'Accepted at the Loop limit: the Done Condition still fails, the Accept Condition holds.';
 
 function appendEntry(
   state: ReadyMissionState,
@@ -114,13 +120,39 @@ function appendEntry(
   } as TranscriptEntry;
   const sections = [...state.sections];
   sections[sections.length - 1] = { ...last, entries: [...last.entries, entry] };
-  return { ...state, sections };
+  // A real entry ends whatever the live row was showing.
+  return withoutActivity({ ...state, sections });
+}
+
+function withoutActivity(state: ReadyMissionState): ReadyMissionState {
+  if (state.activity === undefined) return state;
+  const { activity: _dropped, ...rest } = state;
+  void _dropped;
+  return rest;
 }
 
 function applyEvent(state: ReadyMissionState, event: MissionEvent, now: number): ReadyMissionState {
   if (event.seq <= state.seq) return state;
-  const base: ReadyMissionState = { ...state, seq: event.seq };
+  const base: ReadyMissionState = { ...state, seq: event.seq, lastEventAt: now };
   switch (event.type) {
+    case 'agent.activity': {
+      const { phase, detail } = event.payload;
+      const previous = base.activity;
+      const same =
+        previous !== undefined &&
+        previous.slot === event.slot &&
+        previous.phase === phase &&
+        previous.detail === detail;
+      return {
+        ...base,
+        activity: {
+          slot: event.slot,
+          phase,
+          ...(detail !== undefined && { detail }),
+          since: same ? previous.since : now,
+        },
+      };
+    }
     case 'mission.state': {
       const summary = { ...base.summary, state: event.state };
       if (event.state === 'needs_attention') {
@@ -183,7 +215,7 @@ function applyEvent(state: ReadyMissionState, event: MissionEvent, now: number):
           loops: Math.max(from.loops, event.loopIteration ?? from.loops + 1),
         };
       }
-      const { attention: _dropped, ...rest } = base;
+      const { attention: _dropped, ...rest } = withoutActivity(base);
       void _dropped;
       const panel: PanelState = {
         ...base.panel,
@@ -209,7 +241,14 @@ function applyEvent(state: ReadyMissionState, event: MissionEvent, now: number):
       const slots = { ...base.slots };
       const record = slots[event.slot];
       if (record) slots[event.slot] = { ...record, lastOutput: event.output };
-      return { ...base, slots, slotStatus: { ...base.slotStatus, [event.slot]: 'done' } };
+      const next: ReadyMissionState = withoutActivity({
+        ...base,
+        slots,
+        slotStatus: { ...base.slotStatus, [event.slot]: 'done' },
+      });
+      return event.acceptedAtLimit
+        ? appendEntry(next, event, { kind: 'note', text: ACCEPTED_AT_LIMIT_NOTE })
+        : next;
     }
     case 'agent.text':
       return appendEntry(base, event, { kind: 'text', text: event.payload.text });
@@ -290,9 +329,15 @@ function applyEvent(state: ReadyMissionState, event: MissionEvent, now: number):
       });
       const { pendingQuestion: _dropped, ...rest } = next;
       void _dropped;
+      // The Commander wants to see what their answer sets in motion: follow the Slot that asked.
       return {
         ...rest,
-        panel: { ...next.panel, tab: next.panel.tab === 'question' ? 'main' : next.panel.tab },
+        panel: {
+          ...next.panel,
+          tab: next.panel.tab === 'question' ? 'main' : next.panel.tab,
+          selection: { kind: 'slot', name: event.slot },
+          follow: true,
+        },
       };
     }
     case 'cost.updated': {
@@ -309,7 +354,7 @@ function applyEvent(state: ReadyMissionState, event: MissionEvent, now: number):
       const slots = { ...base.slots };
       for (const record of event.slots) slots[record.name] = record;
       return {
-        ...base,
+        ...withoutActivity(base),
         slots,
         summary: {
           ...base.summary,
@@ -324,7 +369,7 @@ function applyEvent(state: ReadyMissionState, event: MissionEvent, now: number):
       };
     }
     case 'mission.stopped': {
-      const { pendingQuestion: _q, attention: _a, ...rest } = base;
+      const { pendingQuestion: _q, attention: _a, ...rest } = withoutActivity(base);
       void _q;
       void _a;
       return {
@@ -350,7 +395,7 @@ export function reduceMissionPage(
 ): MissionPageState {
   switch (action.type) {
     case 'init':
-      return initMissionPage(action.detail, state);
+      return initMissionPage(action.detail, state, action.now);
     case 'absent':
       return { status: 'absent', connection: state.connection };
     case 'connection':

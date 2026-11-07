@@ -57,6 +57,43 @@ describe('sdkMessageToEvents', () => {
     ]);
   });
 
+  it('maps streaming frames and thinking estimates to activity events', () => {
+    const frame = (event: Record<string, unknown>) =>
+      sdkMessageToEvents(message({ type: 'stream_event', parent_tool_use_id: null, event }));
+    expect(
+      frame({ type: 'content_block_start', index: 0, content_block: { type: 'thinking' } }),
+    ).toEqual([{ type: 'activity', phase: 'thinking' }]);
+    expect(
+      frame({ type: 'content_block_start', index: 1, content_block: { type: 'text' } }),
+    ).toEqual([{ type: 'activity', phase: 'writing' }]);
+    expect(
+      frame({
+        type: 'content_block_start',
+        index: 2,
+        content_block: { type: 'tool_use', id: 't', name: 'Read', input: {} },
+      }),
+    ).toEqual([{ type: 'activity', phase: 'tool', detail: 'Read' }]);
+    expect(
+      frame({
+        type: 'content_block_delta',
+        index: 0,
+        delta: { type: 'thinking_delta', thinking: 'x' },
+      }),
+    ).toEqual([{ type: 'activity', phase: 'thinking' }]);
+    expect(frame({ type: 'message_start', message: {} })).toEqual([]);
+    expect(frame({ type: 'content_block_stop', index: 0 })).toEqual([]);
+    expect(
+      sdkMessageToEvents(
+        message({
+          type: 'system',
+          subtype: 'thinking_tokens',
+          estimated_tokens: 120,
+          estimated_tokens_delta: 20,
+        }),
+      ),
+    ).toEqual([{ type: 'activity', phase: 'thinking' }]);
+  });
+
   it('ignores a plain user prompt and system messages', () => {
     expect(
       sdkMessageToEvents(

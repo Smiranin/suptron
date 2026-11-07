@@ -4,6 +4,7 @@ import { Markdown } from '../../../components/markdown';
 import { STATE_LABELS } from '../../../components/state-badge';
 import { CAUSE_LABELS } from '../model/selectors';
 import type { ReadyMissionState } from '../model/types';
+import { LiveRow } from './LiveRow';
 
 export function SlotsTable({ state }: { state: ReadyMissionState }) {
   return (
@@ -55,6 +56,12 @@ export function MissionLevelView({ state }: { state: ReadyMissionState }) {
           <span className="text-muted-foreground text-xs">(estimate)</span>
         </span>
       </div>
+      {summary.currentSlot !== null && summary.state === 'running' && (
+        <div className="border-border flex items-center gap-2 rounded-lg border px-2 py-1">
+          <span className="text-xs font-semibold">{summary.currentSlot}</span>
+          <LiveRow state={state} />
+        </div>
+      )}
       {attention && (
         <section className="border-destructive/40 bg-destructive/5 rounded-lg border p-3">
           <h3 className="m-0 mb-1 text-xs font-bold tracking-wider uppercase">

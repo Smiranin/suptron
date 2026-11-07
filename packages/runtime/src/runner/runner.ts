@@ -48,6 +48,11 @@ export interface MissionMeta {
 
 type Control = { kind: 'stop' } | { kind: 'retry'; note?: string };
 
+interface QueuedQuestion extends PendingQuestion {
+  respond(answers: Answers): void;
+  dismiss(): void;
+}
+
 type SlotExecution =
   { kind: 'output'; output: string } | { kind: 'interrupted' } | { kind: 'error'; message: string };
 
@@ -79,8 +84,12 @@ export class Runner {
   private stopRequested = false;
   private control: Deferred<Control> | null = null;
   private currentHandle: AgentHandle | null = null;
-  private currentQuestion: { id: string; respond(answers: Answers): void; dismiss(): void } | null =
-    null;
+  /**
+   * Questions the Pilot asked and the Commander has not answered, oldest first. A Pilot may ask
+   * several in one turn (parallel tool calls); they are shown one at a time, and the Pilot resumes
+   * when every one of them is answered, so none may be dropped.
+   */
+  private questions: QueuedQuestion[] = [];
   private checkAbort: AbortController | null = null;
   private readonly sessions = new Map<string, string>();
   private readonly slotOutputs = new Map<string, string>();
@@ -153,8 +162,8 @@ export class Runner {
   async stop(): Promise<void> {
     if (this.state === 'stopped' || this.state === 'completed') return;
     this.stopRequested = true;
-    this.currentQuestion?.dismiss();
-    this.currentQuestion = null;
+    for (const question of this.questions) question.dismiss();
+    this.questions = [];
     this.checkAbort?.abort();
     await this.currentHandle?.interrupt();
     await this.deps.core.interrupt();
@@ -177,21 +186,36 @@ export class Runner {
   }
 
   answer(questionId: string, answers: Answers): void {
-    if (!this.currentQuestion || this.currentQuestion.id !== questionId) {
+    const question = this.questions[0];
+    if (!question || question.id !== questionId) {
       throw new MissionStateError('no_such_question', `No pending question ${questionId}`);
     }
-    const question = this.currentQuestion;
-    this.currentQuestion = null;
+    this.questions.shift();
     this.pendingQuestion = undefined;
     question.respond(answers);
     this.deps.emit({
       type: 'question.answered',
       missionId: this.meta.id,
-      slot: this.summary.currentSlot ?? '',
+      slot: question.slot,
       questionId,
       answers,
     });
-    this.setState('running');
+    const next = this.questions[0];
+    if (next) this.present(next);
+    else this.setState('running');
+  }
+
+  /** Shows one queued question to the Commander and waits for them. */
+  private present(question: QueuedQuestion): void {
+    this.pendingQuestion = { id: question.id, slot: question.slot, questions: question.questions };
+    this.deps.emit({
+      type: 'question.asked',
+      missionId: this.meta.id,
+      slot: question.slot,
+      questionId: question.id,
+      questions: question.questions,
+    });
+    this.setState('waiting_for_owner', { slot: question.slot });
   }
 
   // ---- the state machine ----
@@ -259,10 +283,22 @@ export class Runner {
         continue;
       }
 
-      if (done.holds) {
+      // At the Loop limit the Accept Condition may stand in for the Done Condition (plan B).
+      const acceptance = done.holds
+        ? undefined
+        : await this.acceptAtLoopLimit(slot, output, loopCounts.get(slot.name) ?? 0);
+      if (acceptance) record.checkResults = [...done.results, ...acceptance.results];
+
+      if (done.holds || acceptance?.holds) {
         this.slotOutputs.set(slot.name, output);
         record.lastOutput = output;
-        this.deps.emit({ type: 'slot.done', missionId: this.meta.id, slot: slot.name, output });
+        this.deps.emit({
+          type: 'slot.done',
+          missionId: this.meta.id,
+          slot: slot.name,
+          output,
+          ...(acceptance?.holds && { acceptedAtLimit: true }),
+        });
         if (slot.exitPoint) {
           const exit = await this.evaluate(slot, slot.exitCondition, output);
           this.throwIfStopping();
@@ -290,7 +326,7 @@ export class Runner {
         continue;
       }
 
-      const failed = done.results.filter((r) => !r.holds);
+      const failed = [...done.results, ...(acceptance?.results ?? [])].filter((r) => !r.holds);
       if (slot.loop) {
         const count = (loopCounts.get(slot.name) ?? 0) + 1;
         if (count > slot.loop.limit) {
@@ -333,6 +369,25 @@ export class Runner {
     if (this.stopRequested) throw new StopRequested();
   }
 
+  /**
+   * Judges the Loop's Accept Condition when the Loop limit is exhausted and the Done Condition
+   * failed; undefined when the Slot has no Loop, the limit is not reached yet, or the Loop has
+   * no Accept Condition. A timed-out Check never accepts.
+   */
+  private async acceptAtLoopLimit(
+    slot: ResolvedSlot,
+    output: string,
+    loops: number,
+  ): Promise<{ holds: boolean; results: CheckResult[] } | undefined> {
+    const condition = slot.loop?.acceptCondition;
+    if (!slot.loop || !condition || condition.length === 0 || loops < slot.loop.limit) {
+      return undefined;
+    }
+    const accept = await this.evaluate(slot, condition, output);
+    this.throwIfStopping();
+    return { holds: accept.holds && !accept.timedOut, results: accept.results };
+  }
+
   private async executeSlot(
     slot: ResolvedSlot,
     feedback: Feedback | undefined,
@@ -370,6 +425,7 @@ export class Runner {
       ...(resume !== undefined && { resumeSessionId: resume }),
       guard: buildGuard(this.deps.workspace, {
         taskPath: this.meta.taskPath,
+        taskDocuments: this.meta.taskDocuments,
         configHome: this.meta.configHome,
       }),
     });
@@ -383,6 +439,14 @@ export class Runner {
           case 'text':
             this.deps.emit({
               type: 'agent.text',
+              missionId: this.meta.id,
+              slot: slot.name,
+              payload: event,
+            });
+            break;
+          case 'activity':
+            this.deps.emit({
+              type: 'agent.activity',
               missionId: this.meta.id,
               slot: slot.name,
               payload: event,
@@ -418,16 +482,15 @@ export class Runner {
               event.dismiss();
               break;
             }
-            this.currentQuestion = { id: event.id, respond: event.respond, dismiss: event.dismiss };
-            this.pendingQuestion = { id: event.id, slot: slot.name, questions: event.questions };
-            this.deps.emit({
-              type: 'question.asked',
-              missionId: this.meta.id,
+            this.questions.push({
+              id: event.id,
               slot: slot.name,
-              questionId: event.id,
               questions: event.questions,
+              respond: event.respond,
+              dismiss: event.dismiss,
             });
-            this.setState('waiting_for_owner', { slot: slot.name });
+            // A second question while one is pending waits its turn; the Commander sees one at a time.
+            if (this.questions.length === 1) this.present(this.questions[0]!);
             break;
           case 'result':
             output = event.output;
@@ -440,11 +503,15 @@ export class Runner {
       error = errorMessage(caught);
     } finally {
       this.currentHandle = null;
-      this.currentQuestion = null;
+      this.questions = [];
       this.pendingQuestion = undefined;
       await handle.close().catch(() => undefined);
     }
     if (this.stopRequested) return { kind: 'interrupted' };
+    // An empty result is never a Slot Output: judging it would only burn an Attempt on "nothing to judge".
+    if (output !== null && output.trim() === '') {
+      return { kind: 'error', message: 'The Pilot ended without any output' };
+    }
     if (output !== null) return { kind: 'output', output };
     return { kind: 'error', message: error ?? 'The agent ended without a result' };
   }

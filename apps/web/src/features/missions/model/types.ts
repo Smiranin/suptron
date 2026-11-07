@@ -1,4 +1,5 @@
 import type {
+  ActivityPhase,
   AssemblyFile,
   ExecutionKey,
   MissionDetail,
@@ -29,6 +30,14 @@ export interface PanelState {
 
 export type SlotVisualState = 'pending' | 'running' | 'done' | 'failed';
 
+export interface LiveActivity {
+  slot: string;
+  phase: ActivityPhase;
+  detail?: string;
+  /** Date.now() when this phase began; repeated frames of the same phase keep it. */
+  since: number;
+}
+
 export interface ReadyMissionState {
   status: 'ready';
   summary: MissionSummary;
@@ -46,6 +55,10 @@ export interface ReadyMissionState {
   result?: MissionDetail['result'];
   /** Looping Slot → Date.now() of the last firing, for the chord animation. */
   loopFiredAt: Record<string, number>;
+  /** The last sign of life of the current Slot; dropped by the next transcript entry. */
+  activity?: LiveActivity;
+  /** Date.now() of the last event of any kind (init counts), for the "no activity" warning. */
+  lastEventAt: number;
   seq: number;
   connection: LiveStatus;
   panel: PanelState;

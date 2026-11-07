@@ -21,6 +21,10 @@ interface MissionTranscript {
  * Transcripts in memory, one list of sections per Mission: a section opens on every
  * `slot.started`; earlier sections are trimmed to their last entries, counting what was dropped.
  */
+/** Shown in the transcript when a Slot is done through its Loop's Accept Condition. */
+export const ACCEPTED_NOTE =
+  'Accepted at the Loop limit: the Done Condition still fails, the Accept Condition holds.';
+
 export class TranscriptStore {
   private readonly missions = new Map<string, MissionTranscript>();
 
@@ -55,6 +59,9 @@ export class TranscriptStore {
         transcript.sections.push(section);
         return;
       }
+      case 'slot.done':
+        if (event.acceptedAtLimit) return this.append(event, { kind: 'note', text: ACCEPTED_NOTE });
+        return;
       case 'agent.text':
         return this.append(event, { kind: 'text', text: event.payload.text });
       case 'agent.tool_call':

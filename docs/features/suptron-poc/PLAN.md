@@ -44,6 +44,7 @@ External facts the implementer relies on (verified 2026-10-22 against the offici
 - `query({ prompt, options })` returns an async generator of `SDKMessage`. `interrupt()` is available only when `prompt` is an `AsyncIterable<SDKUserMessage>` (streaming-input mode). Every agent we start uses streaming-input mode for that reason.
 - `session_id` is on the `system/init` message and on the `result` message. `options.resume: sessionId` continues a session. `persistSession` defaults to true.
 - The `result` message carries `total_cost_usd`, `usage`, `modelUsage` (per model, includes subagents), `num_turns`, `duration_ms`, `structured_output`.
+  - Verified 2026-11-04 on a resumed session: `total_cost_usd` and `modelUsage` are the running totals of the whole session, not of the call. The Engine subtracts the last total it saw for that session (`SessionCostLedger`) and emits the difference; a server restart empties the ledger, so the first call of a recovered session is charged its running total once more.
 - `AskUserQuestion` reaches the host through `options.canUseTool`; the host answers with `{ behavior: 'allow', updatedInput: { questions, answers } }`. A tool listed in `disallowedTools` is removed from the agent.
 - `options.hooks.PreToolUse` callbacks receive `tool_name` and `tool_input` and may return `{ hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason } }`. Hooks apply even in `bypassPermissions`.
 - `permissionMode: 'bypassPermissions'` requires `allowDangerouslySkipPermissions: true`. `additionalDirectories`, `settingSources`, `env`, `cwd`, `model`, `systemPrompt` (`{ type: 'preset', preset: 'claude_code', append }` or custom string), `outputFormat: { type: 'json_schema', schema }`, `abortController` exist as named.
@@ -132,6 +133,8 @@ Running(i, attempt[i], loopCount[i])
      if i is last:                                       → NeedsAttention(lastExitConditionFailed)
      i = i + 1; feedback = none                          → Running
   else if slot.loop:
+     if loopCount[i] >= slot.loop.limit and slot.loop.acceptCondition and evaluate(slot.loop.acceptCondition):
+        treat as done (slot.done carries acceptedAtLimit: true)   ← added 2026-11-04
      loopCount[i]++ ; if loopCount[i] > slot.loop.limit  → NeedsAttention(loopLimit)
      feedback = loopFeedback(output, failedChecks); i = index(slot.loop.target) → Running
   else:
@@ -273,6 +276,8 @@ Validation (`config/validate-assembly.ts`) returns `{ errors: Issue[]; warnings:
 
 `MissionSnapshot` (`config/snapshot.ts`): `{ profile: ProjectProfile; assembly: { name; core: CoreDirectives; slots: ResolvedSlot[] } }` where `ResolvedSlot` has every Unit field merged (`model`, `rules`, `instructions` = Unit's + Slot's additional, `doneCondition`, `mayAskCommander` after the Mission's toggles, `attemptLimit`, `memoryMode`, `context`, `loop?`, `exitPoint`, `exitCondition`).
 
+The Loop rule is `{ target; limit; acceptCondition? }` (added 2026-11-04). The Accept Condition is judged only when the limit is exhausted and the Done Condition still fails: holding means the Slot is done (the Slot Output is stored, `slot.done` carries `acceptedAtLimit: true`, the Exit Point is checked as usual), failing or absent means Needs Attention `loop_limit` with both failed lists. It lets a review Loop demand "no finding" while the Mission still completes when only non-blocking findings remain at the limit.
+
 ### Engine port (`runtime/src/engine/`)
 
 ```ts
@@ -356,6 +361,7 @@ The Core is one persistent session per Mission (`resumeSessionId`), created from
 ```ts
 type MissionState = 'running' | 'waiting_for_owner' | 'needs_attention' | 'stopped' | 'completed';
 type NeedsAttentionCause = 'attempt_limit' | 'loop_limit' | 'last_exit_condition_failed' | 'ci_timeout' | 'engine_error';
+// engine_error also covers a Pilot that ends with an empty result (amended 2026-11-04): an empty output is never judged by a Check.
 
 interface MissionSummary { id; projectName; assemblyName; taskPath: string; workItemId?: string; state; currentSlot: string | null; workspace: { kind: 'none' | 'folder' | 'repository'; path: string | null; branch: string | null }; startedAt; cost: Cost & { estimated: true }; pr?: PullRequestRef; note?: string }
 // workspace (workspaces, replaces branch and checkoutPath): the Checkout and its current branch (read at start and refreshed after every Slot), the folder, or nothing
@@ -439,9 +445,9 @@ evaluatePath(path: string, mode: 'read' | 'write' | 'create', ctx: GuardContext)
 - gh: `pr ready`, `pr merge`, `pr close`, `repo edit|delete|archive|rename`, `secret *`, `variable *`, `workflow *`, `run rerun|cancel`, `release *`, `api` with a method other than GET whose path contains `/merge`, `/merges`, `/branches/*/protection`, `/actions/`, `/secrets`, `/deployments`, `/hooks`; `api` with method DELETE on any path containing `/git/refs/`; `api graphql` whose input contains `mergePullRequest`, `markPullRequestReadyForReview`, `deleteRef`, `updateRef`, `enablePullRequestAutoMerge`; `pr close --delete-branch` or `pr merge` in any form (the latter is already denied above).
 - A `git`/`gh` command that cannot be tokenized is denied with reason `unparseable`.
 
-`evaluatePath` (workspaces, amended 2026-10-26) resolves a relative path against `ctx.cwd`; inside `ctx.taskPath` a write to an existing file is denied and a new file allowed (FR-27); inside any of `ctx.writeRoots` everything is allowed except writes into a `.git` directory; any other access to `ctx.configHome` is denied (the Task location and the write roots are judged first, because a text Task and a `none` Workspace live in the Mission folder inside it); reads elsewhere are allowed and writes elsewhere denied.
+`evaluatePath` (workspaces, amended 2026-10-26) resolves a relative path against `ctx.cwd`; inside `ctx.taskPath` a write to one of `ctx.taskDocuments` (the Commander's Task documents, listed at Mission start) is denied and any other file allowed, so a Slot may rewrite its own OUTLINE.md (FR-27; amended 2026-11-04 after run 2 of the interview-content scenario); inside any of `ctx.writeRoots` everything is allowed except writes into a `.git` directory; any other access to `ctx.configHome` is denied (the Task location and the write roots are judged first, because a text Task and a `none` Workspace live in the Mission folder inside it); reads elsewhere are allowed and writes elsewhere denied.
 
-The policy is enforced twice: in the Engine's PreToolUse hook for `Bash`, `Edit`, `Write`, `MultiEdit`, `NotebookEdit`, and by the `git`/`gh` shims on `PATH`, which read `ctx` from environment variables (`SUPTRON_GUARD_CWD`, `SUPTRON_GUARD_WRITE_ROOTS` joined with the PATH delimiter, `SUPTRON_GUARD_PROTECTED_BRANCH` (empty for null), `SUPTRON_GUARD_TASK`, `SUPTRON_GUARD_CONFIG_HOME`, `SUPTRON_REAL_GIT`, `SUPTRON_REAL_GH`; the shim is active when `SUPTRON_GUARD_CONFIG_HOME` is set) and `exec` the real binary when allowed.
+The policy is enforced twice: in the Engine's PreToolUse hook for `Bash`, `Edit`, `Write`, `MultiEdit`, `NotebookEdit`, and by the `git`/`gh` shims on `PATH`, which read `ctx` from environment variables (`SUPTRON_GUARD_CWD`, `SUPTRON_GUARD_WRITE_ROOTS` joined with the PATH delimiter, `SUPTRON_GUARD_PROTECTED_BRANCH` (empty for null), `SUPTRON_GUARD_TASK`, `SUPTRON_GUARD_TASK_DOCUMENTS` joined with the PATH delimiter, `SUPTRON_GUARD_CONFIG_HOME`, `SUPTRON_REAL_GIT`, `SUPTRON_REAL_GH`; the shim is active when `SUPTRON_GUARD_CONFIG_HOME` is set) and `exec` the real binary when allowed.
 
 ## Testing Strategy
 

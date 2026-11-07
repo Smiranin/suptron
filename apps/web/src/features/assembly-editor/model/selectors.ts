@@ -1,5 +1,6 @@
 import {
   DEFAULTS,
+  defaultMemoryMode,
   resolveCore,
   resolveSlot,
   summarizeCondition,
@@ -59,16 +60,17 @@ export function effectiveSlot(doc: AssemblyFile, slot: SlotFile, units: UnitInde
   const unit = units.get(slot.unit);
   const core = resolveCore(doc.core);
   const index = doc.slots.findIndex((s) => s.name === slot.name);
+  const mayAskCommander = pick(
+    slot.mayAskCommander,
+    unit?.mayAskCommander,
+    DEFAULTS.unit.mayAskCommander,
+  );
   return {
     model: pick(slot.model, unit?.model, ''),
     instructions: pick(slot.instructions, undefined, ''),
     doneCondition: pick(slot.doneCondition, unit?.doneCondition, []),
-    mayAskCommander: pick(
-      slot.mayAskCommander,
-      unit?.mayAskCommander,
-      DEFAULTS.unit.mayAskCommander,
-    ),
-    memoryMode: pick(slot.memoryMode, undefined, DEFAULTS.slot.memoryMode),
+    mayAskCommander,
+    memoryMode: pick(slot.memoryMode, undefined, defaultMemoryMode(mayAskCommander.value)),
     attemptLimit: pick(slot.attemptLimit, undefined, core.defaultAttemptLimit),
     resolved: unit ? resolveSlot(slot, unit, core, index === doc.slots.length - 1) : null,
   };

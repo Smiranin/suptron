@@ -107,6 +107,7 @@ export function guardEnv(ctx: GuardContext): Record<string, string> {
     SUPTRON_GUARD_WRITE_ROOTS: ctx.writeRoots.join(delimiter),
     SUPTRON_GUARD_PROTECTED_BRANCH: ctx.protectedBranch ?? '',
     SUPTRON_GUARD_TASK: ctx.taskPath,
+    SUPTRON_GUARD_TASK_DOCUMENTS: ctx.taskDocuments.join(delimiter),
     SUPTRON_GUARD_CONFIG_HOME: ctx.configHome,
   };
 }
@@ -119,6 +120,9 @@ export function guardFromEnv(env: NodeJS.ProcessEnv): GuardContext | null {
     writeRoots: (env.SUPTRON_GUARD_WRITE_ROOTS ?? '').split(delimiter).filter((r) => r !== ''),
     protectedBranch: env.SUPTRON_GUARD_PROTECTED_BRANCH || null,
     taskPath: env.SUPTRON_GUARD_TASK ?? '',
+    taskDocuments: (env.SUPTRON_GUARD_TASK_DOCUMENTS ?? '')
+      .split(delimiter)
+      .filter((d) => d !== ''),
     configHome: env.SUPTRON_GUARD_CONFIG_HOME,
   };
 }

@@ -13,6 +13,7 @@ import {
   type MissionEvent,
   type MissionTask,
   type ProfileFile,
+  type Question,
   type UnitFile,
 } from '../src/index.js';
 import {
@@ -345,6 +346,72 @@ describe('Runner scenarios', () => {
     await h.registry.stop(id);
   });
 
+  it('accepts the Slot at the Loop limit when the Accept Condition holds', async () => {
+    h = await harness(
+      [unit('impl', [PASS]), unit('rev', [FAIL])],
+      [
+        linear([
+          { name: 'impl', unit: 'impl', memoryMode: 'persistent' },
+          { name: 'rev', unit: 'rev', loop: { target: 'impl', limit: 3, acceptCondition: [PASS] } },
+        ]),
+      ],
+    );
+    const id = await h.start();
+    await h.waitFor((es) => es.some((e) => e.type === 'mission.completed'));
+    const done = h.events.find((e) => e.type === 'slot.done' && e.slot === 'rev');
+    expect(done).toMatchObject({ slot: 'rev', output: 'rev output', acceptedAtLimit: true });
+    const record = h.registry.get(id)!.slots.find((s) => s.name === 'rev')!;
+    expect(record.loops).toBe(3);
+    expect(record.lastOutput).toBe('rev output');
+    // The Done Condition's failure and the Accept Condition's pass both land in the record.
+    expect(record.checkResults.map((r) => r.holds)).toEqual([false, true]);
+    expect(h.registry.get(id)?.result?.exitSlot).toBe('rev');
+    // Before the limit the Accept Condition is never judged: three Loops, four reviews.
+    expect(h.events.filter((e) => e.type === 'slot.started' && e.slot === 'rev')).toHaveLength(4);
+    expect(h.events.filter((e) => e.type === 'check.evaluated' && e.slot === 'rev')).toHaveLength(
+      5,
+    );
+  });
+
+  it('reports loop_limit with both failed lists when the Accept Condition fails too', async () => {
+    h = await harness(
+      [unit('impl', [PASS]), unit('rev', [FAIL])],
+      [
+        linear([
+          { name: 'impl', unit: 'impl' },
+          { name: 'rev', unit: 'rev', loop: { target: 'impl', limit: 1, acceptCondition: [FAIL] } },
+        ]),
+      ],
+    );
+    const id = await h.start();
+    await h.waitForState(id, 'needs_attention');
+    const state = h.events.find(
+      (e) => e.type === 'mission.state' && e.state === 'needs_attention',
+    )!;
+    expect(state).toMatchObject({ cause: 'loop_limit', slot: 'rev' });
+    expect(state.type === 'mission.state' && state.failedChecks).toHaveLength(2);
+    expect(h.events.some((e) => e.type === 'slot.done' && e.slot === 'rev')).toBe(false);
+    await h.registry.stop(id);
+  });
+
+  it('forwards a sign of life as agent.activity without a transcript entry', async () => {
+    h = await harness([unit('a', [PASS])], [linear([{ name: 'a', unit: 'a' }])]);
+    h.engine.script('pilot', 'a', [
+      { activity: { phase: 'thinking' } },
+      { activity: { phase: 'tool', detail: 'Read' } },
+      { text: 'done' },
+      { result: { output: 'ok' } },
+    ]);
+    await h.start();
+    await h.waitFor((es) => es.some((e) => e.type === 'mission.completed'));
+    const activity = h.events.filter((e) => e.type === 'agent.activity');
+    expect(activity.map((e) => (e.type === 'agent.activity' ? e.payload : null))).toEqual([
+      { type: 'activity', phase: 'thinking' },
+      { type: 'activity', phase: 'tool', detail: 'Read' },
+    ]);
+    expect(activity.every((e) => e.type === 'agent.activity' && e.slot === 'a')).toBe(true);
+  });
+
   it('leaves early through an Exit Point whose Exit Condition holds', async () => {
     h = await harness(
       [unit('a', [PASS]), unit('b', [PASS])],
@@ -608,6 +675,57 @@ describe('Runner scenarios', () => {
     await h.waitFor((es) => es.some((e) => e.type === 'mission.completed'));
     expect(h.registry.get(id)?.summary.pr).toEqual({ number: pr.number, url: pr.url });
     expect(h.registry.get(id)?.result?.pr).toEqual({ number: pr.number, url: pr.url });
+  });
+
+  it('shows questions asked at once one at a time and loses none of them', async () => {
+    h = await harness(
+      [unit('a', [PASS], { mayAskCommander: true })],
+      [linear([{ name: 'a', unit: 'a' }])],
+    );
+    const q = (text: string): Question => ({
+      question: text,
+      header: 'h',
+      options: [{ label: 'yes', description: '' }],
+      multiSelect: false,
+    });
+    h.engine.script('pilot', 'a', [
+      { questionsAtOnce: [[q('first?')], [q('second?')]] },
+      { result: { output: 'a done' } },
+    ]);
+    const id = await h.start();
+    await h.waitForState(id, 'waiting_for_owner');
+    const first = h.registry.get(id)?.pendingQuestion;
+    expect(first?.questions[0]?.question).toBe('first?');
+    const asked = () => h!.events.filter((e) => e.type === 'question.asked');
+    expect(asked()).toHaveLength(1);
+    h.registry.answer(id, first!.id, { 'first?': 'yes' });
+    // The second question is shown right away; the Mission never went back to running.
+    const second = h.registry.get(id)?.pendingQuestion;
+    expect(second?.questions[0]?.question).toBe('second?');
+    expect(h.registry.get(id)?.summary.state).toBe('waiting_for_owner');
+    expect(asked()).toHaveLength(2);
+    expect(() => h!.registry.answer(id, first!.id, {})).toThrow(MissionStateError);
+    h.registry.answer(id, second!.id, { 'second?': 'yes' });
+    await h.waitFor((es) => es.some((e) => e.type === 'mission.completed'));
+    expect(h.engine.callsFor('pilot', 'a')[0]?.answers).toEqual([
+      { 'first?': 'yes' },
+      { 'second?': 'yes' },
+    ]);
+  });
+
+  it('treats an empty Pilot result as an Engine error, not as a failed Check', async () => {
+    h = await harness([unit('a', [PASS])], [linear([{ name: 'a', unit: 'a' }])]);
+    h.engine.script('pilot', 'a', (call) =>
+      call.index === 0 ? [{ result: { output: '  \n' } }] : [{ result: { output: 'ok' } }],
+    );
+    const id = await h.start();
+    await h.waitForState(id, 'needs_attention');
+    expect(h.registry.get(id)?.attention).toMatchObject({ cause: 'engine_error', slot: 'a' });
+    expect(h.registry.get(id)?.attention?.reason).toContain('without any output');
+    const slotA = h.registry.get(id)?.slots.find((s) => s.name === 'a');
+    expect(slotA?.checkResults).toEqual([]);
+    h.registry.retry(id);
+    await h.waitFor((es) => es.some((e) => e.type === 'mission.completed'));
   });
 
   it('goes to Needs Attention on an Engine error and on a malformed Core output', async () => {

@@ -181,7 +181,7 @@ export function NoteEntry({ entry }: { entry: Extract<TranscriptEntry, { kind: '
     <div className={cn(ROW, 'bg-warning/10 flex items-start gap-2')} data-entry="note">
       <StickyNote aria-hidden="true" className="text-warning mt-0.5 size-4 shrink-0" />
       <div>
-        <div className="text-warning text-xs font-semibold tracking-wider uppercase">Your note</div>
+        <div className="text-warning text-xs font-semibold tracking-wider uppercase">Note</div>
         <p className="m-0 whitespace-pre-wrap">{entry.text}</p>
       </div>
     </div>

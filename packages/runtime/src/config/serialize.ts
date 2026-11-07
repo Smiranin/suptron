@@ -81,6 +81,7 @@ function plainSlot(slot: SlotFile, isLast: boolean): Plain {
   if (slot.loop) {
     const loop: Plain = { target: slot.loop.target };
     put(loop, 'limit', slot.loop.limit);
+    put(loop, 'acceptCondition', plainCondition(slot.loop.acceptCondition));
     out.loop = loop;
   }
   // The last Slot always states exitPoint: true so the file reads unambiguously.

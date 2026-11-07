@@ -1,6 +1,7 @@
 import {
   CONTEXT_SOURCE_REQUIREMENTS,
   DEFAULTS,
+  defaultMemoryMode,
   missingCapabilities,
   summarizeCondition,
   type AssemblyFile,
@@ -163,7 +164,9 @@ function SlotInspector({
               onValueChange={(v) =>
                 patch({
                   memoryMode:
-                    v === DEFAULTS.slot.memoryMode ? undefined : (v as SlotFile['memoryMode']),
+                    v === defaultMemoryMode(effective.mayAskCommander.value)
+                      ? undefined
+                      : (v as SlotFile['memoryMode']),
                 })
               }
             >
@@ -175,6 +178,12 @@ function SlotInspector({
                 <SelectItem value="persistent">persistent (keeps its session)</SelectItem>
               </SelectContent>
             </Select>
+            <p className="text-muted-foreground text-xs">
+              Default: {defaultMemoryMode(effective.mayAskCommander.value)}
+              {effective.mayAskCommander.value
+                ? ' (a Slot that may ask the Commander keeps its session)'
+                : ''}
+            </p>
           </div>
           <OverrideField
             label="May ask the Commander"
@@ -294,7 +303,11 @@ function SlotInspector({
                       loop:
                         v === '__none__'
                           ? null
-                          : { target: v, limit: slot.loop?.limit ?? defaultLoopLimit },
+                          : {
+                              target: v,
+                              limit: slot.loop?.limit ?? defaultLoopLimit,
+                              acceptCondition: slot.loop?.acceptCondition ?? [],
+                            },
                     })
                   }
                 >
@@ -334,9 +347,33 @@ function SlotInspector({
                           loop: {
                             target: slot.loop!.target,
                             limit: Number.isFinite(n) && n > 0 ? n : defaultLoopLimit,
+                            acceptCondition: slot.loop!.acceptCondition ?? [],
                           },
                         });
                       }}
+                    />
+                  </div>
+                  <div className="flex flex-col gap-1">
+                    <Label>At the limit, accept when</Label>
+                    <p className="text-muted-foreground text-xs">
+                      Judged only when the limit is exhausted and the Done Condition still fails.
+                      When it holds the Slot counts as done; empty means Needs Attention.
+                    </p>
+                    <CheckListEditor
+                      value={slot.loop.acceptCondition ?? []}
+                      onChange={(acceptCondition: Check[]) =>
+                        dispatch({
+                          type: 'setLoop',
+                          name: slot.name,
+                          loop: {
+                            target: slot.loop!.target,
+                            limit: slot.loop!.limit ?? defaultLoopLimit,
+                            acceptCondition,
+                          },
+                        })
+                      }
+                      label="Accept Condition"
+                      capabilities={capabilities}
                     />
                   </div>
                   <Button

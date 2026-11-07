@@ -340,6 +340,7 @@ export class MissionRegistry {
       guard: buildGuard(workspace, {
         cwd: taskIsFile ? resolve(taskPath, '..') : taskPath,
         taskPath,
+        taskDocuments,
         configHome: this.deps.home,
       }),
       onCost: (cost) => entry.runner?.addCoreCost(cost),

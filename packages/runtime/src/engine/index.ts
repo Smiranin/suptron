@@ -1,5 +1,6 @@
 import type { Cost } from '../domain/cost.js';
 import type { Answers, Question } from '../domain/transcript.js';
+import type { ActivityPhase } from '../events/mission-event.js';
 
 export interface ModelInfo {
   id: string;
@@ -17,6 +18,11 @@ export interface GuardContext {
   /** null when the Workspace knows no protected branch; the branch Laws are then skipped. */
   protectedBranch: string | null;
   taskPath: string;
+  /**
+   * The Commander's Task documents, absolute: the only files under the Task location the Laws
+   * refuse to overwrite. Anything a Slot writes next to them stays editable (SPEC FR-27).
+   */
+  taskDocuments: readonly string[];
   configHome: string;
 }
 
@@ -43,6 +49,8 @@ export interface AgentSpec {
 
 export type AgentEvent =
   | { type: 'text'; text: string }
+  /** A sign of life while the model thinks, writes or calls a tool; never part of the transcript. */
+  | { type: 'activity'; phase: ActivityPhase; detail?: string }
   | { type: 'tool_call'; id: string; name: string; input: unknown }
   | { type: 'tool_result'; toolCallId: string; output: string; isError: boolean }
   | {
@@ -56,7 +64,6 @@ export type AgentEvent =
   | { type: 'error'; message: string };
 
 export interface AgentHandle {
-  readonly sessionId: Promise<string>;
   /** One user turn; the handle supports exactly one turn per Slot execution. */
   send(prompt: string): void;
   events(): AsyncIterable<AgentEvent>;

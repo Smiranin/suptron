@@ -64,11 +64,14 @@ describe('openWorkspace', () => {
       expect(ws.summary.branch).toBe('feature/x');
       deps.host.seedPullRequest('feature/x');
       expect(await ws.pullRequest()).toMatchObject({ number: 1 });
-      expect(buildGuard(ws, { taskPath: '/t', configHome: '/h' })).toEqual({
+      expect(
+        buildGuard(ws, { taskPath: '/t', taskDocuments: ['/t/SPEC.md'], configHome: '/h' }),
+      ).toEqual({
         cwd: clone,
         writeRoots: [clone],
         protectedBranch: 'main',
         taskPath: '/t',
+        taskDocuments: ['/t/SPEC.md'],
         configHome: '/h',
       });
       await repo.git(['checkout', '-q', 'main']);
@@ -156,7 +159,9 @@ describe('openWorkspace', () => {
       expect(ws.fragment).toContain(missionDir());
       expect(ws.protectedBranch).toBeNull();
       expect(await ws.changeSummary()).toBeNull();
-      expect(buildGuard(ws, { cwd: '/task', taskPath: '/task', configHome: '/h' })).toMatchObject({
+      expect(
+        buildGuard(ws, { cwd: '/task', taskPath: '/task', taskDocuments: [], configHome: '/h' }),
+      ).toMatchObject({
         cwd: '/task',
         writeRoots: [missionDir()],
         protectedBranch: null,

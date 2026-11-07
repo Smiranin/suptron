@@ -39,6 +39,7 @@ export {
 export * from './workspace/kinds.js';
 export { referencesToSlot, uniqueSlotName, type SlotReference } from './config/slot-names.js';
 export {
+  defaultMemoryMode,
   resolveCore,
   resolveSlot,
   type CoreDirectives,

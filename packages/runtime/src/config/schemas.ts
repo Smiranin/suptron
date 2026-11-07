@@ -143,6 +143,12 @@ export type SlotContextFile = z.infer<typeof slotContextSchema>;
 export const loopRuleSchema = z.object({
   target: z.string().min(1),
   limit: z.number().int().positive().default(DEFAULTS.loopLimit),
+  /**
+   * Judged once the limit is exhausted and the Done Condition still fails: when it holds the
+   * Slot counts as done (the Mission moves on), otherwise the Loop limit is a Needs Attention as
+   * before. Empty or absent keeps today's behaviour.
+   */
+  acceptCondition: conditionSchema.optional(),
 });
 
 export type LoopRule = z.infer<typeof loopRuleSchema>;

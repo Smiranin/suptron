@@ -95,6 +95,30 @@ describe('reduce', () => {
     expect(removed.slots[4]?.loop).toBeUndefined();
   });
 
+  it('setLoop keeps a non-empty Accept Condition and drops an empty one', () => {
+    const accept = [{ kind: 'llm_judgment' as const, criterion: 'Nothing blocking remains.' }];
+    const doc = run({
+      type: 'setLoop',
+      name: 'publisher',
+      loop: { target: 'implementer', limit: 2, acceptCondition: accept },
+    });
+    expect(doc.slots[4]?.loop).toEqual({
+      target: 'implementer',
+      limit: 2,
+      acceptCondition: accept,
+    });
+    const cleared = reduce(
+      doc,
+      {
+        type: 'setLoop',
+        name: 'publisher',
+        loop: { target: 'implementer', limit: 2, acceptCondition: [] },
+      },
+      ctx,
+    );
+    expect(cleared.slots[4]?.loop).toEqual({ target: 'implementer', limit: 2 });
+  });
+
   it('patchCore and replaceDoc', () => {
     expect(run({ type: 'patchCore', patch: { model: 'sonnet' } }).core.model).toBe('sonnet');
     const other = { ...primaryAssembly(), name: 'other' };

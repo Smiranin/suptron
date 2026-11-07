@@ -1,5 +1,7 @@
+import { isAbsolute, resolve } from 'node:path';
 import { parse as parseShell } from 'shell-quote';
 import type { GuardContext } from '../engine/index.js';
+import { evaluatePath } from './paths.js';
 
 export type Verdict = { allowed: true } | { allowed: false; reason: string };
 
@@ -12,6 +14,18 @@ const allow: Verdict = { allowed: true };
 const deny = (reason: string): Verdict => ({ allowed: false, reason });
 
 const SEPARATORS = new Set(['&&', '||', ';', '|', '&', '(', ')', ';;']);
+const REDIRECTIONS = new Set(['>', '>>', '<', '2>', '&>', '<<', '<<<']);
+/** Output redirections: the token after them is a file the command writes. */
+const OUTPUT_REDIRECTIONS = new Set(['>', '>>', '&>']);
+/** Programs whose positional arguments (the last one for cp/mv) are files or folders they create. */
+const CREATING_PROGRAMS: Record<string, 'all' | 'last'> = {
+  mkdir: 'all',
+  touch: 'all',
+  tee: 'all',
+  cp: 'last',
+  mv: 'last',
+};
+const DEVICE_PATHS = new Set(['/dev/null', '/dev/stdout', '/dev/stderr', '/dev/tty']);
 const WRAPPERS = new Set(['env', 'command', 'exec', 'nice', 'time', 'sudo', 'nohup', 'xargs']);
 const ENV_ASSIGNMENT = /^[A-Za-z_][A-Za-z0-9_]*=/;
 
@@ -52,14 +66,8 @@ export function splitCommands(command: string): string[][] | null {
       if (SEPARATORS.has(token.op)) {
         if (current.length > 0) commands.push(current);
         current = [];
-      } else if (
-        token.op === '>' ||
-        token.op === '>>' ||
-        token.op === '<' ||
-        token.op === '2>' ||
-        token.op === '&>'
-      ) {
-        // Redirection: the next token is a file, not an argument we care about.
+      } else if (REDIRECTIONS.has(token.op)) {
+        // Redirection: the next token is a file (or a heredoc delimiter), not an argument.
         current.push(token.op);
       } else {
         return null;
@@ -341,15 +349,40 @@ function evaluateGh(args: string[]): Verdict {
   return allow;
 }
 
+/** The files a simple command writes: output redirection targets and what creating programs make. */
+function writeTargets(program: string, args: string[]): string[] {
+  const targets: string[] = [];
+  const positional: string[] = [];
+  for (let i = 0; i < args.length; i++) {
+    const token = args[i]!;
+    if (REDIRECTIONS.has(token)) {
+      // The token after a redirection is its file, never an argument of the program.
+      const file = args[i + 1];
+      if (OUTPUT_REDIRECTIONS.has(token) && file !== undefined) targets.push(file);
+      i++;
+    } else if (!token.startsWith('-')) {
+      positional.push(token);
+    }
+  }
+  const rule = CREATING_PROGRAMS[program];
+  if (rule === 'all') targets.push(...positional);
+  else if (rule === 'last' && positional.length >= 2) targets.push(positional.at(-1)!);
+  return targets.filter((t) => !DEVICE_PATHS.has(t));
+}
+
 /**
  * Evaluates one shell command line against the Laws: every simple command whose program is
- * `git` or `gh` (by basename, so `/usr/bin/git` counts) is inspected; anything else is allowed.
+ * `git` or `gh` (by basename, so `/usr/bin/git` counts) is inspected, and every file a command
+ * writes (an output redirection, `mkdir`, `touch`, `tee`, the destination of `cp`/`mv`) must lie
+ * inside the Workspace or the Task folder, like a Write tool call. `cd` moves the directory the
+ * later commands of the line resolve against. Anything else is allowed.
  */
 export function evaluateCommand(command: string, ctx: CommandContext): Verdict {
   const commands = splitCommands(command);
   if (commands === null) {
     return /\bg(it|h)\b/.test(command) ? deny('unparseable') : allow;
   }
+  let cwd = ctx.cwd;
   for (const argv of commands) {
     const parsed = programOf(argv);
     if (!parsed) continue;
@@ -359,6 +392,16 @@ export function evaluateCommand(command: string, ctx: CommandContext): Verdict {
     } else if (parsed.program === 'gh') {
       const verdict = evaluateGh(parsed.args);
       if (!verdict.allowed) return verdict;
+    } else if (parsed.program === 'cd') {
+      const target = parsed.args.find((a) => !a.startsWith('-'));
+      cwd = target === undefined ? ctx.cwd : resolve(cwd, target);
+    }
+    for (const target of writeTargets(parsed.program, parsed.args)) {
+      const path = isAbsolute(target) ? target : resolve(cwd, target);
+      const verdict = evaluatePath(path, 'create', { ...ctx, cwd });
+      if (!verdict.allowed) {
+        return deny(`${verdict.reason ?? 'Write refused'} (${path})`);
+      }
     }
   }
   return allow;

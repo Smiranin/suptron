@@ -2,6 +2,7 @@ import {
   DEFAULTS,
   uniqueSlotName,
   type AssemblyFile,
+  type Check,
   type CoreDirectivesFile,
   type SlotFile,
 } from '@suptron/runtime/browser';
@@ -12,9 +13,16 @@ export type Command =
   | { type: 'removeSlot'; name: string }
   | { type: 'renameSlot'; name: string; newName: string }
   | { type: 'patchSlot'; name: string; patch: Partial<Omit<SlotFile, 'name' | 'unit'>> }
-  | { type: 'setLoop'; name: string; loop: { target: string; limit: number } | null }
+  | { type: 'setLoop'; name: string; loop: LoopPatch | null }
   | { type: 'patchCore'; patch: Partial<CoreDirectivesFile> }
   | { type: 'replaceDoc'; doc: AssemblyFile };
+
+/** The Loop rule as the editor sets it; an empty Accept Condition is dropped from the file. */
+export interface LoopPatch {
+  target: string;
+  limit: number;
+  acceptCondition?: Check[];
+}
 
 export interface ReduceContext {
   defaultLoopLimit: number;
@@ -130,11 +138,13 @@ export function reduce(doc: AssemblyFile, cmd: Command, ctx: ReduceContext): Ass
       const slots = doc.slots.map((s) => {
         if (s.name !== cmd.name) return s;
         if (cmd.loop === null) return without(s, 'loop');
+        const acceptCondition = cmd.loop.acceptCondition ?? [];
         return {
           ...s,
           loop: {
             target: cmd.loop.target,
             limit: cmd.loop.limit || ctx.defaultLoopLimit || DEFAULTS.loopLimit,
+            ...(acceptCondition.length > 0 && { acceptCondition }),
           },
         };
       });

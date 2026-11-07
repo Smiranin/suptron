@@ -1,5 +1,6 @@
 import type { Cost } from '../domain/cost.js';
 import type { Answers, Question } from '../domain/transcript.js';
+import type { ActivityPhase } from '../events/mission-event.js';
 import type {
   AgentEvent,
   AgentHandle,
@@ -12,11 +13,15 @@ import { exec } from '../process/exec.js';
 
 export type FakeStep =
   | { text: string }
+  /** A sign of life (thinking, writing, a tool) with no transcript entry. */
+  | { activity: { phase: ActivityPhase; detail?: string } }
   | { toolCall: { name: string; input: unknown }; result?: { output: string; isError?: boolean } }
   /** Runs a shell command in the agent's cwd (to make real commits in a temp repository). */
   | { shell: string }
   /** Asks the Commander and waits for the answer. */
   | { question: Question[] }
+  /** Asks several questions at once, as parallel tool calls do, and waits for every answer. */
+  | { questionsAtOnce: Question[][] }
   | { result: { output?: string; structured?: unknown; cost?: Partial<Cost> } }
   | { error: string }
   | { delay: number }
@@ -97,21 +102,16 @@ class Interrupted extends Error {
 }
 
 class FakeAgentHandle implements AgentHandle {
-  private readonly session = new Deferred<string>();
   private prompt: string | null = null;
   private pending: Deferred<void> | null = null;
   private interrupted = false;
   private readonly abort = new AbortController();
-  readonly sessionId: Promise<string>;
 
   constructor(
     private readonly engine: FakeEngine,
     private readonly spec: AgentSpec,
     private readonly sessionIdValue: string,
-  ) {
-    this.sessionId = this.session.promise;
-    this.session.resolve(sessionIdValue);
-  }
+  ) {}
 
   send(prompt: string): void {
     this.prompt = prompt;
@@ -146,6 +146,8 @@ class FakeAgentHandle implements AgentHandle {
         if (this.interrupted) break;
         if ('text' in step) {
           yield { type: 'text', text: step.text };
+        } else if ('activity' in step) {
+          yield { type: 'activity', ...step.activity };
         } else if ('toolCall' in step) {
           const id = `tool-${this.engine.nextId()}`;
           yield { type: 'tool_call', id, name: step.toolCall.name, input: step.toolCall.input };
@@ -194,6 +196,25 @@ class FakeAgentHandle implements AgentHandle {
           };
           await pending.promise;
           this.pending = null;
+        } else if ('questionsAtOnce' in step) {
+          const pendings = step.questionsAtOnce.map(() => new Deferred<void>());
+          for (const [index, questions] of step.questionsAtOnce.entries()) {
+            const pending = pendings[index]!;
+            yield {
+              type: 'question',
+              id: `q-${this.engine.nextId()}`,
+              questions,
+              respond: (answers) => {
+                call.answers.push(answers);
+                pending.resolve();
+              },
+              dismiss: () => {
+                call.dismissed = true;
+                pending.reject(new Interrupted());
+              },
+            };
+          }
+          await Promise.all(pendings.map((p) => p.promise));
         } else if ('result' in step) {
           yield {
             type: 'result',

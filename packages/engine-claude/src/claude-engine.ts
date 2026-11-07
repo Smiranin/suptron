@@ -18,8 +18,10 @@ import type {
   Question,
 } from '@suptron/runtime';
 import { AsyncQueue, Deferred, withTimeout } from './async-queue.js';
+import { ActivityThrottle } from './activity.js';
 import { sdkMessageToEvents } from './events.js';
 import { lawsHooks } from './hooks.js';
+import { SessionCostLedger } from './session-costs.js';
 import { guardEnv, installShims } from './shim.js';
 
 export const FALLBACK_MODELS: ModelInfo[] = [
@@ -29,6 +31,60 @@ export const FALLBACK_MODELS: ModelInfo[] = [
 ];
 
 const ASK_USER_QUESTION = 'AskUserQuestion';
+/** The sub-agent tool of Claude Code; `run_in_background: true` detaches it from the turn. */
+const AGENT_TOOL = 'Agent';
+
+/**
+ * Appended to every Pilot's system prompt. A reply without a tool call ends the SDK query, and
+ * with it every background sub-agent; the runtime cannot wait for work the Pilot detached.
+ */
+export const SLOT_END_PROMPT = `## How a Slot ends
+
+Your reply without a tool call ends the Slot: nothing runs after it, and background work
+dies with it. Never run a sub-agent in the background; one that blocks until it returns is
+fine. Finish the work first, then end with the report your instructions ask for.`;
+
+/**
+ * Appended to a Pilot's system prompt when its Slot may ask the Commander. The tool and its
+ * limits are the engine's business: a Unit says "ask the Commander", the engine says how, so
+ * no Unit has to know which tool this engine routes to the Commander.
+ */
+export const COMMANDER_CHANNEL_PROMPT = `## Reaching the Commander
+
+The Commander reads nothing you write: the only way to ask them anything is the
+${ASK_USER_QUESTION} tool. Call it and wait for the answers. One call takes up to four
+questions; when you need more, make the next call only after the answers to the
+previous one have arrived, never two calls at once. Give every question two to four
+options with your recommended answer first; the Commander may also type a free answer.
+Never end your turn with a question in your output: it reaches nobody, and the Slot is
+judged on what you produced.`;
+
+/**
+ * The system text of an agent: its Rules, then its Instructions, then, for a Pilot, how a Slot
+ * ends and, when it may ask the Commander, how to reach them. The Core gets neither.
+ */
+export function systemText(
+  spec: Pick<AgentSpec, 'role' | 'systemPrompt' | 'allowQuestions'>,
+): string {
+  const parts = [spec.systemPrompt.rules.trim(), spec.systemPrompt.instructions.trim()];
+  if (spec.role === 'pilot') {
+    parts.push(SLOT_END_PROMPT);
+    if (spec.allowQuestions) parts.push(COMMANDER_CHANNEL_PROMPT);
+  }
+  return parts.join('\n\n');
+}
+
+/**
+ * The reason a tool call is refused before the Laws see it, or null. Only one case so far: a
+ * sub-agent detached into the background, which the end of the Slot would kill unseen.
+ */
+export function toolRefusal(toolName: string, input: Record<string, unknown>): string | null {
+  if (toolName === AGENT_TOOL && input.run_in_background === true) {
+    return 'Background sub-agents are not allowed: the Slot ends with your final message and background work is lost. Run the sub-agent in the foreground and wait for its result.';
+  }
+  return null;
+}
+
 /** The Core answers in one or two turns; a few more cover structured-output retries. */
 const CORE_MAX_TURNS = 6;
 const HEALTH_TIMEOUT_MS = 60_000;
@@ -65,20 +121,18 @@ class ClaudeAgentHandle implements AgentHandle {
   private readonly out = new AsyncQueue<AgentEvent>();
   private readonly prompt = new Deferred<string>();
   private readonly inputDone = new Deferred<void>();
-  private readonly session = new Deferred<string>();
   private readonly abort = new AbortController();
   private active: Query | null = null;
   private started = false;
   private interrupted = false;
   private stderrTail = '';
-  readonly sessionId: Promise<string>;
+  private readonly activity = new ActivityThrottle();
 
   constructor(
     private readonly spec: AgentSpec,
     private readonly engineOptions: ClaudeEngineOptions,
-  ) {
-    this.sessionId = this.session.promise;
-  }
+    private readonly costs: SessionCostLedger,
+  ) {}
 
   send(prompt: string): void {
     this.prompt.resolve(prompt);
@@ -111,8 +165,6 @@ class ClaudeAgentHandle implements AgentHandle {
     this.inputDone.resolve();
     this.abort.abort();
     this.out.close();
-    if (!this.session.isSettled)
-      this.session.reject(new Error('The agent ended before a session id was known'));
   }
 
   /** Streaming-input mode: exactly one user turn, then the iterable stays open until the result. */
@@ -126,6 +178,8 @@ class ClaudeAgentHandle implements AgentHandle {
     toolName: string,
     input: Record<string, unknown>,
   ): Promise<PermissionResult> => {
+    const refusal = toolRefusal(toolName, input);
+    if (refusal !== null) return { behavior: 'deny', message: refusal };
     if (toolName !== ASK_USER_QUESTION) return { behavior: 'allow', updatedInput: input };
     return new Promise<PermissionResult>((resolve) => {
       this.out.push({
@@ -151,6 +205,8 @@ class ClaudeAgentHandle implements AgentHandle {
       additionalDirectories: spec.additionalDirectories,
       env,
       abortController: this.abort,
+      // Streaming frames feed the activity events (signs of life between transcript entries).
+      includePartialMessages: true,
       persistSession: true,
       settingSources: ['project'],
       hooks: { PreToolUse: lawsHooks(spec.guard, spec.cwd) },
@@ -163,16 +219,16 @@ class ClaudeAgentHandle implements AgentHandle {
         pathToClaudeCodeExecutable: this.engineOptions.pathToClaudeCodeExecutable,
       }),
     };
-    const systemText = `${spec.systemPrompt.rules.trim()}\n\n${spec.systemPrompt.instructions.trim()}`;
+    const text = systemText(spec);
     if (spec.role === 'pilot') {
-      options.systemPrompt = { type: 'preset', preset: 'claude_code', append: systemText };
+      options.systemPrompt = { type: 'preset', preset: 'claude_code', append: text };
       // Not bypassPermissions: that mode auto-approves before canUseTool is consulted, so a
       // Pilot's AskUserQuestion would never reach the Commander. acceptEdits auto-approves file
       // edits and routes everything else through canUseTool, which allows all but questions.
       options.permissionMode = 'acceptEdits';
       if (!spec.allowQuestions) options.disallowedTools = [ASK_USER_QUESTION];
     } else {
-      options.systemPrompt = systemText;
+      options.systemPrompt = text;
       options.tools = [];
       options.disallowedTools = [ASK_USER_QUESTION];
       options.maxTurns = CORE_MAX_TURNS;
@@ -182,6 +238,13 @@ class ClaudeAgentHandle implements AgentHandle {
     return options;
   }
 
+  /** The SDK reports the session's running total; the Engine reports the cost of this call. */
+  private withCallCost(event: AgentEvent): AgentEvent {
+    if (event.type !== 'result') return event;
+    const cost = this.costs.costOfCall(this.spec.resumeSessionId, event.sessionId, event.cost);
+    return { ...event, cost };
+  }
+
   private async pump(): Promise<void> {
     try {
       const options = await this.buildOptions();
@@ -189,14 +252,10 @@ class ClaudeAgentHandle implements AgentHandle {
       this.active = active;
       for await (const message of active as AsyncIterable<SDKMessage>) {
         if (this.interrupted) break;
-        if (
-          'session_id' in message &&
-          typeof message.session_id === 'string' &&
-          message.session_id
-        ) {
-          this.session.resolve(message.session_id);
+        for (const event of sdkMessageToEvents(message)) {
+          const passed = this.activity.pass(event);
+          if (passed !== null) this.out.push(this.withCallCost(passed));
         }
-        for (const event of sdkMessageToEvents(message)) this.out.push(event);
         if (message.type === 'result') break;
       }
     } catch (error) {
@@ -215,10 +274,13 @@ class ClaudeAgentHandle implements AgentHandle {
 
 /** The Engine on the Claude Agent SDK; the only place the SDK is imported. */
 export class ClaudeEngine implements Engine {
+  /** Shared by every handle: a resumed session's total was reported by an earlier handle. */
+  private readonly costs = new SessionCostLedger();
+
   constructor(private readonly options: ClaudeEngineOptions = {}) {}
 
   createAgent(spec: AgentSpec): AgentHandle {
-    return new ClaudeAgentHandle(spec, this.options);
+    return new ClaudeAgentHandle(spec, this.options, this.costs);
   }
 
   private baseOptions(abort: AbortController): Options {

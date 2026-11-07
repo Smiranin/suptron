@@ -32,6 +32,7 @@ describe('git/gh shims', () => {
     writeRoots: [repo.clonePath, join(home, 'missions', 'm1')],
     protectedBranch,
     taskPath: join(home, 'task'),
+    taskDocuments: [join(home, 'task', 'SPEC.md')],
     configHome: home,
   });
   const env = (protectedBranch: string | null = 'main') => ({

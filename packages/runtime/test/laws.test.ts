@@ -6,6 +6,7 @@ const ctx: CommandContext = {
   writeRoots: ['/work/repo'],
   protectedBranch: 'main',
   taskPath: '/work/tasks/t1',
+  taskDocuments: ['/work/tasks/t1/SPEC.md'],
   configHome: '/home/me/.suptron',
   currentBranch: 'feature/x',
 };
@@ -130,6 +131,23 @@ const commandTable: [command: string, context: CommandContext, allowed: boolean]
   // unrelated commands
   ['pnpm test', onMain, true],
   ['ls -la', onMain, true],
+  // files a command writes must lie inside the Workspace or the Task folder (run 4 wrote to /tmp)
+  ['cat > notes.md', ctx, true],
+  ['echo x > /work/repo/out.txt', ctx, true],
+  ['python3 gen.py > /work/tasks/t1/cards.md', ctx, true],
+  ['mkdir -p /work/tasks/t1/gen && touch /work/tasks/t1/gen/a.py', ctx, true],
+  ['pnpm test 2>/dev/null', ctx, true],
+  ["cat > /tmp/rs/datemap.py <<'PY'\nprint(1)\nPY", ctx, false],
+  ['mkdir -p /tmp/rs', ctx, false],
+  ['cd /tmp/rs && cat > pass1.py', ctx, false],
+  ['cd /work/tasks/t1 && cat > pass1.py', ctx, true],
+  ['git diff --name-only > /tmp/dojo_new.txt', ctx, false],
+  ['tee /tmp/a < x', ctx, false],
+  ['cp a.md /tmp/b.md', ctx, false],
+  ['cp /tmp/b.md a.md', ctx, true],
+  ['mv a.md /work/repo/b.md', ctx, true],
+  ['echo x >> /home/me/.suptron/hangar/x.md', ctx, false],
+  ['echo x > /work/repo/.git/config', ctx, false],
 ];
 
 describe('evaluateCommand', () => {
@@ -147,6 +165,15 @@ describe('evaluateCommand', () => {
     expect(verdict.allowed).toBe(false);
     if (!verdict.allowed) expect(verdict.reason).toContain('protected branch');
   });
+
+  it('names the Task folder and the offending path when a command writes outside', () => {
+    const verdict = evaluateCommand('cd /tmp/rs && cat > pass1.py', ctx);
+    expect(verdict.allowed).toBe(false);
+    if (!verdict.allowed) {
+      expect(verdict.reason).toContain('/work/tasks/t1');
+      expect(verdict.reason).toContain('/tmp/rs/pass1.py');
+    }
+  });
 });
 
 const pathTable: [path: string, mode: 'read' | 'write' | 'create', allowed: boolean][] = [
@@ -158,6 +185,8 @@ const pathTable: [path: string, mode: 'read' | 'write' | 'create', allowed: bool
   ['/work/tasks/t1/SPEC.md', 'read', true],
   ['/work/tasks/t1/SPEC.md', 'write', false],
   ['/work/tasks/t1/answers.md', 'create', true],
+  // a file a Slot wrote next to the Task is its own to rewrite (FR-27 protects the Commander's)
+  ['/work/tasks/t1/OUTLINE.md', 'write', true],
   ['/home/me/.suptron/hangar/analyst.md', 'read', false],
   ['/home/me/.suptron/hangar/analyst.md', 'write', false],
   ['/etc/hosts', 'write', false],
@@ -169,6 +198,11 @@ const pathTable: [path: string, mode: 'read' | 'write' | 'create', allowed: bool
 describe('evaluatePath', () => {
   it.each(pathTable)('%s (%s) → %s', (path, mode, allowed) => {
     expect(evaluatePath(path, mode, ctx).allowed).toBe(allowed);
+  });
+
+  it('names the Task folder as the place for working files', () => {
+    const verdict = evaluatePath('/tmp/x', 'create', ctx);
+    expect(verdict).toEqual({ allowed: false, reason: expect.stringContaining('/work/tasks/t1') });
   });
 });
 
@@ -192,6 +226,7 @@ describe('evaluatePath with the Mission folder as the write root (kind none)', (
     cwd: '/home/me/.suptron/missions/m1',
     writeRoots: ['/home/me/.suptron/missions/m1'],
     taskPath: '/work/tasks/t1',
+    taskDocuments: ['/work/tasks/t1/SPEC.md'],
     protectedBranch: null,
   };
   it.each([
@@ -208,11 +243,16 @@ describe('evaluatePath with the Mission folder as the write root (kind none)', (
 });
 
 describe('evaluatePath with a text Task stored in the configuration home', () => {
-  const textTask: CommandContext = { ...ctx, taskPath: '/home/me/.suptron/missions/m1' };
+  const textTask: CommandContext = {
+    ...ctx,
+    taskPath: '/home/me/.suptron/missions/m1',
+    taskDocuments: ['/home/me/.suptron/missions/m1/task.md'],
+  };
   it.each([
     ['/home/me/.suptron/missions/m1/task.md', 'read', true],
     ['/home/me/.suptron/missions/m1/task.md', 'write', false],
     ['/home/me/.suptron/missions/m1/notes.md', 'create', true],
+    ['/home/me/.suptron/missions/m1/OUTLINE.md', 'write', true],
     ['/home/me/.suptron/missions/active.json', 'read', false],
     ['/home/me/.suptron/hangar/analyst.md', 'read', false],
   ] as [string, 'read' | 'write' | 'create', boolean][])('%s (%s) → %s', (path, mode, allowed) => {
@@ -235,6 +275,7 @@ describe('evaluatePath with symlinked roots', () => {
       cwd: link,
       writeRoots: [link],
       taskPath: join(root, 'task'),
+      taskDocuments: [join(root, 'task', 'SPEC.md')],
       configHome: join(root, 'home'),
     };
     expect(evaluatePath(join(real, 'new.txt'), 'create', linked).allowed).toBe(true);

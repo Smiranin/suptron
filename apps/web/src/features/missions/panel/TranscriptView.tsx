@@ -6,6 +6,7 @@ import type { Dispatch } from 'react';
 import { isCurrentSection, sectionsOf } from '../model/selectors';
 import type { MissionPageAction, ReadyMissionState } from '../model/types';
 import { Entry } from './entries';
+import { LiveRow } from './LiveRow';
 import { useAutoScroll } from './useAutoScroll';
 
 function ExecutionSection({
@@ -13,11 +14,13 @@ function ExecutionSection({
   open,
   current,
   onToggle,
+  state,
 }: {
   section: TranscriptSection;
   open: boolean;
   current: boolean;
   onToggle: () => void;
+  state: ReadyMissionState;
 }) {
   const title = sectionTitle(section.execution);
   return (
@@ -58,9 +61,10 @@ function ExecutionSection({
           {section.entries.map((entry) => (
             <Entry key={entry.id} entry={entry} />
           ))}
-          {section.entries.length === 0 && section.dropped === 0 && (
+          {section.entries.length === 0 && section.dropped === 0 && !current && (
             <p className="text-muted-foreground m-0 px-3 py-2 text-xs italic">Nothing yet.</p>
           )}
+          {current && <LiveRow state={state} />}
         </div>
       )}
     </section>
@@ -79,7 +83,9 @@ export function TranscriptView({
 }) {
   const sections = sectionsOf(state, slot);
   const lastEntryId = sections.at(-1)?.entries.at(-1)?.id ?? null;
-  const { ref, following, follow } = useAutoScroll(`${sections.length}:${lastEntryId}`);
+  const { ref, following, follow } = useAutoScroll(
+    `${sections.length}:${lastEntryId}:${state.activity?.phase ?? ''}`,
+  );
   if (state.transcriptLost) {
     return (
       <p className="text-muted-foreground p-4 text-sm" data-testid="transcript-lost">
@@ -104,6 +110,7 @@ export function TranscriptView({
               current={current}
               open={current || state.panel.expanded.has(id)}
               onToggle={() => dispatch({ type: 'toggleSection', executionId: id })}
+              state={state}
             />
           );
         })}

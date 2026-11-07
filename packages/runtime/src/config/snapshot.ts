@@ -70,6 +70,7 @@ export function resolveSlot(
   toggles: MayAskToggles = {},
 ): ResolvedSlot {
   const additional = slot.instructions?.trim();
+  const mayAskCommander = toggles[slot.name] ?? slot.mayAskCommander ?? unit.mayAskCommander;
   const resolved: ResolvedSlot = {
     name: slot.name,
     unit: slot.unit,
@@ -77,9 +78,9 @@ export function resolveSlot(
     rules: unit.rules,
     instructions: additional ? `${unit.instructions.trim()}\n\n${additional}` : unit.instructions,
     doneCondition: [...(slot.doneCondition ?? unit.doneCondition)],
-    mayAskCommander: toggles[slot.name] ?? slot.mayAskCommander ?? unit.mayAskCommander,
+    mayAskCommander,
     attemptLimit: slot.attemptLimit ?? core.defaultAttemptLimit,
-    memoryMode: slot.memoryMode ?? DEFAULTS.slot.memoryMode,
+    memoryMode: slot.memoryMode ?? defaultMemoryMode(mayAskCommander),
     context: {
       taskDocuments: slot.context?.taskDocuments ?? DEFAULTS.slot.context.taskDocuments,
       knowledgeSources: slot.context?.knowledgeSources ?? DEFAULTS.slot.context.knowledgeSources,
@@ -90,9 +91,24 @@ export function resolveSlot(
     exitCondition: [...(slot.exitCondition ?? [])],
   };
   if (slot.loop) {
-    resolved.loop = { target: slot.loop.target, limit: slot.loop.limit ?? core.defaultLoopLimit };
+    resolved.loop = {
+      target: slot.loop.target,
+      limit: slot.loop.limit ?? core.defaultLoopLimit,
+      ...(slot.loop.acceptCondition &&
+        slot.loop.acceptCondition.length > 0 && {
+          acceptCondition: [...slot.loop.acceptCondition],
+        }),
+    };
   }
   return resolved;
+}
+
+/**
+ * A Slot that may ask the Commander keeps its session by default: a second Attempt must never
+ * restart an interview from zero (the planner of run 1). An explicit `memoryMode` still wins.
+ */
+export function defaultMemoryMode(mayAskCommander: boolean): MemoryMode {
+  return mayAskCommander ? 'persistent' : DEFAULTS.slot.memoryMode;
 }
 
 export function resolveCore(core: CoreDirectivesFile): CoreDirectives {

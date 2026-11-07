@@ -190,6 +190,8 @@ interface MissionDetail {
 
 `mission.state` for `waiting_for_owner` carries `slot`. `agent.*` and `check.evaluated` are unchanged; both server and client attach them to the execution opened by the last `slot.started` of that Mission.
 
+Added 2026-11-04 (interview scenario, plan F): `{ type: 'agent.activity'; missionId; seq; slot; payload: { type: 'activity'; phase: 'thinking' | 'writing' | 'tool'; detail?: string } }`. The Engine reads the SDK's streaming frames (`includePartialMessages`) and the CLI's thinking estimates, throttled to a phase change or one event per second. It is a sign of life, not a transcript entry: the server's `TranscriptStore` ignores it and the `EventHub` never buffers it. The client keeps `activity` (slot, phase, detail, since) and `lastEventAt` in `MissionPageState`; the `liveRow` selector renders "Thinking… 24 s", "Writing…", "Running Read…", or "No activity for 2 min" after `SILENCE_AFTER_MS` without any event, under the current section of the transcript and on the Mission-level view. Any transcript entry drops `activity`. `question.answered` now also selects the asking Slot with `follow: true`, and the Question tab shows a toast "Answer sent to <slot>".
+
 ### HTTP and SSE contract changes (`apps/server`, `docs/api.md`)
 
 ```
@@ -254,7 +256,7 @@ type MissionPageAction =
 function reduceMissionPage(state, action): MissionPageState;
 // Invariants: event.seq <= state.seq is ignored; slot.started opens a section, sets current, and moves the selection when follow;
 // question.asked sets tab 'question'; mission.state needs_attention sets tab 'attention'; mission.completed sets selection 'mission' and follow false;
-// question.answered / retry clear their tab back to 'main'.
+// question.answered / retry clear their tab back to 'main'; question.answered also selects the asking Slot with follow true (2026-11-04).
 ```
 
 ### Clock decorations (`apps/web/src/features/missions/model/selectors.ts`, consumed by `features/clock`)

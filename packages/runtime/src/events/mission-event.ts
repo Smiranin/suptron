@@ -9,8 +9,12 @@ import type {
 } from '../domain/mission.js';
 import type { Answers, Question } from '../domain/transcript.js';
 
+/** What the agent is doing between two transcript entries; `detail` names the tool when `phase` is 'tool'. */
+export type ActivityPhase = 'thinking' | 'writing' | 'tool';
+
 export type AgentPayload =
   | { type: 'text'; text: string }
+  | { type: 'activity'; phase: ActivityPhase; detail?: string }
   | { type: 'tool_call'; id: string; name: string; input: unknown }
   | { type: 'tool_result'; toolCallId: string; output: string; isError: boolean }
   | { type: 'error'; message: string };
@@ -41,7 +45,15 @@ export type MissionEvent =
       loopFrom?: string;
       note?: string;
     }
-  | { type: 'slot.done'; missionId: string; seq: number; slot: string; output: string }
+  | {
+      type: 'slot.done';
+      missionId: string;
+      seq: number;
+      slot: string;
+      output: string;
+      /** The Done Condition failed at the Loop limit but the Accept Condition held. */
+      acceptedAtLimit?: true;
+    }
   | {
       type: 'agent.text';
       missionId: string;
@@ -69,6 +81,17 @@ export type MissionEvent =
       seq: number;
       slot: string;
       payload: Extract<AgentPayload, { type: 'error' }>;
+    }
+  /**
+   * A sign of life between two transcript entries (the model thinks, writes or runs a tool).
+   * Ephemeral: not a transcript entry, not kept by the server's stores, not replayed.
+   */
+  | {
+      type: 'agent.activity';
+      missionId: string;
+      seq: number;
+      slot: string;
+      payload: Extract<AgentPayload, { type: 'activity' }>;
     }
   | {
       type: 'check.evaluated';

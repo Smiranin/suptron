@@ -8,6 +8,7 @@ import {
   DEFAULTS,
   assemblyFileSchema,
   buildSnapshot,
+  defaultMemoryMode,
   findUnitUsage,
   loadConfig,
   parseUnitMarkdown,
@@ -189,7 +190,11 @@ describe('buildSnapshot', () => {
           instructions: 'Also check the docs.',
           doneCondition: [{ kind: 'command', command: 'pnpm lint' }],
           attemptLimit: 5,
-          loop: { target: 'analyst', limit: 2 },
+          loop: {
+            target: 'analyst',
+            limit: 2,
+            acceptCondition: [{ kind: 'llm_judgment', criterion: 'Nothing blocking remains.' }],
+          },
         },
       ],
     });
@@ -206,9 +211,34 @@ describe('buildSnapshot', () => {
     expect(reviewer!.instructions).toMatch(/^Review the diff[\s\S]*Also check the docs\.$/);
     expect(reviewer!.doneCondition).toEqual([{ kind: 'command', command: 'pnpm lint' }]);
     expect(reviewer!.attemptLimit).toBe(5);
-    expect(reviewer!.loop).toEqual({ target: 'analyst', limit: 2 });
+    expect(reviewer!.loop).toEqual({
+      target: 'analyst',
+      limit: 2,
+      acceptCondition: [{ kind: 'llm_judgment', criterion: 'Nothing blocking remains.' }],
+    });
     expect(reviewer!.exitPoint).toBe(true);
     expect(Object.isFrozen(snapshot.assembly.slots)).toBe(true);
+  });
+});
+
+describe('buildSnapshot memory default', () => {
+  it('keeps the session of a Slot that may ask the Commander unless the file says otherwise', () => {
+    const doc = assembly({
+      slots: [
+        { name: 'analyst', unit: 'analyst' },
+        { name: 'analyst-fresh', unit: 'analyst', memoryMode: 'fresh' },
+        { name: 'reviewer', unit: 'reviewer' },
+      ],
+    });
+    const asks = buildSnapshot(primaryProfile('/repo'), doc, primaryUnits(), { analyst: true });
+    const [analyst, analystFresh, reviewer] = asks.assembly.slots;
+    expect(analyst!.mayAskCommander).toBe(true);
+    expect(analyst!.memoryMode).toBe('persistent');
+    expect(analystFresh!.memoryMode).toBe('fresh');
+    expect(reviewer!.mayAskCommander).toBe(false);
+    expect(reviewer!.memoryMode).toBe('fresh');
+    expect(defaultMemoryMode(true)).toBe('persistent');
+    expect(defaultMemoryMode(false)).toBe(DEFAULTS.slot.memoryMode);
   });
 });
 
@@ -309,7 +339,11 @@ describe('serialize round-trips', () => {
           context: { knowledgeSources: false, gitConventions: true, slotOutputs: ['analyst'] },
           doneCondition: [],
           attemptLimit: 1,
-          loop: { target: 'analyst', limit: 2 },
+          loop: {
+            target: 'analyst',
+            limit: 2,
+            acceptCondition: [{ kind: 'llm_judgment', criterion: 'nothing blocking' }],
+          },
           exitPoint: true,
           exitCondition: [{ kind: 'llm_judgment', criterion: 'ok' }],
         },
@@ -319,6 +353,7 @@ describe('serialize round-trips', () => {
     const reparsed = assemblyFileSchema.parse(parse(text));
     expect(reparsed).toEqual(doc);
     expect(text).toContain('exitPoint: true');
+    expect(text).toContain('acceptCondition');
     expect(text).not.toContain('memoryMode: fresh');
   });
 

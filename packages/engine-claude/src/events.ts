@@ -1,5 +1,5 @@
 import type { SDKMessage, SDKResultMessage } from '@anthropic-ai/claude-agent-sdk';
-import type { AgentEvent, Cost } from '@suptron/runtime';
+import type { ActivityPhase, AgentEvent, Cost } from '@suptron/runtime';
 
 /** The content block shapes we read; structural so the Anthropic SDK types are not imported. */
 interface ContentBlock {
@@ -64,9 +64,56 @@ export function costOfResult(result: SDKResultMessage): Cost {
   };
 }
 
+/** The streaming frames we read for signs of life; structural, like `ContentBlock`. */
+interface StreamFrame {
+  type: string;
+  content_block?: { type: string; name?: string };
+  delta?: { type: string };
+}
+
+/** The phase a streaming frame reveals, or null for frames that say nothing about it. */
+function activityOf(frame: StreamFrame): Extract<AgentEvent, { type: 'activity' }> | null {
+  if (frame.type === 'content_block_start' && frame.content_block) {
+    const block = frame.content_block;
+    if (block.type === 'thinking' || block.type === 'redacted_thinking') {
+      return { type: 'activity', phase: 'thinking' };
+    }
+    if (block.type === 'text') return { type: 'activity', phase: 'writing' };
+    if (block.type === 'tool_use') {
+      return {
+        type: 'activity',
+        phase: 'tool',
+        ...(block.name !== undefined && { detail: block.name }),
+      };
+    }
+    return null;
+  }
+  if (frame.type === 'content_block_delta' && frame.delta) {
+    const phase: ActivityPhase | null =
+      frame.delta.type === 'thinking_delta'
+        ? 'thinking'
+        : frame.delta.type === 'text_delta'
+          ? 'writing'
+          : frame.delta.type === 'input_json_delta'
+            ? 'tool'
+            : null;
+    return phase === null ? null : { type: 'activity', phase };
+  }
+  return null;
+}
+
 /** Maps one SDK message to zero or more AgentEvents. Messages we do not show yield nothing. */
 export function sdkMessageToEvents(message: SDKMessage): AgentEvent[] {
   switch (message.type) {
+    case 'stream_event': {
+      // Only with `includePartialMessages`: a frame per content block and per delta.
+      const activity = activityOf(message.event as unknown as StreamFrame);
+      return activity ? [activity] : [];
+    }
+    case 'system': {
+      // The CLI estimates thinking progress while the model thinks (no stream frame yet).
+      return message.subtype === 'thinking_tokens' ? [{ type: 'activity', phase: 'thinking' }] : [];
+    }
     case 'assistant': {
       const events: AgentEvent[] = [];
       for (const block of blocksOf(message.message.content)) {

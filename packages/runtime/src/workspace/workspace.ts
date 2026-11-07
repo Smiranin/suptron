@@ -87,6 +87,7 @@ export interface GuardLocations {
   /** Defaults to the Workspace's working directory; the Core runs in the Task folder instead. */
   cwd?: string;
   taskPath: string;
+  taskDocuments: readonly string[];
   configHome: string;
 }
 
@@ -97,6 +98,7 @@ export function buildGuard(workspace: Workspace, locations: GuardLocations): Gua
     writeRoots: [...workspace.writeRoots],
     protectedBranch: workspace.protectedBranch,
     taskPath: locations.taskPath,
+    taskDocuments: [...locations.taskDocuments],
     configHome: locations.configHome,
   };
 }

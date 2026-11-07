@@ -121,6 +121,12 @@ export function validateAssembly(
       errors.push(
         ...unavailableChecks(slot.name, doneCondition, 'doneCondition', capabilities),
         ...unavailableChecks(slot.name, slot.exitCondition ?? [], 'exitCondition', capabilities),
+        ...unavailableChecks(
+          slot.name,
+          slot.loop?.acceptCondition ?? [],
+          'loop.acceptCondition',
+          capabilities,
+        ),
         ...unavailableContextSources(slot.name, slot.context ?? {}, capabilities),
       );
     }
@@ -148,7 +154,7 @@ export function validateAssembly(
 function unavailableChecks(
   slotName: string,
   condition: readonly Check[],
-  field: 'doneCondition' | 'exitCondition',
+  field: 'doneCondition' | 'exitCondition' | 'loop.acceptCondition',
   capabilities: ReadonlySet<Capability>,
 ): Issue[] {
   return condition.flatMap((check, index) => {

@@ -11,6 +11,7 @@ import {
   projectRelDir,
   serializeAssembly,
   serializeProfile,
+  titleSchema,
   validateAssembly,
   type Capability,
   type LoadedAssembly,
@@ -24,7 +25,7 @@ import type { ServerContext } from '../context.js';
 import { badRequest, fail, notFound } from '../errors.js';
 import { checkPrecondition, putWithPreconditions } from './put-semantics.js';
 
-const duplicateSchema = z.object({ newName: nameSchema });
+const duplicateSchema = z.object({ newName: nameSchema, newTitle: titleSchema });
 const createProjectSchema = z.object({ profile: profileFileSchema });
 
 function validUnits(config: LoadedConfig): UnitFile[] {
@@ -39,6 +40,7 @@ function capabilities(project: LoadedProject): ReadonlySet<Capability> | null {
 export function registerProjectRoutes(app: FastifyInstance, ctx: ServerContext): void {
   const assemblyItem = (project: string, a: LoadedAssembly) => ({
     name: a.name,
+    title: a.assembly?.title,
     status: a.status,
     issues: a.issues,
     activeMissions: ctx.usage.assembly(project, a.name),
@@ -269,7 +271,7 @@ export function registerProjectRoutes(app: FastifyInstance, ctx: ServerContext):
       if (!project || !assembly?.assembly) return notFound(reply, 'Assembly');
       if (project.assemblies.some((a) => a.name === body.data.newName))
         return fail(reply, 409, { reason: 'name_taken' });
-      const copy = { ...assembly.assembly, name: body.data.newName };
+      const copy = { ...assembly.assembly, name: body.data.newName, title: body.data.newTitle };
       const written = await ctx.writer.writeIfMatch(
         assemblyRelPath(project.name, copy.name),
         serializeAssembly(copy),

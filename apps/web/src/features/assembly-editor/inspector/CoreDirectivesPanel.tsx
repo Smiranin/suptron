@@ -1,11 +1,13 @@
 import { DEFAULTS, type AssemblyFile } from '@suptron/runtime/browser';
 import { Input } from '@suptron/ui/components/input';
 import { Label } from '@suptron/ui/components/label';
+import { CollapsibleSection } from '../../../components/collapsible-section';
 import { MarkdownField } from '../../../components/markdown-field';
 import { ModelSelect } from '../../../components/model-select';
+import { PromptPreview, PromptPreviewButton } from '../../../components/prompt-preview-dialog';
 import type { Command } from '../model/reducer';
 
-/** The Core Directives: model, limits and the free-text instructions (FR-19). */
+/** The Assembly's title, then the Core Directives: model, limits and the free-text instructions (FR-19). */
 export function CoreDirectivesPanel({
   doc,
   dispatch,
@@ -26,6 +28,19 @@ export function CoreDirectivesPanel({
   };
   return (
     <div className="flex flex-col gap-4" data-testid="core-panel">
+      <h2 className="text-lg font-bold">Assembly</h2>
+      <div className="flex flex-col gap-1">
+        <Label htmlFor="assembly-title">Title</Label>
+        <Input
+          id="assembly-title"
+          value={doc.title ?? ''}
+          placeholder={doc.name}
+          onChange={(e) => dispatch({ type: 'setTitle', title: e.target.value })}
+        />
+        <p className="text-muted-foreground text-xs">
+          ID <code>{doc.name}</code> is fixed: Missions refer to it.
+        </p>
+      </div>
       <h2 className="text-lg font-bold">Core Directives</h2>
       <div className="flex flex-col gap-1">
         <Label htmlFor="core-model">Core model</Label>
@@ -57,15 +72,25 @@ export function CoreDirectivesPanel({
           />
         </div>
       </div>
+      <CollapsibleSection title="Built-in directives">
+        <PromptPreview request={{ role: 'core', instructions: '' }} />
+      </CollapsibleSection>
       <div className="flex flex-col gap-1">
-        <Label htmlFor="core-instructions">Instructions</Label>
+        <Label htmlFor="core-instructions">Additional Instructions</Label>
         <p className="text-muted-foreground text-xs">
-          How to compose context, judge Checks, when to go to Needs Attention and how to report.
+          Appended to the built-in directives: how to compose context, judge Checks, when to go to
+          Needs Attention and how to report in this Assembly.
         </p>
         <MarkdownField
           id="core-instructions"
           value={core.instructions ?? ''}
           onChange={(e) => dispatch({ type: 'patchCore', patch: { instructions: e.target.value } })}
+        />
+      </div>
+      <div>
+        <PromptPreviewButton
+          title="Prompt of the Core"
+          request={{ role: 'core', instructions: core.instructions ?? '' }}
         />
       </div>
     </div>

@@ -3,6 +3,7 @@ import {
   nameSchema,
   parseUnitMarkdown,
   serializeUnit,
+  titleSchema,
   unitFileSchema,
   unitRelPath,
   type LoadedUnit,
@@ -13,7 +14,7 @@ import type { ServerContext } from '../context.js';
 import { badRequest, fail, notFound } from '../errors.js';
 import { checkPrecondition, putWithPreconditions } from './put-semantics.js';
 
-const duplicateSchema = z.object({ newName: nameSchema });
+const duplicateSchema = z.object({ newName: nameSchema, newTitle: titleSchema });
 
 function item(unit: LoadedUnit) {
   return { name: unit.name, unit: unit.unit, etag: unit.etag, issues: unit.issues };
@@ -83,7 +84,7 @@ export function registerUnitRoutes(app: FastifyInstance, ctx: ServerContext): vo
     if (!unit?.unit) return notFound(reply, 'Unit');
     if (config.units.some((u) => u.name === body.data.newName))
       return fail(reply, 409, { reason: 'name_taken' });
-    const copy = { ...unit.unit, name: body.data.newName };
+    const copy = { ...unit.unit, name: body.data.newName, title: body.data.newTitle };
     const written = await ctx.writer.writeIfMatch(unitRelPath(copy.name), serializeUnit(copy), {
       create: true,
     });

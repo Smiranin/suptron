@@ -6,6 +6,7 @@ import { useState } from 'react';
 import { InUseError, NameTakenError } from '../../api/client';
 import { api, useHealth, useInvalidateConfig } from '../../api/queries';
 import type { AssemblyItem } from '../../api/types';
+import type { TitleId } from '../../components/title-id-fields';
 import { ConfirmDialog } from '../../components/confirm-dialog';
 import { NamePromptDialog } from '../../components/name-prompt-dialog';
 import { OpenInEditorButton } from '../../components/open-in-editor-button';
@@ -63,18 +64,18 @@ export function AssembliesList({
     }
   };
 
-  const duplicate = async (assembly: AssemblyItem, newName: string): Promise<string | null> => {
+  const duplicate = async (assembly: AssemblyItem, copy: TitleId): Promise<string | null> => {
     try {
-      await api.duplicateAssembly(project, assembly.name, newName);
+      await api.duplicateAssembly(project, assembly.name, copy.name, copy.title);
       await invalidate();
       setPending(null);
       void navigate({
         to: '/projects/$project/assemblies/$assembly',
-        params: { project, assembly: newName },
+        params: { project, assembly: copy.name },
       });
       return null;
     } catch (error) {
-      if (error instanceof NameTakenError) return 'That name is already taken';
+      if (error instanceof NameTakenError) return 'That ID is already taken';
       return error instanceof Error ? error.message : String(error);
     }
   };
@@ -106,10 +107,11 @@ export function AssembliesList({
                   <Link
                     to="/projects/$project/assemblies/$assembly"
                     params={{ project, assembly: assembly.name }}
-                    className="text-foreground font-mono text-sm font-bold no-underline hover:underline"
+                    className="text-foreground text-sm font-bold no-underline hover:underline"
                   >
-                    {assembly.name}
+                    {assembly.title ?? assembly.name}
                   </Link>
+                  <span className="text-muted-foreground font-mono text-xs">{assembly.name}</span>
                   <AssemblyStatusBadge status={assembly.status} />
                   {assembly.activeMissions > 0 && (
                     <span className="text-warning text-xs font-medium">
@@ -158,12 +160,13 @@ export function AssembliesList({
         open={pending?.kind === 'new'}
         title="New Assembly"
         description="The Assembly opens as an empty clock; it is written when you save it."
-        onSubmit={async (name) => {
-          if (names.includes(name)) return 'That name is already taken';
+        takenNames={names}
+        onSubmit={async ({ title, name }) => {
           setPending(null);
           void navigate({
             to: '/projects/$project/assemblies/$assembly',
             params: { project, assembly: name },
+            search: { title },
           });
           return null;
         }}
@@ -171,11 +174,16 @@ export function AssembliesList({
       />
       <NamePromptDialog
         open={pending?.kind === 'duplicate'}
-        title={`Duplicate ${pending?.kind === 'duplicate' ? pending.assembly.name : ''}`}
-        initialValue={pending?.kind === 'duplicate' ? `${pending.assembly.name}-copy` : ''}
+        title={`Duplicate ${pending?.kind === 'duplicate' ? (pending.assembly.title ?? pending.assembly.name) : ''}`}
+        initialTitle={
+          pending?.kind === 'duplicate'
+            ? `${pending.assembly.title ?? pending.assembly.name} copy`
+            : ''
+        }
+        takenNames={names}
         confirmLabel="Duplicate"
-        onSubmit={(name) =>
-          pending?.kind === 'duplicate' ? duplicate(pending.assembly, name) : Promise.resolve(null)
+        onSubmit={(copy) =>
+          pending?.kind === 'duplicate' ? duplicate(pending.assembly, copy) : Promise.resolve(null)
         }
         onCancel={() => setPending(null)}
       />

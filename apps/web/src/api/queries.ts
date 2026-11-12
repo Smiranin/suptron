@@ -8,6 +8,8 @@ import type {
   HealthInfo,
   ModelItem,
   ProjectItem,
+  PromptPreview,
+  PromptPreviewRequest,
   RemoteDefaults,
   UnitDetail,
   UnitItem,
@@ -39,10 +41,10 @@ export const api = {
     }),
   deleteUnit: (name: string) =>
     request<void>(`/api/units/${encodeURIComponent(name)}`, { method: 'DELETE' }),
-  duplicateUnit: (name: string, newName: string) =>
+  duplicateUnit: (name: string, newName: string, newTitle: string) =>
     request<{ unit: UnitFile; etag: string }>(`/api/units/${encodeURIComponent(name)}/duplicate`, {
       method: 'POST',
-      body: { newName },
+      body: { newName, newTitle },
     }),
   projects: () => request<{ items: ProjectItem[] }>('/api/projects').then((r) => r.items),
   project: (name: string) => request<ProjectItem>(`/api/projects/${encodeURIComponent(name)}`),
@@ -88,12 +90,14 @@ export const api = {
       `/api/projects/${encodeURIComponent(project)}/assemblies/${encodeURIComponent(name)}`,
       { method: 'DELETE' },
     ),
-  duplicateAssembly: (project: string, name: string, newName: string) =>
+  duplicateAssembly: (project: string, name: string, newName: string, newTitle: string) =>
     request<{ assembly: AssemblyFile; etag: string }>(
       `/api/projects/${encodeURIComponent(project)}/assemblies/${encodeURIComponent(name)}/duplicate`,
-      { method: 'POST', body: { newName } },
+      { method: 'POST', body: { newName, newTitle } },
     ),
   open: (path: string) => request<void>('/api/open', { method: 'POST', body: { path } }),
+  previewPrompt: (body: PromptPreviewRequest) =>
+    request<PromptPreview>('/api/prompts/preview', { method: 'POST', body }),
   remoteDefaults: (path: string) =>
     request<RemoteDefaults>(`/api/git/remote-defaults?path=${encodeURIComponent(path)}`),
   fsStat: (path: string, base?: string) =>

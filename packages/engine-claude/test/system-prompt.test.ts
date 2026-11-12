@@ -1,14 +1,33 @@
 import { describe, expect, it } from 'vitest';
 import {
   COMMANDER_CHANNEL_PROMPT,
+  ClaudeEngine,
   SLOT_END_PROMPT,
+  offeredModels,
   systemText,
   toolRefusal,
 } from '../src/claude-engine.js';
 
 const systemPrompt = { rules: '  Never push.\n', instructions: '\nWrite the plan.  ' };
 
+describe('offeredModels', () => {
+  it("leaves out Claude Code's machine default, which would make an Assembly depend on /model", () => {
+    expect(
+      offeredModels([
+        { value: 'default', displayName: 'Default (recommended)' },
+        { value: 'opus', displayName: 'Opus' },
+        { value: '', displayName: 'nothing' },
+      ]),
+    ).toEqual([{ id: 'opus', displayName: 'Opus' }]);
+  });
+});
+
 describe('systemText', () => {
+  it('is what the Engine shows for a preview', () => {
+    const spec = { role: 'pilot' as const, systemPrompt, allowQuestions: true };
+    expect(new ClaudeEngine().systemText(spec)).toBe(systemText(spec));
+  });
+
   it('gives the Core only its Rules and Instructions, trimmed', () => {
     const text = systemText({ role: 'core', systemPrompt, allowQuestions: false });
     expect(text).toBe('Never push.\n\nWrite the plan.');

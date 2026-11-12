@@ -46,19 +46,30 @@ describe('Projects overview', () => {
     const { router } = renderApp('/projects', home.live);
     await user.click(await screen.findByRole('button', { name: /New Project/ }));
     const dialog = await screen.findByRole('dialog');
-    await user.type(within(dialog).getByLabelText('Name'), 'other');
-    await user.type(within(dialog).getByLabelText('Repository path'), '/repos/other');
+    await user.type(within(dialog).getByLabelText(/^Title/), 'Other');
+    // the ID follows the title and cannot be typed
+    expect(within(dialog).getByLabelText('ID')).toHaveValue('other');
+    expect(within(dialog).getByLabelText('ID')).toBeDisabled();
+    await user.type(within(dialog).getByLabelText(/^Repository path/), '/repos/other');
     // The remote and protected branch are read from git once the path resolves to a repository.
     await waitFor(() =>
       expect(within(dialog).getByLabelText('Protected branch')).toHaveValue('develop'),
     );
     expect(within(dialog).getByLabelText('Remote')).toHaveValue('origin');
+    // the Git conventions start empty and folded away; only what is typed is written
+    expect(within(dialog).queryByLabelText('Branch name template')).toBeNull();
+    await user.click(within(dialog).getByRole('button', { name: 'Git conventions (optional)' }));
+    const branch = within(dialog).getByLabelText('Branch name template');
+    expect(branch).toHaveValue('');
+    expect(branch).toHaveAttribute('placeholder', 'feature/{work_item_id}-{task_slug}');
+    await user.type(branch, 'feat/{{task_slug}');
     await user.click(within(dialog).getByRole('button', { name: 'Create Project' }));
     await waitFor(() => expect(router.state.location.pathname).toBe('/projects/other'));
     const post = home.requestsTo('POST', '/api/projects')[0]!;
     expect(post.body).toEqual({
       profile: {
         name: 'other',
+        title: 'Other',
         workspace: {
           kind: 'repository',
           path: '/repos/other',
@@ -66,8 +77,8 @@ describe('Projects overview', () => {
           protectedBranch: 'develop',
           host: 'github',
           git: {
-            branchNameTemplate: 'feature/{work_item_id}-{task_slug}',
-            pullRequestTemplate: '## {task_title}\n\n### Summary\n\n### Testing\n',
+            branchNameTemplate: 'feat/{task_slug}',
+            pullRequestTemplate: '',
             labels: [],
             reviewers: [],
           },
@@ -85,15 +96,15 @@ describe('Projects overview', () => {
     const { router } = renderApp('/projects', home.live);
     await user.click(await screen.findByRole('button', { name: /New Project/ }));
     const dialog = await screen.findByRole('dialog');
-    await user.type(within(dialog).getByLabelText('Name'), 'trips');
+    await user.type(within(dialog).getByLabelText(/^Title/), 'Trips');
     await user.click(within(dialog).getByRole('combobox', { name: 'Project type' }));
     await user.click(await screen.findByRole('option', { name: 'No folder' }));
     // a new Project changes its type without a confirmation
     expect(screen.queryByRole('alertdialog')).toBeNull();
     expect(within(dialog).getByTestId('workspace-fields')).toHaveAttribute('data-kind', 'none');
-    expect(within(dialog).queryByLabelText('Repository path')).toBeNull();
+    expect(within(dialog).queryByLabelText(/^Repository path/)).toBeNull();
     expect(within(dialog).queryByLabelText('Protected branch')).toBeNull();
-    expect(within(dialog).queryByLabelText('Branch name template')).toBeNull();
+    expect(within(dialog).queryByLabelText(/^Branch name template/)).toBeNull();
     await user.click(within(dialog).getByRole('button', { name: /Add Knowledge Source/ }));
     await user.click(within(dialog).getByRole('combobox', { name: 'Knowledge Source 1 type' }));
     await user.click(await screen.findByRole('option', { name: 'Text' }));
@@ -104,6 +115,7 @@ describe('Projects overview', () => {
     expect(home.requestsTo('POST', '/api/projects')[0]!.body).toEqual({
       profile: {
         name: 'trips',
+        title: 'Trips',
         workspace: { kind: 'none' },
         knowledgeSources: [{ text: 'Prefer direct flights.', title: 'Airlines' }],
         engine: 'claude-code',
@@ -113,6 +125,45 @@ describe('Projects overview', () => {
 });
 
 describe('New Project dialog', () => {
+  it('keeps Create enabled and reveals every missing required field when pressed', async () => {
+    const home = useFakeHome();
+    const user = userEvent.setup();
+    renderApp('/projects', home.live);
+    await user.click(await screen.findByRole('button', { name: /New Project/ }));
+    const dialog = await screen.findByRole('dialog');
+    // required fields carry the mark
+    expect(within(dialog).getByText('Title').closest('label')).toHaveTextContent('Title*');
+    expect(within(dialog).getByText('Repository path').closest('label')).toHaveTextContent(
+      'Repository path*',
+    );
+    const create = within(dialog).getByRole('button', { name: 'Create Project' });
+    expect(create).toBeEnabled();
+    await user.click(create);
+    await waitFor(() =>
+      expect(within(dialog).getByText('A title is required')).toBeInTheDocument(),
+    );
+    expect(within(dialog).getByText('A repository path is required')).toBeInTheDocument();
+    expect(within(dialog).getByLabelText(/^Title/)).toHaveFocus();
+    expect(home.requestsTo('POST', '/api/projects')).toHaveLength(0);
+  });
+
+  it('explains an ID that cannot be made from the title, and a taken one', async () => {
+    const home = useFakeHome();
+    const user = userEvent.setup();
+    renderApp('/projects', home.live);
+    await user.click(await screen.findByRole('button', { name: /New Project/ }));
+    const dialog = await screen.findByRole('dialog');
+    const title = within(dialog).getByLabelText(/^Title/);
+    await user.type(title, 'Проект');
+    expect(within(dialog).getByLabelText('ID')).toHaveValue('');
+    expect(within(dialog).getByText('The ID needs Latin letters or digits')).toBeInTheDocument();
+    await user.clear(title);
+    await user.type(title, 'My App');
+    expect(within(dialog).getByText('The ID "my-app" is already taken')).toBeInTheDocument();
+    await user.click(within(dialog).getByRole('button', { name: 'Create Project' }));
+    expect(home.requestsTo('POST', '/api/projects')).toHaveLength(0);
+  });
+
   it('closes at once while untouched, ignores clicks outside, and asks before discarding typed input', async () => {
     const home = useFakeHome();
     const user = userEvent.setup();
@@ -124,7 +175,7 @@ describe('New Project dialog', () => {
 
     await user.click(screen.getByRole('button', { name: /New Project/ }));
     const dialog = await screen.findByRole('dialog');
-    await user.type(within(dialog).getByLabelText('Name'), 'other');
+    await user.type(within(dialog).getByLabelText(/^Title/), 'Other');
     // A pointer down outside the dialog (the backdrop) must not close it. fireEvent, because the
     // dialog sets pointer-events: none on the body, which user-event refuses to click through.
     fireEvent.pointerDown(document.body, { pointerType: 'mouse', button: 0 });
@@ -136,7 +187,7 @@ describe('New Project dialog', () => {
     expect(confirm).toHaveTextContent('Discard the new Project?');
     await user.click(within(confirm).getByRole('button', { name: 'Cancel' }));
     await waitFor(() => expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument());
-    expect(within(screen.getByRole('dialog')).getByLabelText('Name')).toHaveValue('other');
+    expect(within(screen.getByRole('dialog')).getByLabelText(/^Title/)).toHaveValue('Other');
     await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Cancel' }));
     await user.click(
       within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Discard' }),
@@ -146,7 +197,16 @@ describe('New Project dialog', () => {
 });
 
 describe('Project page', () => {
-  it('blocks Save while a Knowledge Source does not exist and saves once it does', async () => {
+  it('opens the Git conventions when the Profile states one', async () => {
+    const home = useFakeHome();
+    renderApp('/projects/my-app', home.live);
+    const form = await screen.findByRole('form', { name: 'Project Profile' });
+    expect(within(form).getByLabelText('Branch name template')).toHaveValue(
+      'feature/{work_item_id}-{task_slug}',
+    );
+  });
+
+  it('refuses to save while a Knowledge Source does not exist and saves once it does', async () => {
     const home = useFakeHome();
     const user = userEvent.setup();
     renderApp('/projects/my-app', home.live);
@@ -156,7 +216,12 @@ describe('Project page', () => {
     await waitFor(() =>
       expect(screen.getAllByTestId('path-status').at(-1)).toHaveTextContent('does not exist'),
     );
-    expect(screen.getByTestId('save-button')).toBeDisabled();
+    // Save stays enabled; pressing it explains the refusal instead of sending anything
+    await user.click(screen.getByTestId('save-button'));
+    expect(
+      await screen.findByText('A path does not exist; fix it before saving'),
+    ).toBeInTheDocument();
+    expect(home.requestsTo('PUT', '/api/projects/my-app/profile')).toHaveLength(0);
     await user.clear(field);
     await user.type(field, 'docs/adr');
     await waitFor(() =>
@@ -182,7 +247,7 @@ describe('Project page', () => {
     const user = userEvent.setup();
     renderApp('/projects/my-app', home.live);
     const form = await screen.findByRole('form', { name: 'Project Profile' });
-    expect(within(form).getByLabelText('Repository path')).toHaveValue('/repos/my-app');
+    expect(within(form).getByLabelText(/^Repository path/)).toHaveValue('/repos/my-app');
     await user.click(within(form).getByRole('combobox', { name: 'Project type' }));
     await user.click(await screen.findByRole('option', { name: 'Folder' }));
     const confirm = await screen.findByRole('alertdialog');
@@ -198,7 +263,7 @@ describe('Project page', () => {
       expect(within(form).getByTestId('workspace-fields')).toHaveAttribute('data-kind', 'folder'),
     );
     expect(within(form).queryByLabelText('Protected branch')).toBeNull();
-    await user.type(within(form).getByLabelText('Folder path'), '/notes');
+    await user.type(within(form).getByLabelText(/^Folder path/), '/notes');
     // two debounced path checks (the folder, then the Knowledge Source against it) run first
     await waitFor(() => expect(screen.getByTestId('save-button')).toBeEnabled(), {
       timeout: 3000,
@@ -253,10 +318,26 @@ describe('Project page', () => {
     const { router } = renderApp('/projects/my-app', home.live);
     await user.click(await screen.findByRole('button', { name: /New Assembly/ }));
     const dialog = await screen.findByRole('dialog');
-    await user.type(within(dialog).getByLabelText('Name'), 'hotfix');
+    await user.type(within(dialog).getByLabelText(/^Title/), 'Hot fix');
     await user.click(within(dialog).getByRole('button', { name: 'Create' }));
     await waitFor(() =>
-      expect(router.state.location.pathname).toBe('/projects/my-app/assemblies/hotfix'),
+      expect(router.state.location.pathname).toBe('/projects/my-app/assemblies/hot-fix'),
     );
+    // the title waits in the URL until the Assembly is first saved
+    expect(router.state.location.search).toEqual({ title: 'Hot fix' });
+  });
+
+  it('shows a taken Assembly ID while typing and does not navigate', async () => {
+    const home = useFakeHome();
+    const user = userEvent.setup();
+    const { router } = renderApp('/projects/my-app', home.live);
+    await user.click(await screen.findByRole('button', { name: /New Assembly/ }));
+    const dialog = await screen.findByRole('dialog');
+    await user.type(within(dialog).getByLabelText(/^Title/), 'Feature');
+    expect(within(dialog).getByRole('alert')).toHaveTextContent(
+      'The ID "feature" is already taken',
+    );
+    await user.click(within(dialog).getByRole('button', { name: 'Create' }));
+    expect(router.state.location.pathname).toBe('/projects/my-app');
   });
 });

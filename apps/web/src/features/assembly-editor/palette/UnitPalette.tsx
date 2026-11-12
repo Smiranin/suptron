@@ -53,8 +53,10 @@ export function UnitPalette({ units, dragging, itemHandlers, onAppend }: UnitPal
         >
           <GripVertical className="text-muted-foreground size-4 shrink-0" aria-hidden="true" />
           <span className="min-w-0 flex-1">
-            <span className="block truncate font-semibold">{unit.name}</span>
-            <span className="text-muted-foreground block truncate text-[11px]">{unit.model}</span>
+            <span className="block truncate font-semibold">{unit.title ?? unit.name}</span>
+            <span className="text-muted-foreground block truncate text-[11px]">
+              <span className="font-mono">{unit.name}</span> · {unit.model}
+            </span>
           </span>
         </div>
       ))}

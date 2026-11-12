@@ -4,8 +4,8 @@ import { Separator } from '@suptron/ui/components/separator';
 import { toast } from '@suptron/ui/components/sonner';
 import { Link, useNavigate } from '@tanstack/react-router';
 import { ArrowLeft, Trash2 } from 'lucide-react';
-import { useCallback, useEffect, useState } from 'react';
-import { InUseError, NameTakenError, NotFoundError } from '../../api/client';
+import { useCallback, useState } from 'react';
+import { InUseError, NotFoundError } from '../../api/client';
 import { api, useHealth, useInvalidateConfig, useProject } from '../../api/queries';
 import type { ProjectItem } from '../../api/types';
 import { ActiveMissionsNote } from '../../components/active-missions-note';
@@ -18,7 +18,13 @@ import { SaveBar } from '../../components/save-bar';
 import { useSaveFlow } from '../../components/use-save-flow';
 import { useSaveShortcut } from '../../lib/keyboard';
 import { AssembliesList } from './AssembliesList';
-import { ProfileForm, emptyProfile, useProfileForm, usePathStatuses } from './ProfileForm';
+import {
+  ProfileForm,
+  emptyProfile,
+  profileForForm,
+  useProfileForm,
+  usePathStatuses,
+} from './ProfileForm';
 
 /** One Project: its Profile inline and its Assemblies (editors SPEC FR-1, FR-14 to FR-17). */
 export function ProjectPage({ project }: { project: string }) {
@@ -51,12 +57,12 @@ function ProjectEditor({ item }: { item: ProjectItem }) {
   const invalidate = useInvalidateConfig();
   const name = item.name;
   const [etag, setEtag] = useState<string | null>(item.profile ? item.etag : null);
-  // Kept with the name it was reported for, so editing the name clears it without an effect.
-  const [nameError, setNameError] = useState<{ name: string; message: string } | null>(null);
-  const [redirectTo, setRedirectTo] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const paths = usePathStatuses();
-  const form = useProfileForm(item.profile ?? emptyProfile('repository', name));
+  // The ID is frozen once the Project exists, so a save never renames its folder.
+  const form = useProfileForm(
+    item.profile ? profileForForm(item.profile) : emptyProfile('repository', name),
+  );
 
   const flow = useSaveFlow<ProfileFile>({
     etag,
@@ -70,10 +76,8 @@ function ProjectEditor({ item }: { item: ProjectItem }) {
     onSaved: useCallback(
       (result) => {
         setEtag(result.etag);
-        setNameError(null);
-        form.reset(result.data);
-        toast.success(`Saved ${result.data.name}`);
-        if (result.data.name !== name) setRedirectTo(result.data.name);
+        form.reset(profileForForm(result.data));
+        toast.success(`Saved ${result.data.title ?? result.data.name}`);
         // A changed Workspace re-validates the Assemblies; say so when some became invalid (FR-3).
         const before = new Map(item.assemblies.map((a) => [a.name, a.status]));
         void invalidate().then(async () => {
@@ -92,51 +96,33 @@ function ProjectEditor({ item }: { item: ProjectItem }) {
           }
         });
       },
-      [form, invalidate, item.assemblies, name],
+      [form, invalidate, item.assemblies],
     ),
     onReload: useCallback(
       (current) => {
         setEtag(current.etag);
-        form.reset(current.data);
+        form.reset(profileForForm(current.data));
       },
       [form],
     ),
-    onError: useCallback(
-      (error: Error) => {
-        if (error instanceof NameTakenError)
-          setNameError({ name: form.getValues('name'), message: 'That name is already taken' });
-        else if (error instanceof InUseError)
-          setNameError({
-            name: form.getValues('name'),
-            message: `Renaming is refused while ${error.count} active Missions use the Project`,
-          });
-        else toast.error(error.message);
-      },
-      [form],
-    ),
+    onError: useCallback((error: Error) => toast.error(error.message), []),
   });
 
-  const { isDirty, isValid } = form.formState;
-  const watchedName = form.watch('name');
-  // Navigate to the new name only once the form is clean, so the discard guard stays quiet.
-  useEffect(() => {
-    if (redirectTo === null || isDirty) return;
-    void navigate({ to: '/projects/$project', params: { project: redirectTo }, replace: true });
-  }, [redirectTo, isDirty, navigate]);
+  const { isDirty } = form.formState;
   const pathsBlock = paths.missing.length > 0;
-  const canSave = isDirty && isValid && !pathsBlock && !paths.checking && !flow.saving;
+  // Save stays enabled on invalid fields: pressing it reveals and focuses them.
+  const canSave = isDirty && !paths.checking && !flow.saving;
   const disabledReason = !isDirty
     ? 'No changes to save'
-    : pathsBlock
-      ? 'A path does not exist'
-      : !isValid
-        ? 'Fix the highlighted fields first'
-        : paths.checking
-          ? 'Checking paths…'
-          : undefined;
+    : paths.checking
+      ? 'Checking paths…'
+      : undefined;
   const save = useCallback(() => {
-    void form.handleSubmit((doc) => flow.save(doc))();
-  }, [form, flow]);
+    void form.handleSubmit((doc) => {
+      if (pathsBlock) toast.error('A path does not exist; fix it before saving');
+      else return flow.save(doc);
+    })();
+  }, [form, flow, pathsBlock]);
   useSaveShortcut(save, canSave);
 
   const remove = async () => {
@@ -156,7 +142,7 @@ function ProjectEditor({ item }: { item: ProjectItem }) {
   return (
     <PageContainer>
       <PageHeader
-        title={name}
+        title={item.profile?.title ?? name}
         action={
           <SaveBar
             dirty={isDirty}
@@ -198,12 +184,7 @@ function ProjectEditor({ item }: { item: ProjectItem }) {
         className="mt-4"
         aria-label="Project Profile"
       >
-        <ProfileForm
-          form={form}
-          paths={paths}
-          nameError={nameError && nameError.name === watchedName ? nameError.message : null}
-          existing
-        />
+        <ProfileForm form={form} paths={paths} existing />
       </form>
       <Separator className="my-8" />
       <AssembliesList project={name} assemblies={item.assemblies} />

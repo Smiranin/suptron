@@ -3,11 +3,14 @@ import {
   DEFAULTS,
   defaultMemoryMode,
   missingCapabilities,
+  resolveCore,
+  resolveSlot,
   summarizeCondition,
   type AssemblyFile,
   type Capability,
   type Check,
   type SlotFile,
+  type UnitFile,
 } from '@suptron/runtime/browser';
 import { Button } from '@suptron/ui/components/button';
 import { Checkbox } from '@suptron/ui/components/checkbox';
@@ -23,11 +26,15 @@ import {
 import { Switch } from '@suptron/ui/components/switch';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@suptron/ui/components/tabs';
 import { X } from 'lucide-react';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { CheckListEditor } from '../../../components/check-list-editor';
+import { CollapsibleSection } from '../../../components/collapsible-section';
+import { Markdown } from '../../../components/markdown';
+import { PromptPreviewButton } from '../../../components/prompt-preview-dialog';
 import { MarkdownField } from '../../../components/markdown-field';
 import { ModelSelect } from '../../../components/model-select';
 import { NameField, nameError } from '../../../components/name-field';
+import { clampWidth, useWidthDrag } from '../../../lib/use-width-drag';
 import type { InspectorTab } from '../editor-state';
 import type { Command } from '../model/reducer';
 import { earlierSlots, effectiveSlot, isLastSlot, type UnitIndex } from '../model/selectors';
@@ -48,38 +55,78 @@ export interface InspectorProps {
   onClose(): void;
 }
 
+const WIDTH_STORAGE_KEY = 'suptron.inspectorWidth';
+const MIN_WIDTH = 320;
+const MAX_WIDTH = 900;
+/** Wide enough for Rules, Instructions and Checks to read as text, not as a column of words. */
+const DEFAULT_WIDTH = 480;
+
+function readWidth(): number {
+  try {
+    const stored = Number(window.localStorage.getItem(WIDTH_STORAGE_KEY));
+    if (stored > 0) return clampWidth(stored, MIN_WIDTH, MAX_WIDTH);
+  } catch {
+    // storage unavailable: the default width
+  }
+  return DEFAULT_WIDTH;
+}
+
+function writeWidth(width: number): void {
+  try {
+    window.localStorage.setItem(WIDTH_STORAGE_KEY, String(width));
+  } catch {
+    // a convenience only
+  }
+}
+
 /** The right-side inspector of the selected Slot (FR-31 to FR-35) or the Core Directives (FR-19). */
 export function Inspector(props: InspectorProps) {
   const { doc, selected, dispatch, onClose } = props;
   const slot = selected === 'core' ? null : doc.slots.find((s) => s.name === selected);
+  const [width, setWidth] = useState(readWidth);
+  useEffect(() => writeWidth(width), [width]);
+  const drag = useWidthDrag(width, setWidth, {
+    min: MIN_WIDTH,
+    max: MAX_WIDTH,
+  });
   return (
-    <aside
-      className="border-border bg-background flex w-80 shrink-0 flex-col overflow-y-auto border-l"
-      aria-label="Inspector"
-      data-testid="inspector"
-    >
-      <div className="flex items-center justify-between px-4 pt-3">
-        <span className="text-muted-foreground text-xs font-semibold tracking-wider uppercase">
-          {selected === 'core' ? 'Core' : 'Slot'}
-        </span>
-        <Button
-          type="button"
-          size="icon"
-          variant="ghost"
-          aria-label="Close inspector"
-          onClick={onClose}
-        >
-          <X aria-hidden="true" />
-        </Button>
-      </div>
-      <div className="px-4 pb-6">
-        {selected === 'core' ? (
-          <CoreDirectivesPanel doc={doc} dispatch={dispatch} />
-        ) : slot ? (
-          <SlotInspector {...props} slot={slot} />
-        ) : null}
-      </div>
-    </aside>
+    <div className="flex shrink-0" style={{ width }}>
+      <div
+        role="separator"
+        aria-orientation="vertical"
+        aria-label="Resize the Inspector"
+        className="hover:bg-primary/40 w-1.5 shrink-0 cursor-col-resize"
+        data-testid="inspector-divider"
+        {...drag}
+      />
+      <aside
+        className="border-border bg-background flex min-w-0 flex-1 flex-col overflow-y-auto border-l"
+        aria-label="Inspector"
+        data-testid="inspector"
+      >
+        <div className="flex items-center justify-between px-4 pt-3">
+          <span className="text-muted-foreground text-xs font-semibold tracking-wider uppercase">
+            {selected === 'core' ? 'Core' : 'Slot'}
+          </span>
+          <Button
+            type="button"
+            size="icon"
+            variant="ghost"
+            aria-label="Close inspector"
+            onClick={onClose}
+          >
+            <X aria-hidden="true" />
+          </Button>
+        </div>
+        <div className="px-4 pb-6">
+          {selected === 'core' ? (
+            <CoreDirectivesPanel doc={doc} dispatch={dispatch} />
+          ) : slot ? (
+            <SlotInspector {...props} slot={slot} />
+          ) : null}
+        </div>
+      </aside>
+    </div>
   );
 }
 
@@ -202,17 +249,23 @@ function SlotInspector({
               {slot.mayAskCommander ? 'may ask' : 'never asks'}
             </label>
           </OverrideField>
-          <div className="flex flex-col gap-1">
-            <Label htmlFor="slot-instructions">Additional Instructions</Label>
-            <p className="text-muted-foreground text-xs">Appended to the Unit's Instructions.</p>
-            <MarkdownField
-              id="slot-instructions"
-              value={slot.instructions ?? ''}
-              onChange={(e) =>
-                patch({ instructions: e.target.value === '' ? undefined : e.target.value })
-              }
-            />
-          </div>
+          <UnitTextAddition
+            id="slot-rules"
+            kind="Rules"
+            hint="Appended to the Unit's Rules: tighten them, never loosen them."
+            unitText={unit?.rules}
+            value={slot.rules}
+            onChange={(rules) => patch({ rules })}
+          />
+          <UnitTextAddition
+            id="slot-instructions"
+            kind="Instructions"
+            hint="Appended to the Unit's Instructions."
+            unitText={unit?.instructions}
+            value={slot.instructions}
+            onChange={(instructions) => patch({ instructions })}
+          />
+          {unit && <SlotPromptButton doc={doc} slot={slot} unit={unit} last={last} />}
         </TabsContent>
 
         <TabsContent value="context" className="flex flex-col gap-3 pt-2">
@@ -482,6 +535,80 @@ function SlotNameField({
             e.preventDefault();
             commit();
           }
+        }}
+      />
+    </div>
+  );
+}
+
+/**
+ * What a Slot adds to its Unit's Rules or Instructions, under the Unit's own text, which is shown
+ * read-only so the addition is written knowing what it extends.
+ */
+function UnitTextAddition({
+  id,
+  kind,
+  hint,
+  unitText,
+  value,
+  onChange,
+}: {
+  id: string;
+  kind: 'Rules' | 'Instructions';
+  hint: string;
+  /** Undefined when the Unit is missing from the Hangar. */
+  unitText: string | undefined;
+  value: string | undefined;
+  /** Undefined removes the addition from the file. */
+  onChange(value: string | undefined): void;
+}) {
+  return (
+    <div className="flex flex-col gap-1" data-testid={`${id}-section`}>
+      {unitText !== undefined && (
+        <CollapsibleSection title={`${kind} from the Unit`}>
+          {unitText.trim() === '' ? (
+            <p className="text-muted-foreground text-xs">The Unit has none.</p>
+          ) : (
+            <Markdown
+              text={unitText}
+              className="bg-muted text-muted-foreground max-h-64 overflow-y-auto rounded-md p-2 text-xs"
+            />
+          )}
+        </CollapsibleSection>
+      )}
+      <Label htmlFor={id}>Additional {kind}</Label>
+      <p className="text-muted-foreground text-xs">{hint}</p>
+      <MarkdownField
+        id={id}
+        value={value ?? ''}
+        onChange={(e) => onChange(e.target.value === '' ? undefined : e.target.value)}
+      />
+    </div>
+  );
+}
+
+/** The Pilot's system text as a Mission would build it, unsaved edits included. */
+function SlotPromptButton({
+  doc,
+  slot,
+  unit,
+  last,
+}: {
+  doc: AssemblyFile;
+  slot: SlotFile;
+  unit: UnitFile;
+  last: boolean;
+}) {
+  const resolved = resolveSlot(slot, unit, resolveCore(doc.core), last);
+  return (
+    <div>
+      <PromptPreviewButton
+        title={`Prompt of ${slot.name}`}
+        request={{
+          role: 'pilot',
+          rules: resolved.rules,
+          instructions: resolved.instructions,
+          allowQuestions: resolved.mayAskCommander,
         }}
       />
     </div>

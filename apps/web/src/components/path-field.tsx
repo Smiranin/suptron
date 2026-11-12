@@ -1,6 +1,6 @@
 import { Input } from '@suptron/ui/components/input';
 import { cn } from '@suptron/ui/lib/utils';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type Ref } from 'react';
 import { useFsStat } from '../api/queries';
 
 export interface PathFieldProps {
@@ -13,8 +13,11 @@ export interface PathFieldProps {
   disabled?: boolean;
   /** Reports whether the path exists (and its kind) after the debounced check. */
   onStatus?: (status: PathStatus) => void;
+  /** Lets a form focus the field when it holds the first error on submit. */
+  ref?: Ref<HTMLInputElement>;
   'aria-label'?: string;
   'aria-invalid'?: boolean;
+  'aria-required'?: boolean;
 }
 
 export type PathStatus =
@@ -38,6 +41,7 @@ export function PathField({
   placeholder,
   disabled,
   onStatus,
+  ref,
   ...aria
 }: PathFieldProps) {
   const debounced = useDebounced(value.trim(), 250);
@@ -59,6 +63,7 @@ export function PathField({
     <div className="flex flex-col gap-1">
       <Input
         id={id}
+        ref={ref}
         value={value}
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}

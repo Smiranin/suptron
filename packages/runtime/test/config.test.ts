@@ -14,6 +14,8 @@ import {
   parseUnitMarkdown,
   profileFileSchema,
   referencesToSlot,
+  resolveCore,
+  resolveSlot,
   serializeAssembly,
   serializeProfile,
   serializeUnit,
@@ -362,6 +364,47 @@ describe('serialize round-trips', () => {
     expect(text).not.toContain('defaultAttemptLimit');
     expect(text.trim().endsWith('exitPoint: true')).toBe(true);
     expect(assemblyFileSchema.parse(parse(text))).toEqual(primaryAssembly());
+  });
+
+  it('leaves out Git conventions nobody set, and the Branch convention line with them', async () => {
+    const { renderGitConventions } = await import('../src/templates/index.js');
+    const base = primaryProfile('/repo');
+    const bare = profileFileSchema.parse({
+      name: base.name,
+      workspace: { kind: 'repository', path: '/repo' },
+    });
+    expect(serializeProfile(bare)).not.toContain('git:');
+    if (bare.workspace.kind !== 'repository') throw new Error('expected a repository');
+    expect(bare.workspace.git.branchNameTemplate).toBe('');
+    const rendered = renderGitConventions(bare.workspace, { taskTitle: 'T', taskSlug: 't' });
+    expect(rendered).toBe('Protected branch: main\nRemote: origin');
+  });
+
+  it("appends a Slot's Rules to its Unit's Rules", () => {
+    const assembly = primaryAssembly();
+    const slot = { ...assembly.slots[1]!, rules: 'Never touch docs/.' };
+    const unit = primaryUnits().find((u) => u.name === slot.unit)!;
+    const resolved = resolveSlot(slot, unit, resolveCore(assembly.core), false);
+    expect(resolved.rules).toBe(`${unit.rules.trim()}\n\nNever touch docs/.`);
+    expect(serializeAssembly({ ...assembly, slots: [assembly.slots[0]!, slot] })).toContain(
+      'rules: Never touch docs/.',
+    );
+  });
+
+  it('writes the title right after the name and keeps files without one valid', () => {
+    const unit = { ...primaryUnits()[0]!, title: 'Code analyst' };
+    const unitText = serializeUnit(unit);
+    expect(unitText).toMatch(/^---\nname: [a-z-]+\ntitle: Code analyst\nmodel:/);
+    expect(parseUnitMarkdown(unitText).unit).toEqual(unit);
+    const profile = { ...primaryProfile('/repo'), title: 'My App' };
+    expect(serializeProfile(profile)).toMatch(/^name: my-app\ntitle: My App\nworkspace:/);
+    expect(profileFileSchema.parse(serializeProfileToObject(profile))).toEqual(profile);
+    const assembly = { ...primaryAssembly(), title: 'Feature to PR' };
+    expect(serializeAssembly(assembly)).toMatch(/^name: feature\ntitle: Feature to PR\ncore:/);
+    expect(assemblyFileSchema.parse(parse(serializeAssembly(assembly)))).toEqual(assembly);
+    // no title, no key: the files of before keep their exact shape
+    expect(serializeAssembly(primaryAssembly())).not.toContain('title:');
+    expect(assemblyFileSchema.safeParse({ ...primaryAssembly(), title: '  ' }).success).toBe(false);
   });
 });
 

@@ -127,6 +127,15 @@ describe('Assembly editor: rendering', () => {
     expect(screen.getByTestId('launch-button')).toBeDisabled();
   });
 
+  it("starts a new Assembly's Core on a fixed model and with the title it was given", async () => {
+    const { user } = await openEditor('/projects/my-app/assemblies/new-one?title=New%20one');
+    expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('New one');
+    await user.click(screen.getByRole('button', { name: 'Core' }));
+    const panel = await screen.findByTestId('core-panel');
+    // never the machine default: the Core must not change with the terminal's /model
+    expect(within(panel).getByRole('combobox', { name: 'Model' })).toHaveTextContent('Claude Opus');
+  });
+
   it('shows an unparseable file with Open in editor instead of the canvas', async () => {
     const home = FakeHome.primary();
     home.projects.get('my-app')!.assemblies.set('bad', { doc: null, text: 'name: [broken' });
@@ -357,6 +366,70 @@ describe('Assembly editor: inspector', () => {
     expect(
       (request.body as AssemblyFile).slots.filter((s) => s.loop?.target === 'builder'),
     ).toHaveLength(3);
+  });
+
+  it("shows the Unit's Rules read-only and saves the Slot's additional Rules", async () => {
+    const { user, home } = await openEditor();
+    const inspector = await select('implementer');
+    const rules = within(inspector).getByTestId('slot-rules-section');
+    expect(within(rules).queryByText(/Never push to the protected branch/)).toBeNull();
+    await user.click(within(rules).getByRole('button', { name: 'Rules from the Unit' }));
+    expect(within(rules).getByText(/Never push to the protected branch/)).toBeInTheDocument();
+    await user.type(within(inspector).getByLabelText('Additional Rules'), 'Never touch docs/.');
+    const request = await save(home, user);
+    const slot = (request.body as AssemblyFile).slots.find((s) => s.name === 'implementer')!;
+    expect(slot.rules).toBe('Never touch docs/.');
+    // the full prompt joins the Unit's Rules with the Slot's, unsaved edits included
+    await user.type(within(inspector).getByLabelText('Additional Rules'), ' Keep it short.');
+    await user.click(within(inspector).getByRole('button', { name: 'View full prompt' }));
+    const preview = await screen.findByTestId('prompt-preview');
+    expect(preview).toHaveTextContent(
+      /Never push to the protected branch\.\s+Never touch docs\/\. Keep it short\./,
+    );
+  });
+
+  it('opens the Inspector at 480px and widens it by dragging its left edge', async () => {
+    window.localStorage.removeItem('suptron.inspectorWidth');
+    await openEditor();
+    const inspector = await select('implementer');
+    const panel = inspector.parentElement!;
+    expect(panel.style.width).toBe('480px');
+    drag(
+      screen.getByTestId('inspector-divider'),
+      { clientX: 500, clientY: 10 },
+      { clientX: 400, clientY: 10 },
+    );
+    expect(panel.style.width).toBe('580px');
+    // never narrower than 320px
+    drag(
+      screen.getByTestId('inspector-divider'),
+      { clientX: 400, clientY: 10 },
+      { clientX: 1000, clientY: 10 },
+    );
+    expect(panel.style.width).toBe('320px');
+    expect(window.localStorage.getItem('suptron.inspectorWidth')).toBe('320');
+    window.localStorage.removeItem('suptron.inspectorWidth');
+  });
+
+  it("shows the Core's built-in directives and its full prompt", async () => {
+    const { user } = await openEditor();
+    await user.click(screen.getByRole('button', { name: 'Core' }));
+    const panel = await screen.findByTestId('core-panel');
+    await user.click(within(panel).getByRole('button', { name: 'Built-in directives' }));
+    expect(await within(panel).findByText('CORE PREAMBLE')).toBeInTheDocument();
+    expect(within(panel).getByText('Call: judge')).toBeInTheDocument();
+    expect(within(panel).getByLabelText('Additional Instructions')).toBeInTheDocument();
+  });
+
+  it('sets the Assembly title from the centre circle', async () => {
+    const { user, home } = await openEditor();
+    await user.click(screen.getByRole('button', { name: 'Core' }));
+    const panel = await screen.findByTestId('core-panel');
+    await user.type(within(panel).getByLabelText('Title'), 'Feature to PR');
+    expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('Feature to PR');
+    const request = await save(home, user);
+    expect((request.body as AssemblyFile).title).toBe('Feature to PR');
+    expect((request.body as AssemblyFile).name).toBe('feature');
   });
 
   it('edits the Core Directives from the centre circle', async () => {

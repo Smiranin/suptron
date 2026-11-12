@@ -12,6 +12,7 @@ import type { ServerContext } from './context.js';
 import { registerHealthRoutes } from './routes/health.js';
 import { registerMissionRoutes } from './routes/missions.js';
 import { registerProjectRoutes } from './routes/projects.js';
+import { registerPromptRoutes } from './routes/prompts.js';
 import { registerToolRoutes } from './routes/tools.js';
 import { registerUnitRoutes } from './routes/units.js';
 import { EventHub } from './sse.js';
@@ -67,6 +68,7 @@ export async function buildApp(options: BuildAppOptions): Promise<BuiltApp> {
   registerProjectRoutes(app, context);
   registerMissionRoutes(app, context);
   registerToolRoutes(app, context);
+  registerPromptRoutes(app, context);
   if (options.webDist) await registerStatic(app, options.webDist);
 
   return { app, context };

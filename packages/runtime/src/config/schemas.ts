@@ -9,6 +9,12 @@ export const nameSchema = z
   .min(1, 'A name is required')
   .regex(NAME_PATTERN, 'Use lowercase letters, digits and "-" only');
 
+/**
+ * The human name shown in lists and headers; the `name` stays the ID (file name, URL, references).
+ * Optional so files written before titles existed stay valid; readers fall back to the name.
+ */
+export const titleSchema = z.string().trim().min(1, 'A title is required').optional();
+
 export const checkSchema = z.discriminatedUnion('kind', [
   z.object({
     kind: z.literal('command'),
@@ -32,6 +38,7 @@ export const conditionSchema = z.array(checkSchema);
 
 export const unitFrontmatterSchema = z.object({
   name: nameSchema,
+  title: titleSchema,
   model: z.string().min(1, 'A model is required'),
   mayAskCommander: z.boolean().default(DEFAULTS.unit.mayAskCommander),
   doneCondition: conditionSchema.default([]),
@@ -66,12 +73,21 @@ export const workspaceFileSchema = z.discriminatedUnion('kind', [
     remote: z.string().min(1).default(DEFAULTS.profile.repository.remote),
     protectedBranch: z.string().min(1).default(DEFAULTS.profile.repository.protectedBranch),
     host: z.enum(['github', 'none']).default(DEFAULTS.profile.repository.host),
-    git: z.object({
-      branchNameTemplate: z.string().min(1, 'A branch name template is required'),
-      pullRequestTemplate: z.string().default(DEFAULTS.profile.repository.git.pullRequestTemplate),
-      labels: z.array(z.string().min(1)).default([]),
-      reviewers: z.array(z.string().min(1)).default([]),
-    }),
+    git: z
+      .object({
+        branchNameTemplate: z.string().default(DEFAULTS.profile.repository.git.branchNameTemplate),
+        pullRequestTemplate: z
+          .string()
+          .default(DEFAULTS.profile.repository.git.pullRequestTemplate),
+        labels: z.array(z.string().min(1)).default([]),
+        reviewers: z.array(z.string().min(1)).default([]),
+      })
+      .default({
+        branchNameTemplate: DEFAULTS.profile.repository.git.branchNameTemplate,
+        pullRequestTemplate: DEFAULTS.profile.repository.git.pullRequestTemplate,
+        labels: [],
+        reviewers: [],
+      }),
     ciWaitTimeoutMinutes: z
       .number()
       .int()
@@ -97,6 +113,7 @@ export const RELATIVE_PATH_WITHOUT_WORKSPACE = 'relative_path_without_workspace'
 export const profileFileSchema = z
   .object({
     name: nameSchema,
+    title: titleSchema,
     workspace: workspaceFileSchema,
     knowledgeSources: z.array(knowledgeSourceSchema).default([]),
     engine: z.literal('claude-code').default(DEFAULTS.profile.engine),
@@ -157,6 +174,8 @@ export const slotFileSchema = z.object({
   name: nameSchema,
   unit: nameSchema,
   model: z.string().min(1).optional(),
+  /** Added after the Unit's Rules; a Slot can tighten a Unit, never loosen it. */
+  rules: z.string().optional(),
   instructions: z.string().optional(),
   memoryMode: memoryModeSchema.optional(),
   mayAskCommander: z.boolean().optional(),
@@ -172,6 +191,7 @@ export type SlotFile = z.infer<typeof slotFileSchema>;
 
 export const assemblyFileSchema = z.object({
   name: nameSchema,
+  title: titleSchema,
   core: coreDirectivesSchema,
   slots: z.array(slotFileSchema).default([]),
 });

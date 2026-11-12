@@ -14,11 +14,13 @@ export function FolderFields({ form, paths, id }: WorkspaceFieldsProps) {
         <Field
           id={`${id}-folder`}
           label="Folder path"
+          required
           hint="Absolute path of the directory Missions work in; a git repository inside it is ignored."
           error={error}
         >
           <PathField
             id={`${id}-folder`}
+            ref={field.ref}
             value={field.value ?? ''}
             onChange={(value) => {
               field.onChange(value);
@@ -27,6 +29,7 @@ export function FolderFields({ form, paths, id }: WorkspaceFieldsProps) {
             placeholder="/Users/me/notes"
             onStatus={(status) => paths.set('workspace', status)}
             aria-label="Folder path"
+            aria-required
           />
         </Field>
       )}

@@ -2,14 +2,8 @@ import { Button } from '@suptron/ui/components/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@suptron/ui/components/tabs';
 import { cn } from '@suptron/ui/lib/utils';
 import { PanelRightClose, PanelRightOpen, Pin } from 'lucide-react';
-import {
-  useCallback,
-  useEffect,
-  useRef,
-  useState,
-  type Dispatch,
-  type PointerEvent as ReactPointerEvent,
-} from 'react';
+import { useCallback, useEffect, useState, type Dispatch } from 'react';
+import { clampWidth, useWidthDrag } from '../../../lib/use-width-drag';
 import type { MissionPageAction, PanelTab, ReadyMissionState } from '../model/types';
 import { AttentionTab } from './AttentionTab';
 import { MissionLevelView } from './MissionLevelView';
@@ -34,7 +28,7 @@ function readPrefs(): PanelPrefs {
       return {
         width:
           typeof parsed.width === 'number'
-            ? Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, parsed.width))
+            ? clampWidth(parsed.width, MIN_WIDTH, MAX_WIDTH)
             : DEFAULT_WIDTH,
         collapsed: parsed.collapsed === true,
       };
@@ -62,32 +56,12 @@ export interface SidePanelProps {
 /** Right side, resizable, collapsible: one Slot's transcript or the Mission-level view, plus Question / Attention (FR-19). */
 export function SidePanel({ state, dispatch, onStop }: SidePanelProps) {
   const [prefs, setPrefs] = useState<PanelPrefs>(readPrefs);
-  const drag = useRef<{ pointerId: number; startX: number; startWidth: number } | null>(null);
   useEffect(() => writePrefs(prefs), [prefs]);
-
-  const onPointerDown = useCallback(
-    (event: ReactPointerEvent<HTMLDivElement>) => {
-      drag.current = { pointerId: event.pointerId, startX: event.clientX, startWidth: prefs.width };
-      event.currentTarget.setPointerCapture(event.pointerId);
-      event.preventDefault();
-    },
-    [prefs.width],
-  );
-  const onPointerMove = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
-    const current = drag.current;
-    if (!current || current.pointerId !== event.pointerId) return;
-    const width = Math.min(
-      MAX_WIDTH,
-      Math.max(MIN_WIDTH, current.startWidth - (event.clientX - current.startX)),
-    );
-    setPrefs((p) => ({ ...p, width }));
-  }, []);
-  const onPointerUp = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
-    if (drag.current?.pointerId === event.pointerId) {
-      drag.current = null;
-      event.currentTarget.releasePointerCapture(event.pointerId);
-    }
-  }, []);
+  const setWidth = useCallback((width: number) => setPrefs((p) => ({ ...p, width })), []);
+  const { onPointerDown, onPointerMove, onPointerUp } = useWidthDrag(prefs.width, setWidth, {
+    min: MIN_WIDTH,
+    max: MAX_WIDTH,
+  });
 
   const { panel, pendingQuestion, attention } = state;
   const mainLabel = panel.selection.kind === 'slot' ? panel.selection.name : 'Mission';

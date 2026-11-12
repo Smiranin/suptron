@@ -55,13 +55,10 @@ export function renderGitConventions(
   workspace: RepositoryWorkspaceFile,
   values: MissionValues,
 ): string {
-  const branch = render(workspace.git.branchNameTemplate, values);
+  const branch = render(workspace.git.branchNameTemplate, values).trim();
   const prBody = render(workspace.git.pullRequestTemplate, values).trim();
-  const lines = [
-    `Protected branch: ${workspace.protectedBranch}`,
-    `Remote: ${workspace.remote}`,
-    `Branch convention: ${branch}`,
-  ];
+  const lines = [`Protected branch: ${workspace.protectedBranch}`, `Remote: ${workspace.remote}`];
+  if (branch) lines.push(`Branch convention: ${branch}`);
   if (workspace.git.labels.length > 0)
     lines.push(`Pull request labels: ${workspace.git.labels.join(', ')}`);
   if (workspace.git.reviewers.length > 0) {

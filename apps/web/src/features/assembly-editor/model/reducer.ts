@@ -15,6 +15,7 @@ export type Command =
   | { type: 'patchSlot'; name: string; patch: Partial<Omit<SlotFile, 'name' | 'unit'>> }
   | { type: 'setLoop'; name: string; loop: LoopPatch | null }
   | { type: 'patchCore'; patch: Partial<CoreDirectivesFile> }
+  | { type: 'setTitle'; title: string }
   | { type: 'replaceDoc'; doc: AssemblyFile };
 
 /** The Loop rule as the editor sets it; an empty Accept Condition is dropped from the file. */
@@ -89,6 +90,9 @@ export function reduce(doc: AssemblyFile, cmd: Command, ctx: ReduceContext): Ass
       return cmd.doc;
     case 'patchCore':
       return { ...doc, core: compact({ ...doc.core, ...cmd.patch }) };
+    case 'setTitle':
+      // An empty title is dropped from the file; lists then show the ID.
+      return compact({ ...doc, title: cmd.title === '' ? undefined : cmd.title });
     case 'addSlot': {
       const name = uniqueSlotName(
         cmd.unit,

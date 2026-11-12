@@ -8,6 +8,7 @@ import type {
   Engine,
   HealthStatus,
   ModelInfo,
+  SystemTextSpec,
 } from '../engine/index.js';
 import { exec } from '../process/exec.js';
 
@@ -317,6 +318,10 @@ export class FakeEngine implements Engine {
 
   async healthCheck(): Promise<HealthStatus> {
     return this.health;
+  }
+
+  systemText(spec: SystemTextSpec): string {
+    return [spec.systemPrompt.rules, spec.systemPrompt.instructions].join('\n\n');
   }
 
   createAgent(spec: AgentSpec): AgentHandle {

@@ -7,6 +7,7 @@ import {
 } from '@suptron/runtime/browser';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useForm, type Resolver, type UseFormReturn } from 'react-hook-form';
+import { withRequiredTitle } from '../../components/title-id-fields';
 
 /**
  * The form holds the Profile with every kind's fields optional, so react-hook-form can address
@@ -15,6 +16,7 @@ import { useForm, type Resolver, type UseFormReturn } from 'react-hook-form';
  */
 export interface ProfileFormValues {
   name: string;
+  title?: string;
   workspace: {
     kind: WorkspaceKind;
     path?: string;
@@ -22,7 +24,7 @@ export interface ProfileFormValues {
     protectedBranch?: string;
     host?: 'github' | 'none';
     git?: {
-      branchNameTemplate: string;
+      branchNameTemplate?: string;
       pullRequestTemplate?: string;
       labels?: string[];
       reviewers?: string[];
@@ -49,9 +51,10 @@ export function emptyWorkspace(kind: WorkspaceKind): WorkspaceFile {
         remote: DEFAULTS.profile.repository.remote,
         protectedBranch: DEFAULTS.profile.repository.protectedBranch,
         host: DEFAULTS.profile.repository.host,
+        // Empty conventions: the form shows examples, the Pilots decide unless the Commander sets one.
         git: {
-          branchNameTemplate: 'feature/{work_item_id}-{task_slug}',
-          pullRequestTemplate: '## {task_title}\n\n### Summary\n\n### Testing\n',
+          branchNameTemplate: DEFAULTS.profile.repository.git.branchNameTemplate,
+          pullRequestTemplate: DEFAULTS.profile.repository.git.pullRequestTemplate,
           labels: [],
           reviewers: [],
         },
@@ -61,17 +64,30 @@ export function emptyWorkspace(kind: WorkspaceKind): WorkspaceFile {
 }
 
 export function emptyProfile(kind: WorkspaceKind = 'repository', name = ''): ProfileFile {
-  return { name, workspace: emptyWorkspace(kind), knowledgeSources: [], engine: 'claude-code' };
+  return {
+    name,
+    title: name,
+    workspace: emptyWorkspace(kind),
+    knowledgeSources: [],
+    engine: 'claude-code',
+  };
+}
+
+/** A Profile as the form edits it: a file written before titles existed shows its name as title. */
+export function profileForForm(profile: ProfileFile): ProfileFile {
+  return { ...profile, title: profile.title ?? profile.name };
 }
 
 export function useProfileForm(defaultValues: ProfileFile): ProfileFormHandle {
   return useForm<ProfileFormValues, unknown, ProfileFile>({
     // The schema's input type is the union; the form's is its widened shape (see ProfileFormValues).
-    resolver: zodResolver(profileFileSchema) as unknown as Resolver<
-      ProfileFormValues,
-      unknown,
-      ProfileFile
-    >,
+    resolver: withRequiredTitle(
+      zodResolver(profileFileSchema) as unknown as Resolver<
+        ProfileFormValues,
+        unknown,
+        ProfileFile
+      >,
+    ),
     defaultValues,
     mode: 'onChange',
   });

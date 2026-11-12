@@ -39,26 +39,30 @@ describe('Hangar', () => {
     const user = userEvent.setup();
     const { router } = renderApp('/hangar', home.live);
     await user.click(await screen.findByRole('button', { name: 'Duplicate tester' }));
-    const input = await screen.findByLabelText('Name');
+    const input = await screen.findByLabelText(/^Title/);
+    // the copy starts from the original's title
+    expect(input).toHaveValue('tester copy');
     await user.clear(input);
-    await user.type(input, 'tester-two');
+    await user.type(input, 'Tester two');
     await user.click(screen.getByRole('button', { name: 'Duplicate' }));
     await waitFor(() => expect(router.state.location.pathname).toBe('/hangar/tester-two'));
     expect(home.requestsTo('POST', '/api/units/tester/duplicate')[0]?.body).toEqual({
       newName: 'tester-two',
+      newTitle: 'Tester two',
     });
     expect(home.units.get('tester-two')?.model).toBe('sonnet');
   });
 
-  it('shows a name conflict inline when duplicating', async () => {
+  it('shows a taken ID while typing and does not duplicate', async () => {
     const home = useFakeHome();
     const user = userEvent.setup();
     renderApp('/hangar', home.live);
     await user.click(await screen.findByRole('button', { name: 'Duplicate tester' }));
-    const input = await screen.findByLabelText('Name');
+    const input = await screen.findByLabelText(/^Title/);
     await user.clear(input);
-    await user.type(input, 'analyst');
+    await user.type(input, 'Analyst');
+    expect(await screen.findByRole('alert')).toHaveTextContent('The ID "analyst" is already taken');
     await user.click(screen.getByRole('button', { name: 'Duplicate' }));
-    expect(await screen.findByRole('alert')).toHaveTextContent('already taken');
+    expect(home.requestsTo('POST', '/api/units/tester/duplicate')).toHaveLength(0);
   });
 });

@@ -53,9 +53,10 @@ export function ProjectsPage() {
                         params={{ project: project.name }}
                         className="text-foreground no-underline hover:underline"
                       >
-                        {project.name}
+                        {project.profile?.title ?? project.name}
                       </Link>
                     </h2>
+                    <span className="text-muted-foreground font-mono text-xs">{project.name}</span>
                     {project.profile && (
                       <Badge variant="secondary" data-testid="project-kind">
                         {workspaceKindLabel(project.profile.workspace.kind)}
@@ -104,10 +105,13 @@ export function ProjectsPage() {
                           <Link
                             to="/projects/$project/assemblies/$assembly"
                             params={{ project: project.name, assembly: assembly.name }}
-                            className="text-foreground font-mono text-sm font-bold no-underline hover:underline"
+                            className="text-foreground text-sm font-bold no-underline hover:underline"
                           >
-                            {assembly.name}
+                            {assembly.title ?? assembly.name}
                           </Link>
+                          <span className="text-muted-foreground font-mono text-xs">
+                            {assembly.name}
+                          </span>
                           <AssemblyStatusBadge status={assembly.status} />
                           {assembly.activeMissions > 0 && (
                             <span className="text-warning text-xs font-medium">

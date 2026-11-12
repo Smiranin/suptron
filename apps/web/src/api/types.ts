@@ -24,6 +24,7 @@ export interface UnitDetail extends UnitItem {
 
 export interface AssemblyItem {
   name: string;
+  title?: string;
   status: AssemblyStatus;
   issues: { errors: Issue[]; warnings: Issue[] };
   activeMissions: number;
@@ -76,4 +77,15 @@ export interface FsStat {
   exists: boolean;
   kind?: 'file' | 'dir';
   path?: string;
+}
+
+export type PromptPreviewRequest =
+  | { role: 'pilot'; rules: string; instructions: string; allowQuestions: boolean }
+  | { role: 'core'; instructions: string };
+
+export interface PromptPreview {
+  /** What the Engine appends to its own system prompt (a Pilot) or uses as the whole one (the Core). */
+  system: string;
+  /** The Core only: the instruction heading each kind of call. */
+  calls?: Record<string, string>;
 }

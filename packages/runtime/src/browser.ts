@@ -18,6 +18,7 @@ export {
   profileFileSchema,
   slotContextSchema,
   slotFileSchema,
+  titleSchema,
   unitFileSchema,
   unitFrontmatterSchema,
   workspaceFileSchema,
@@ -37,6 +38,8 @@ export {
   type ValidationUnit,
 } from './config/validate-assembly.js';
 export * from './workspace/kinds.js';
+// The same slug Missions give a Task title; the editors derive a new item's ID with it.
+export { slugify } from './templates/index.js';
 export { referencesToSlot, uniqueSlotName, type SlotReference } from './config/slot-names.js';
 export {
   defaultMemoryMode,

@@ -71,6 +71,7 @@ function plainContext(context: SlotContextFile | undefined): Plain | undefined {
 function plainSlot(slot: SlotFile, isLast: boolean): Plain {
   const out: Plain = { name: slot.name, unit: slot.unit };
   put(out, 'model', slot.model);
+  put(out, 'rules', slot.rules);
   put(out, 'instructions', slot.instructions);
   put(out, 'memoryMode', unlessDefault(slot.memoryMode, DEFAULTS.slot.memoryMode));
   put(out, 'mayAskCommander', slot.mayAskCommander);
@@ -106,11 +107,10 @@ export function serializeAssembly(assembly: AssemblyFile): string {
     unlessDefault(assembly.core.defaultLoopLimit, DEFAULTS.core.defaultLoopLimit),
   );
   put(core, 'instructions', unlessDefault(assembly.core.instructions, DEFAULTS.core.instructions));
-  const doc: Plain = {
-    name: assembly.name,
-    core,
-    slots: assembly.slots.map((slot, i) => plainSlot(slot, i === assembly.slots.length - 1)),
-  };
+  const doc: Plain = { name: assembly.name };
+  put(doc, 'title', assembly.title);
+  doc.core = core;
+  doc.slots = assembly.slots.map((slot, i) => plainSlot(slot, i === assembly.slots.length - 1));
   return stringifyYaml(doc, YAML_OPTIONS);
 }
 
@@ -131,7 +131,12 @@ function plainWorkspace(workspace: WorkspaceFile): Plain {
         unlessDefault(workspace.protectedBranch, defaults.protectedBranch),
       );
       put(out, 'host', unlessDefault(workspace.host, defaults.host));
-      const git: Plain = { branchNameTemplate: workspace.git.branchNameTemplate };
+      const git: Plain = {};
+      put(
+        git,
+        'branchNameTemplate',
+        unlessDefault(workspace.git.branchNameTemplate, defaults.git.branchNameTemplate),
+      );
       put(
         git,
         'pullRequestTemplate',
@@ -139,7 +144,7 @@ function plainWorkspace(workspace: WorkspaceFile): Plain {
       );
       put(git, 'labels', nonEmpty(workspace.git.labels));
       put(git, 'reviewers', nonEmpty(workspace.git.reviewers));
-      out.git = git;
+      if (Object.keys(git).length > 0) out.git = git;
       put(
         out,
         'ciWaitTimeoutMinutes',
@@ -157,14 +162,18 @@ function plainKnowledgeSource(source: KnowledgeSource): Plain {
 }
 
 export function serializeProfile(profile: ProfileFile): string {
-  const doc: Plain = { name: profile.name, workspace: plainWorkspace(profile.workspace) };
+  const doc: Plain = { name: profile.name };
+  put(doc, 'title', profile.title);
+  doc.workspace = plainWorkspace(profile.workspace);
   put(doc, 'knowledgeSources', nonEmpty(profile.knowledgeSources)?.map(plainKnowledgeSource));
   put(doc, 'engine', unlessDefault(profile.engine, DEFAULTS.profile.engine));
   return stringifyYaml(doc, YAML_OPTIONS);
 }
 
 export function serializeUnit(unit: UnitFile): string {
-  const frontmatter: Plain = { name: unit.name, model: unit.model };
+  const frontmatter: Plain = { name: unit.name };
+  put(frontmatter, 'title', unit.title);
+  frontmatter.model = unit.model;
   put(
     frontmatter,
     'mayAskCommander',

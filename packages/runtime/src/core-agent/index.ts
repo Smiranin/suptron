@@ -78,7 +78,8 @@ Calls:
 - explainNeedsAttention: explain in two or three sentences why the Mission needs the Commander and what to do. Return { "reason": string }.
 - finalReport: write a Markdown report of the Mission for the Commander. Return { "report": string }.`;
 
-const CALL_INSTRUCTIONS: Record<string, string> = {
+/** The instruction at the head of each Core call; the call's input follows it as JSON. */
+export const CORE_CALL_INSTRUCTIONS: Readonly<Record<string, string>> = {
   composeSlotPrompt:
     'Compose the prompt for this Slot. Include the Slot instructions verbatim, list the paths of the Task documents and of the Knowledge Sources given as paths, quote a Knowledge Source given as text under its title, state the Workspace fragment so the Pilot knows where it works and where results go, quote the Git conventions when they are given (never mention them otherwise), include every Slot Output given, and when feedback is present put it under a heading that names its source (Loop feedback from <Slot>, or the previous Attempt) with the failed Checks and the Commander note.',
   judge:
@@ -202,5 +203,5 @@ function tryParseJson(text: string): unknown {
 
 /** `# Core call: <name>` on the first line, the instruction, then the input as a JSON block. */
 export function formatCorePrompt(name: string, input: unknown): string {
-  return `# Core call: ${name}\n\n${CALL_INSTRUCTIONS[name] ?? ''}\n\nInput:\n\n\`\`\`json\n${JSON.stringify(input, null, 2)}\n\`\`\`\n`;
+  return `# Core call: ${name}\n\n${CORE_CALL_INSTRUCTIONS[name] ?? ''}\n\nInput:\n\n\`\`\`json\n${JSON.stringify(input, null, 2)}\n\`\`\`\n`;
 }

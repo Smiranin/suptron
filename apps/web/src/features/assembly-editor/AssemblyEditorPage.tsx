@@ -18,7 +18,6 @@ import {
   useAssembly,
   useHealth,
   useInvalidateConfig,
-  useModels,
   useProject,
   useUnits,
 } from '../../api/queries';
@@ -57,18 +56,24 @@ const FALLBACK_VIEWPORT: Viewport = { width: 900, height: 600 };
 export interface AssemblyEditorPageProps {
   project: string;
   assembly: string;
+  /** The title a New Assembly was given; ignored once the file exists. */
+  newTitle?: string | undefined;
   /** Fixed viewport for tests; the router passes none and the page measures itself. */
   viewport?: Viewport;
 }
 
-export function AssemblyEditorPage({ project, assembly, viewport }: AssemblyEditorPageProps) {
+export function AssemblyEditorPage({
+  project,
+  assembly,
+  newTitle,
+  viewport,
+}: AssemblyEditorPageProps) {
   const query = useAssembly(project, assembly);
   const projectQuery = useProject(project);
   const units = useUnits();
-  const models = useModels();
   const isNew = query.error instanceof NotFoundError;
 
-  if (query.isPending || projectQuery.isPending || units.isPending || models.isPending) {
+  if (query.isPending || projectQuery.isPending || units.isPending) {
     return (
       <div className="flex flex-col gap-4 p-6" aria-busy="true">
         <Skeleton className="h-8 w-64" />
@@ -124,8 +129,9 @@ export function AssemblyEditorPage({ project, assembly, viewport }: AssemblyEdit
     query.data?.assembly ??
     ({
       name: assembly,
+      ...(newTitle && { title: newTitle }),
       core: {
-        model: models.data?.[0]?.id ?? 'sonnet',
+        model: DEFAULTS.core.model,
         defaultAttemptLimit: DEFAULTS.core.defaultAttemptLimit,
         defaultLoopLimit: DEFAULTS.core.defaultLoopLimit,
         instructions: '',
@@ -344,7 +350,7 @@ function AssemblyEditor({
       <DiscardGuard
         when={dirty && state.etag !== null ? dirty : dirty && state.doc.slots.length > 0}
       />
-      <EditorHeader project={project} assembly={state.doc.name}>
+      <EditorHeader project={project} assembly={state.doc.title || state.doc.name}>
         <ActiveMissionsNote count={activeMissions} subject="Assembly" />
         <OpenInEditorButton path={filePath} disabled={state.etag === null} />
         <LaunchButton

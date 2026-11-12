@@ -12,8 +12,9 @@ import { toast } from '@suptron/ui/components/sonner';
 import { useNavigate } from '@tanstack/react-router';
 import { useEffect, useRef, useState } from 'react';
 import { NameTakenError, ValidationError } from '../../api/client';
-import { api, useInvalidateConfig } from '../../api/queries';
+import { api, useInvalidateConfig, useProjects } from '../../api/queries';
 import { ConfirmDialog } from '../../components/confirm-dialog';
+import { titleIdProblems } from '../../components/title-id-fields';
 import { ProfileForm, emptyProfile, useProfileForm, usePathStatuses } from './ProfileForm';
 
 /**
@@ -82,20 +83,31 @@ function NewProjectForm({
   const paths = usePathStatuses();
   const navigate = useNavigate();
   const invalidate = useInvalidateConfig();
-  const [nameError, setNameError] = useState<string | null>(null);
+  const projects = useProjects();
+  const takenNames = projects.data?.map((p) => p.name) ?? [];
+  // Kept with the ID it was reported for, so a new title clears it without an effect.
+  const [nameError, setNameError] = useState<{ name: string; message: string } | null>(null);
+  const watchedName = form.watch('name');
   const [busy, setBusy] = useState(false);
-  const blocked = paths.missing.length > 0 || paths.checking || !form.formState.isValid;
 
+  // Create stays enabled: pressing it reveals every error at once instead of leaving the
+  // Commander to guess why a disabled button does nothing.
   const submit = form.handleSubmit(async (profile: ProfileFile) => {
+    const { id } = titleIdProblems(
+      { title: profile.title ?? '', name: profile.name },
+      { taken: takenNames },
+    );
+    if (id || paths.missing.length > 0 || paths.checking) return;
     setBusy(true);
     try {
       await api.createProject(profile);
       await invalidate();
-      toast.success(`Created ${profile.name}`);
+      toast.success(`Created ${profile.title ?? profile.name}`);
       onClose();
       void navigate({ to: '/projects/$project', params: { project: profile.name } });
     } catch (error) {
-      if (error instanceof NameTakenError) setNameError('That name is already taken');
+      if (error instanceof NameTakenError)
+        setNameError({ name: profile.name, message: 'That ID is already taken' });
       else if (error instanceof ValidationError) toast.error(error.message);
       else toast.error(error instanceof Error ? error.message : String(error));
     } finally {
@@ -117,7 +129,12 @@ function NewProjectForm({
           The type of place the Project works in, its fields and its Knowledge Sources.
         </DialogDescription>
       </DialogHeader>
-      <ProfileForm form={form} paths={paths} nameError={nameError} />
+      <ProfileForm
+        form={form}
+        paths={paths}
+        nameError={nameError && nameError.name === watchedName ? nameError.message : null}
+        takenNames={takenNames}
+      />
       {paths.missing.length > 0 && (
         <p className="text-destructive text-sm" role="alert">
           Some paths do not exist; fix them before creating the Project.
@@ -127,7 +144,7 @@ function NewProjectForm({
         <Button type="button" variant="outline" onClick={onCancel}>
           Cancel
         </Button>
-        <Button type="submit" disabled={blocked || busy}>
+        <Button type="submit" disabled={busy}>
           Create Project
         </Button>
       </DialogFooter>

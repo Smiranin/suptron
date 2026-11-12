@@ -16,6 +16,7 @@ import type {
   HealthStatus,
   ModelInfo,
   Question,
+  SystemTextSpec,
 } from '@suptron/runtime';
 import { AsyncQueue, Deferred, withTimeout } from './async-queue.js';
 import { ActivityThrottle } from './activity.js';
@@ -29,6 +30,21 @@ export const FALLBACK_MODELS: ModelInfo[] = [
   { id: 'opus', displayName: 'Claude Opus' },
   { id: 'haiku', displayName: 'Claude Haiku' },
 ];
+
+/**
+ * Claude Code's own alias for "whatever model this machine is set to". Not offered: an Assembly
+ * must behave the same whatever the Commander picks in a terminal.
+ */
+const MACHINE_DEFAULT_MODEL = 'default';
+
+/** The models a Unit or a Core may name: every model the SDK reports but the machine default. */
+export function offeredModels(models: { value: string; displayName: string }[]): ModelInfo[] {
+  return models
+    .filter(
+      (m) => typeof m.value === 'string' && m.value !== '' && m.value !== MACHINE_DEFAULT_MODEL,
+    )
+    .map((m) => ({ id: m.value, displayName: m.displayName || m.value }));
+}
 
 const ASK_USER_QUESTION = 'AskUserQuestion';
 /** The sub-agent tool of Claude Code; `run_in_background: true` detaches it from the turn. */
@@ -63,9 +79,7 @@ judged on what you produced.`;
  * The system text of an agent: its Rules, then its Instructions, then, for a Pilot, how a Slot
  * ends and, when it may ask the Commander, how to reach them. The Core gets neither.
  */
-export function systemText(
-  spec: Pick<AgentSpec, 'role' | 'systemPrompt' | 'allowQuestions'>,
-): string {
+export function systemText(spec: SystemTextSpec): string {
   const parts = [spec.systemPrompt.rules.trim(), spec.systemPrompt.instructions.trim()];
   if (spec.role === 'pilot') {
     parts.push(SLOT_END_PROMPT);
@@ -283,6 +297,10 @@ export class ClaudeEngine implements Engine {
     return new ClaudeAgentHandle(spec, this.options, this.costs);
   }
 
+  systemText(spec: SystemTextSpec): string {
+    return systemText(spec);
+  }
+
   private baseOptions(abort: AbortController): Options {
     return {
       abortController: abort,
@@ -317,10 +335,8 @@ export class ClaudeEngine implements Engine {
         MODELS_TIMEOUT_MS,
         'supportedModels',
       );
-      const mapped = models
-        .filter((m) => typeof m.value === 'string' && m.value !== '')
-        .map((m) => ({ id: m.value, displayName: m.displayName || m.value }));
-      return mapped.length > 0 ? mapped : FALLBACK_MODELS;
+      const offered = offeredModels(models);
+      return offered.length > 0 ? offered : FALLBACK_MODELS;
     } catch {
       return FALLBACK_MODELS;
     } finally {

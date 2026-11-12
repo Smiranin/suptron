@@ -1,3 +1,4 @@
+import { slugify } from '@suptron/runtime/browser';
 import { Button } from '@suptron/ui/components/button';
 import {
   Dialog,
@@ -7,28 +8,30 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@suptron/ui/components/dialog';
-import { Label } from '@suptron/ui/components/label';
 import { useId, useState } from 'react';
-import { NameField, nameError } from './name-field';
+import { TitleIdFields, titleIdProblems, type TitleId } from './title-id-fields';
 
 export interface NamePromptDialogProps {
   open: boolean;
   title: string;
   description?: string;
-  initialValue?: string;
+  /** The title the field starts with; the ID is derived from it. */
+  initialTitle?: string;
+  /** IDs already used next to the new item, checked while typing. */
+  takenNames?: readonly string[];
   confirmLabel?: string;
-  /** Returns an error message to show at the field, or null on success. */
-  onSubmit(name: string): Promise<string | null>;
+  /** Returns an error message to show at the ID, or null on success. */
+  onSubmit(value: TitleId): Promise<string | null>;
   onCancel(): void;
 }
 
-/** Asks for a basename (Duplicate, New Assembly); server-side refusals land at the field. */
+/** Asks for the Title and derived ID of a new item (Duplicate, New Assembly); server refusals land at the ID. */
 export function NamePromptDialog({ open, onCancel, ...rest }: NamePromptDialogProps) {
   return (
     <Dialog open={open} onOpenChange={(next) => !next && onCancel()}>
-      <DialogContent>
+      <DialogContent className="sm:max-w-2xl">
         {/* Remounting on open resets the draft without an effect. */}
-        {open && <NamePromptForm key={rest.initialValue ?? ''} onCancel={onCancel} {...rest} />}
+        {open && <NamePromptForm key={rest.initialTitle ?? ''} onCancel={onCancel} {...rest} />}
       </DialogContent>
     </Dialog>
   );
@@ -37,20 +40,26 @@ export function NamePromptDialog({ open, onCancel, ...rest }: NamePromptDialogPr
 function NamePromptForm({
   title,
   description,
-  initialValue = '',
+  initialTitle = '',
+  takenNames = [],
   confirmLabel = 'Create',
   onSubmit,
   onCancel,
 }: Omit<NamePromptDialogProps, 'open'>) {
-  const [value, setValue] = useState(initialValue);
+  const [value, setValue] = useState<TitleId>({
+    title: initialTitle,
+    name: slugify(initialTitle),
+  });
+  const [submitted, setSubmitted] = useState(false);
   const [serverError, setServerError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const id = useId();
-  const invalid = nameError(value) !== null;
+  const problems = titleIdProblems(value, { taken: takenNames });
   const submit = async () => {
-    if (invalid || busy) return;
+    setSubmitted(true);
+    if (problems.title || problems.id || busy) return;
     setBusy(true);
-    const error = await onSubmit(value);
+    const error = await onSubmit({ title: value.title.trim(), name: value.name });
     setBusy(false);
     setServerError(error);
   };
@@ -66,24 +75,23 @@ function NamePromptForm({
         <DialogTitle>{title}</DialogTitle>
         {description && <DialogDescription>{description}</DialogDescription>}
       </DialogHeader>
-      <div className="flex flex-col gap-2">
-        <Label htmlFor={id}>Name</Label>
-        <NameField
-          id={id}
-          value={value}
-          onChange={(event) => {
-            setValue(event.target.value);
-            setServerError(null);
-          }}
-          error={serverError}
-          autoFocus
-        />
-      </div>
+      <TitleIdFields
+        id={id}
+        value={value}
+        onChange={(next) => {
+          setValue(next);
+          setServerError(null);
+        }}
+        taken={takenNames}
+        titleError={submitted ? problems.title : null}
+        idError={serverError}
+        autoFocus
+      />
       <DialogFooter>
         <Button type="button" variant="outline" onClick={onCancel}>
           Cancel
         </Button>
-        <Button type="submit" disabled={invalid || busy}>
+        <Button type="submit" disabled={busy}>
           {confirmLabel}
         </Button>
       </DialogFooter>

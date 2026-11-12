@@ -9,9 +9,10 @@ import {
 } from '@suptron/ui/components/select';
 import { Textarea } from '@suptron/ui/components/textarea';
 import { GitBranch } from 'lucide-react';
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Controller } from 'react-hook-form';
 import { useRemoteDefaults } from '../../../api/queries';
+import { CollapsibleSection } from '../../../components/collapsible-section';
 import { Field } from '../../../components/field';
 import { PathField } from '../../../components/path-field';
 import { TagInput } from '../../../components/tag-input';
@@ -24,9 +25,14 @@ const PLACEHOLDER_LEGEND = (
   </>
 );
 
+/** Examples shown while a convention is empty; nothing is written unless the Commander types it. */
+const BRANCH_EXAMPLE = 'feature/{work_item_id}-{task_slug}';
+const PULL_REQUEST_EXAMPLE = '## {task_title}\n\n### Summary\n\n### Testing';
+
 /**
  * Kind `repository`: the clone, its remote and protected branch (read from git when the path
- * resolves to a repository, SPEC FR-4), the host, the Git conventions and the CI wait.
+ * resolves to a repository, SPEC FR-4), the host and the CI wait, then the optional Git
+ * conventions, which are only handed to the Pilots.
  */
 export function RepositoryFields({ form, paths, id }: WorkspaceFieldsProps) {
   const errors = form.formState.errors.workspace ?? {};
@@ -35,6 +41,16 @@ export function RepositoryFields({ form, paths, id }: WorkspaceFieldsProps) {
     paths.statuses.workspace?.checking === false && paths.statuses.workspace.exists;
   const defaults = useRemoteDefaults(repositoryPath, repositoryExists);
   const appliedFor = useRef<string | null>(null);
+  // Open when the Profile already states a convention, so nothing set is hidden.
+  const [conventionsOpen] = useState(() => {
+    const git = form.getValues('workspace.git');
+    return Boolean(
+      git?.branchNameTemplate ||
+      git?.pullRequestTemplate ||
+      git?.labels?.length ||
+      git?.reviewers?.length,
+    );
+  });
 
   const applyDefaults = () => {
     if (!defaults.data) return;
@@ -62,11 +78,13 @@ export function RepositoryFields({ form, paths, id }: WorkspaceFieldsProps) {
             <Field
               id={`${id}-repo`}
               label="Repository path"
+              required
               hint="Absolute path of the main clone; worktrees are discovered from it."
               error={errors.path?.message}
             >
               <PathField
                 id={`${id}-repo`}
+                ref={field.ref}
                 value={field.value ?? ''}
                 onChange={(value) => {
                   field.onChange(value);
@@ -75,6 +93,7 @@ export function RepositoryFields({ form, paths, id }: WorkspaceFieldsProps) {
                 placeholder="/Users/me/code/my-app"
                 onStatus={(status) => paths.set('workspace', status)}
                 aria-label="Repository path"
+                aria-required
               />
             </Field>
           )}
@@ -180,80 +199,88 @@ export function RepositoryFields({ form, paths, id }: WorkspaceFieldsProps) {
           />
         </div>
       </div>
-      <div className="flex flex-col gap-5">
-        <Controller
-          control={form.control}
-          name="workspace.git.branchNameTemplate"
-          render={({ field }) => (
-            <Field
-              id={`${id}-branch`}
-              label="Branch name template"
-              hint={PLACEHOLDER_LEGEND}
-              error={errors.git?.branchNameTemplate?.message}
-            >
-              <Input
+      <CollapsibleSection title="Git conventions (optional)" defaultOpen={conventionsOpen}>
+        <div className="flex flex-col gap-5">
+          <p className="text-muted-foreground m-0 text-xs">
+            Handed to the Pilots as conventions. Left empty, a Pilot decides for itself.
+          </p>
+          <Controller
+            control={form.control}
+            name="workspace.git.branchNameTemplate"
+            render={({ field }) => (
+              <Field
                 id={`${id}-branch`}
-                value={field.value ?? ''}
-                onChange={field.onChange}
-                onBlur={field.onBlur}
-                className="font-mono text-sm"
-              />
-            </Field>
-          )}
-        />
-        <Controller
-          control={form.control}
-          name="workspace.git.pullRequestTemplate"
-          render={({ field }) => (
-            <Field
-              id={`${id}-pr`}
-              label="Pull Request description template"
-              hint={PLACEHOLDER_LEGEND}
-            >
-              <Textarea
+                label="Branch name template"
+                hint={PLACEHOLDER_LEGEND}
+                error={errors.git?.branchNameTemplate?.message}
+              >
+                <Input
+                  id={`${id}-branch`}
+                  ref={field.ref}
+                  placeholder={BRANCH_EXAMPLE}
+                  value={field.value ?? ''}
+                  onChange={field.onChange}
+                  onBlur={field.onBlur}
+                  className="font-mono text-sm"
+                />
+              </Field>
+            )}
+          />
+          <Controller
+            control={form.control}
+            name="workspace.git.pullRequestTemplate"
+            render={({ field }) => (
+              <Field
                 id={`${id}-pr`}
-                value={field.value ?? ''}
-                onChange={field.onChange}
-                onBlur={field.onBlur}
-                rows={6}
-                className="font-mono text-sm"
-              />
-            </Field>
-          )}
-        />
-        <div className="grid grid-cols-2 gap-3">
-          <Controller
-            control={form.control}
-            name="workspace.git.labels"
-            render={({ field }) => (
-              <Field id={`${id}-labels`} label="Labels" hint="Enter or comma adds one.">
-                <TagInput
-                  id={`${id}-labels`}
-                  value={field.value ?? []}
+                label="Pull Request description template"
+                hint={PLACEHOLDER_LEGEND}
+              >
+                <Textarea
+                  id={`${id}-pr`}
+                  placeholder={PULL_REQUEST_EXAMPLE}
+                  value={field.value ?? ''}
                   onChange={field.onChange}
-                  aria-label="Labels"
-                  placeholder="feature"
+                  onBlur={field.onBlur}
+                  rows={6}
+                  className="font-mono text-sm"
                 />
               </Field>
             )}
           />
-          <Controller
-            control={form.control}
-            name="workspace.git.reviewers"
-            render={({ field }) => (
-              <Field id={`${id}-reviewers`} label="Reviewers" hint="GitHub logins.">
-                <TagInput
-                  id={`${id}-reviewers`}
-                  value={field.value ?? []}
-                  onChange={field.onChange}
-                  aria-label="Reviewers"
-                  placeholder="octocat"
-                />
-              </Field>
-            )}
-          />
+          <div className="grid grid-cols-2 gap-3">
+            <Controller
+              control={form.control}
+              name="workspace.git.labels"
+              render={({ field }) => (
+                <Field id={`${id}-labels`} label="Labels" hint="Enter or comma adds one.">
+                  <TagInput
+                    id={`${id}-labels`}
+                    value={field.value ?? []}
+                    onChange={field.onChange}
+                    aria-label="Labels"
+                    placeholder="feature"
+                  />
+                </Field>
+              )}
+            />
+            <Controller
+              control={form.control}
+              name="workspace.git.reviewers"
+              render={({ field }) => (
+                <Field id={`${id}-reviewers`} label="Reviewers" hint="GitHub logins.">
+                  <TagInput
+                    id={`${id}-reviewers`}
+                    value={field.value ?? []}
+                    onChange={field.onChange}
+                    aria-label="Reviewers"
+                    placeholder="octocat"
+                  />
+                </Field>
+              )}
+            />
+          </div>
         </div>
-      </div>
+      </CollapsibleSection>
     </div>
   );
 }

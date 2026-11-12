@@ -119,6 +119,11 @@ describe('reduce', () => {
     expect(cleared.slots[4]?.loop).toEqual({ target: 'implementer', limit: 2 });
   });
 
+  it('setTitle sets the title and drops an empty one', () => {
+    expect(run({ type: 'setTitle', title: 'Feature to PR' }).title).toBe('Feature to PR');
+    expect(run({ type: 'setTitle', title: '' })).not.toHaveProperty('title');
+  });
+
   it('patchCore and replaceDoc', () => {
     expect(run({ type: 'patchCore', patch: { model: 'sonnet' } }).core.model).toBe('sonnet');
     const other = { ...primaryAssembly(), name: 'other' };

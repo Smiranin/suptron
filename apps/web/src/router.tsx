@@ -44,10 +44,19 @@ export function createAppRouter(queryClient: QueryClient, history?: RouterHistor
   const assemblyRoute = createRoute({
     getParentRoute: () => rootRoute,
     path: '/projects/$project/assemblies/$assembly',
+    // The title a New Assembly was given; it lives only in the URL until the first save.
+    validateSearch: (search: Record<string, unknown>): { title?: string } =>
+      typeof search.title === 'string' && search.title.trim() !== '' ? { title: search.title } : {},
     component: function AssemblyRoute() {
       const { project, assembly } = assemblyRoute.useParams();
+      const { title } = assemblyRoute.useSearch();
       return (
-        <AssemblyEditorPage key={`${project}/${assembly}`} project={project} assembly={assembly} />
+        <AssemblyEditorPage
+          key={`${project}/${assembly}`}
+          project={project}
+          assembly={assembly}
+          newTitle={title}
+        />
       );
     },
   });

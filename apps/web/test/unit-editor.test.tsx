@@ -102,11 +102,29 @@ describe('Unit editor', () => {
     ]);
   });
 
+  it('keeps the ID of an existing Unit while its title changes', async () => {
+    const home = useFakeHome();
+    const user = userEvent.setup();
+    renderApp('/hangar/reviewer', home.live);
+    // a file written before titles existed shows its ID as the title
+    const title = await screen.findByLabelText(/^Title/);
+    expect(title).toHaveValue('reviewer');
+    await user.clear(title);
+    await user.type(title, 'Code reviewer');
+    expect(screen.getByLabelText('ID')).toHaveValue('reviewer');
+    await user.click(screen.getByTestId('save-button'));
+    await waitFor(() => expect(home.requestsTo('PUT', '/api/units/reviewer')).toHaveLength(1));
+    expect(home.requestsTo('PUT', '/api/units/reviewer')[0]!.body).toMatchObject({
+      name: 'reviewer',
+      title: 'Code reviewer',
+    });
+  });
+
   it('creates a new Unit and navigates to it', async () => {
     const home = useFakeHome();
     const user = userEvent.setup();
     const { router } = renderApp('/hangar/new', home.live);
-    await user.type(await screen.findByLabelText('Name'), 'docs-writer');
+    await user.type(await screen.findByLabelText(/^Title/), 'Docs writer');
     await user.click(screen.getByRole('combobox', { name: 'Model' }));
     await user.click(await screen.findByRole('option', { name: 'Claude Sonnet' }));
     await user.type(screen.getByLabelText('Rules'), 'Only docs.');
@@ -119,6 +137,7 @@ describe('Unit editor', () => {
     expect(put.headers['if-match']).toBeUndefined();
     expect(put.body).toMatchObject({
       name: 'docs-writer',
+      title: 'Docs writer',
       model: 'sonnet',
       rules: 'Only docs.',
       instructions: 'Write them.',

@@ -11,8 +11,8 @@ import { useId, useState } from 'react';
 import { Controller } from 'react-hook-form';
 import { ConfirmDialog } from '../../components/confirm-dialog';
 import { Field } from '../../components/field';
-import { NameField } from '../../components/name-field';
 import type { PathStatus } from '../../components/path-field';
+import { TitleIdFields } from '../../components/title-id-fields';
 import { KnowledgeSourcesField } from './KnowledgeSourcesField';
 import { emptyWorkspace, type ProfileFormHandle } from './profile-form-model';
 import { FolderFields } from './workspace/FolderFields';
@@ -20,7 +20,7 @@ import { NoneFields } from './workspace/NoneFields';
 import { RepositoryFields } from './workspace/RepositoryFields';
 import type { WorkspaceFieldsProps } from './workspace/types';
 
-export { emptyProfile, emptyWorkspace, useProfileForm } from './profile-form-model';
+export { emptyProfile, emptyWorkspace, profileForForm, useProfileForm } from './profile-form-model';
 export type { ProfileFormHandle } from './profile-form-model';
 
 /** Tracks the existence checks of the typed paths; a missing path blocks Save (SPEC FR-14, FR-15). */
@@ -44,8 +44,13 @@ export interface ProfileFormProps {
   form: ProfileFormHandle;
   paths: ReturnType<typeof usePathStatuses>;
   nameError?: string | null;
-  /** An existing Project: changing the kind asks first, because the old kind's fields are dropped (FR-3). */
+  /**
+   * An existing Project: its ID is frozen, and changing the kind asks first, because the old
+   * kind's fields are dropped (FR-3).
+   */
   existing?: boolean;
+  /** IDs of the other Projects, for the live uniqueness check of a new one. */
+  takenNames?: readonly string[];
 }
 
 /** The permitted switch on the kind: which section the form renders (SPEC NFR-1). */
@@ -61,8 +66,15 @@ function WorkspaceFields({ kind, ...props }: WorkspaceFieldsProps & { kind: Work
 }
 
 /** The Project Profile form, kind first (editors SPEC FR-14 to FR-17; workspaces SPEC FR-3). */
-export function ProfileForm({ form, paths, nameError, existing = false }: ProfileFormProps) {
+export function ProfileForm({
+  form,
+  paths,
+  nameError,
+  existing = false,
+  takenNames = [],
+}: ProfileFormProps) {
   const id = useId();
+  const name = form.watch('name');
   const kind = form.watch('workspace.kind');
   const workspacePath = form.watch('workspace.path');
   const [pendingKind, setPendingKind] = useState<WorkspaceKind | null>(null);
@@ -80,29 +92,31 @@ export function ProfileForm({ form, paths, nameError, existing = false }: Profil
 
   return (
     <div className="flex flex-col gap-6">
+      <Controller
+        control={form.control}
+        name="title"
+        render={({ field, fieldState }) => (
+          <TitleIdFields
+            id={id}
+            value={{ title: field.value ?? '', name }}
+            onChange={(next) => {
+              field.onChange(next.title);
+              if (next.name !== name) form.setValue('name', next.name, { shouldDirty: true });
+            }}
+            onBlur={field.onBlur}
+            titleRef={field.ref}
+            frozen={existing}
+            taken={takenNames}
+            titleError={fieldState.error?.message}
+            idError={nameError}
+          />
+        )}
+      />
       <div className="grid gap-6 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
-        <Controller
-          control={form.control}
-          name="name"
-          render={({ field }) => (
-            <Field
-              id={`${id}-name`}
-              label="Name"
-              hint="The Project folder name; renaming moves the folder."
-            >
-              <NameField
-                id={`${id}-name`}
-                value={field.value}
-                onChange={field.onChange}
-                onBlur={field.onBlur}
-                error={nameError}
-              />
-            </Field>
-          )}
-        />
         <Field
           id={`${id}-kind`}
           label="Project type"
+          required
           hint={WORKSPACE_KINDS.find((k) => k.kind === kind)?.description}
         >
           <Select value={kind} onValueChange={(v) => requestKind(v as WorkspaceKind)}>

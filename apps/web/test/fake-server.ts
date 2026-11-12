@@ -521,11 +521,11 @@ export function handlersFor(home: FakeHome): HttpHandler[] {
       return new HttpResponse(null, { status: 204 });
     }),
     http.post('/api/units/:name/duplicate', async ({ params, request }) => {
-      const body = (await record(request)) as { newName: string };
+      const body = (await record(request)) as { newName: string; newTitle?: string };
       const unit = home.units.get(String(params.name));
       if (!unit) return json({ reason: 'not_found' }, 404);
       if (home.units.has(body.newName)) return json({ reason: 'name_taken' }, 409);
-      const copy = { ...unit, name: body.newName };
+      const copy = { ...unit, name: body.newName, title: body.newTitle };
       home.units.set(copy.name, copy);
       return json({ unit: copy, etag: etagOf(copy) }, 201);
     }),
@@ -695,16 +695,34 @@ export function handlersFor(home: FakeHome): HttpHandler[] {
     http.post(
       '/api/projects/:project/assemblies/:assembly/duplicate',
       async ({ params, request }) => {
-        const body = (await record(request)) as { newName: string };
+        const body = (await record(request)) as { newName: string; newTitle?: string };
         const p = home.projects.get(String(params.project));
         const a = p?.assemblies.get(String(params.assembly));
         if (!p || !a?.doc) return json({ reason: 'not_found' }, 404);
         if (p.assemblies.has(body.newName)) return json({ reason: 'name_taken' }, 409);
-        const copy = { ...a.doc, name: body.newName };
+        const copy = { ...a.doc, name: body.newName, title: body.newTitle };
         p.assemblies.set(copy.name, { doc: copy });
         return json({ assembly: copy, etag: etagOf(copy) }, 201);
       },
     ),
+
+    // Echoes the parts so a test sees what the editor sent; the real assembly is the Engine's.
+    http.post('/api/prompts/preview', async ({ request }) => {
+      const body = (await record(request)) as
+        | { role: 'pilot'; rules: string; instructions: string; allowQuestions: boolean }
+        | { role: 'core'; instructions: string };
+      if (body.role === 'pilot') {
+        return json({
+          system: [body.rules, body.instructions, body.allowQuestions ? 'CAN ASK' : '']
+            .filter(Boolean)
+            .join('\n\n'),
+        });
+      }
+      return json({
+        system: ['CORE PREAMBLE', body.instructions].filter(Boolean).join('\n\n'),
+        calls: { judge: 'Be strict.' },
+      });
+    }),
 
     http.post('/api/open', async ({ request }) => {
       const body = (await record(request)) as { path: string };

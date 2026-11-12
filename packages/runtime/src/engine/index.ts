@@ -71,8 +71,16 @@ export interface AgentHandle {
   close(): Promise<void>;
 }
 
+/** What decides an agent's system text, without the Mission-bound parts of an AgentSpec. */
+export type SystemTextSpec = Pick<AgentSpec, 'role' | 'systemPrompt' | 'allowQuestions'>;
+
 export interface Engine {
   listModels(): Promise<ModelInfo[]>;
+  /**
+   * The system text the Engine gives an agent of this spec, exactly as `createAgent` would, so
+   * the Commander can read it before a Mission. An Engine's own built-in prompt is not included.
+   */
+  systemText(spec: SystemTextSpec): string;
   healthCheck(): Promise<HealthStatus>;
   createAgent(spec: AgentSpec): AgentHandle;
 }

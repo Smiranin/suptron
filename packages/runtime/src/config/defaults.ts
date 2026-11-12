@@ -8,6 +8,11 @@ export const DEFAULTS = {
     doneCondition: [] as const,
   },
   core: {
+    /**
+     * The model a new Assembly's Core starts with; the file always states it. The Core judges every
+     * Check, and the judge is never weaker than the Pilots it judges.
+     */
+    model: 'opus',
     defaultAttemptLimit: 2,
     defaultLoopLimit: 3,
     instructions: '',
@@ -31,7 +36,13 @@ export const DEFAULTS = {
       remote: 'origin',
       protectedBranch: 'main',
       host: 'github' as const,
-      git: { pullRequestTemplate: '', labels: [] as const, reviewers: [] as const },
+      /** Every Git convention is optional: an empty one is not given, and the Pilot decides. */
+      git: {
+        branchNameTemplate: '',
+        pullRequestTemplate: '',
+        labels: [] as const,
+        reviewers: [] as const,
+      },
       ciWaitTimeoutMinutes: 30,
     },
     knowledgeSources: [] as const,

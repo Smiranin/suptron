@@ -9,6 +9,7 @@ import { api, useHealth, useInvalidateConfig, useUnits } from '../../api/queries
 import type { UnitItem } from '../../api/types';
 import { ConfirmDialog } from '../../components/confirm-dialog';
 import { NamePromptDialog } from '../../components/name-prompt-dialog';
+import type { TitleId } from '../../components/title-id-fields';
 import { OpenInEditorButton } from '../../components/open-in-editor-button';
 import { EmptyState, PageContainer, PageHeader, StatePanel } from '../../components/page';
 
@@ -43,15 +44,15 @@ export function HangarPage() {
     }
   };
 
-  const duplicate = async (unit: UnitItem, newName: string): Promise<string | null> => {
+  const duplicate = async (unit: UnitItem, copy: TitleId): Promise<string | null> => {
     try {
-      await api.duplicateUnit(unit.name, newName);
+      await api.duplicateUnit(unit.name, copy.name, copy.title);
       await invalidate();
       setPending(null);
-      void navigate({ to: '/hangar/$name', params: { name: newName } });
+      void navigate({ to: '/hangar/$name', params: { name: copy.name } });
       return null;
     } catch (error) {
-      if (error instanceof NameTakenError) return 'That name is already taken';
+      if (error instanceof NameTakenError) return 'That ID is already taken';
       return error instanceof Error ? error.message : String(error);
     }
   };
@@ -90,13 +91,16 @@ export function HangarPage() {
             >
               <div className="flex min-w-0 flex-1 flex-col gap-0.5">
                 {item.unit ? (
-                  <Link
-                    to="/hangar/$name"
-                    params={{ name: item.name }}
-                    className="text-foreground font-mono text-sm font-bold no-underline hover:underline"
-                  >
-                    {item.name}
-                  </Link>
+                  <span className="flex items-center gap-3">
+                    <Link
+                      to="/hangar/$name"
+                      params={{ name: item.name }}
+                      className="text-foreground text-sm font-bold no-underline hover:underline"
+                    >
+                      {item.unit.title ?? item.name}
+                    </Link>
+                    <span className="text-muted-foreground font-mono text-xs">{item.name}</span>
+                  </span>
                 ) : (
                   <span className="font-mono text-sm font-bold">{item.name}</span>
                 )}
@@ -155,11 +159,12 @@ export function HangarPage() {
       )}
       <NamePromptDialog
         open={pending?.kind === 'duplicate'}
-        title={`Duplicate ${pending?.unit.name ?? ''}`}
-        description="The copy keeps every setting; only the name changes."
-        initialValue={pending ? `${pending.unit.name}-copy` : ''}
+        title={`Duplicate ${pending ? (pending.unit.unit?.title ?? pending.unit.name) : ''}`}
+        description="The copy keeps every setting; only the title and ID change."
+        initialTitle={pending ? `${pending.unit.unit?.title ?? pending.unit.name} copy` : ''}
+        takenNames={units.data.map((u) => u.name)}
         confirmLabel="Duplicate"
-        onSubmit={(name) => (pending ? duplicate(pending.unit, name) : Promise.resolve(null))}
+        onSubmit={(copy) => (pending ? duplicate(pending.unit, copy) : Promise.resolve(null))}
         onCancel={() => setPending(null)}
       />
       <ConfirmDialog

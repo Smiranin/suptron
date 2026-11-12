@@ -69,14 +69,17 @@ export function resolveSlot(
   isLast: boolean,
   toggles: MayAskToggles = {},
 ): ResolvedSlot {
-  const additional = slot.instructions?.trim();
+  const additionalInstructions = slot.instructions?.trim();
+  const additionalRules = slot.rules?.trim();
   const mayAskCommander = toggles[slot.name] ?? slot.mayAskCommander ?? unit.mayAskCommander;
   const resolved: ResolvedSlot = {
     name: slot.name,
     unit: slot.unit,
     model: slot.model ?? unit.model,
-    rules: unit.rules,
-    instructions: additional ? `${unit.instructions.trim()}\n\n${additional}` : unit.instructions,
+    rules: additionalRules ? `${unit.rules.trim()}\n\n${additionalRules}` : unit.rules,
+    instructions: additionalInstructions
+      ? `${unit.instructions.trim()}\n\n${additionalInstructions}`
+      : unit.instructions,
     doneCondition: [...(slot.doneCondition ?? unit.doneCondition)],
     mayAskCommander,
     attemptLimit: slot.attemptLimit ?? core.defaultAttemptLimit,

@@ -16,13 +16,20 @@ export function CoreDirectivesPanel({
   dispatch: (cmd: Command) => void;
 }) {
   const core = doc.core;
-  const number = (key: 'defaultAttemptLimit' | 'defaultLoopLimit', raw: string) => {
+  /** An empty or out-of-range entry clears the field, so its default applies. */
+  const number = (
+    key: 'defaultAttemptLimit' | 'defaultLoopLimit' | 'resolutionLimit',
+    raw: string,
+    min = 1,
+  ) => {
     const value = Number(raw);
     dispatch({
       type: 'patchCore',
       patch: {
         [key]:
-          raw.trim() === '' || !Number.isFinite(value) || value < 1 ? undefined : Math.floor(value),
+          raw.trim() === '' || !Number.isFinite(value) || value < min
+            ? undefined
+            : Math.floor(value),
       },
     });
   };
@@ -71,6 +78,21 @@ export function CoreDirectivesPanel({
             onChange={(e) => number('defaultLoopLimit', e.target.value)}
           />
         </div>
+      </div>
+      <div className="flex flex-col gap-1">
+        <Label htmlFor="core-resolutions">Core decision limit</Label>
+        <Input
+          id="core-resolutions"
+          type="number"
+          min={0}
+          value={core.resolutionLimit ?? DEFAULTS.core.resolutionLimit}
+          onChange={(e) => number('resolutionLimit', e.target.value, 0)}
+        />
+        <p className="text-muted-foreground text-xs">
+          How many times per Slot the Core decides in your place before the Mission goes to Needs
+          Attention: one more Attempt with its own note, or a failed judgment accepted as an open
+          point. 0: every such point waits for you.
+        </p>
       </div>
       <CollapsibleSection title="Built-in directives">
         <PromptPreview request={{ role: 'core', instructions: '' }} />

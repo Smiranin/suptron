@@ -106,6 +106,11 @@ export function serializeAssembly(assembly: AssemblyFile): string {
     'defaultLoopLimit',
     unlessDefault(assembly.core.defaultLoopLimit, DEFAULTS.core.defaultLoopLimit),
   );
+  put(
+    core,
+    'resolutionLimit',
+    unlessDefault(assembly.core.resolutionLimit, DEFAULTS.core.resolutionLimit),
+  );
   put(core, 'instructions', unlessDefault(assembly.core.instructions, DEFAULTS.core.instructions));
   const doc: Plain = { name: assembly.name };
   put(doc, 'title', assembly.title);

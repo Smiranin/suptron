@@ -167,7 +167,13 @@ async function cleanup(h: Harness | undefined) {
 function linear(slots: AssemblyFile['slots'], name = 'feature'): AssemblyFile {
   return {
     name,
-    core: { model: 'opus', defaultAttemptLimit: 2, defaultLoopLimit: 3, instructions: '' },
+    core: {
+      model: 'opus',
+      defaultAttemptLimit: 2,
+      defaultLoopLimit: 3,
+      resolutionLimit: 2,
+      instructions: '',
+    },
     slots,
   };
 }
@@ -944,5 +950,255 @@ describe('Runner scenarios on a folder and on no folder', () => {
       issues: [{ field: 'workspace', message: expect.stringContaining('/nowhere/at/all') }],
     });
     expect(await readdir(join(h.home, 'missions')).catch(() => [])).toEqual([]);
+  });
+});
+
+describe('Runner scenarios with Core Resolutions', () => {
+  let h: Harness | undefined;
+  afterEach(() => cleanup(h));
+
+  const JUDGED: Check = { kind: 'llm_judgment', criterion: 'The document is complete.' };
+
+  interface ResolveInput {
+    cause: string;
+    mayAccept: boolean;
+    resolutionsLeft: number;
+    detail?: string;
+  }
+
+  /** Scripts the named Core calls; every other call keeps the default answer. */
+  function scriptCore(
+    engine: FakeEngine,
+    answers: Partial<Record<'judge' | 'resolveAttention', (nth: number) => object>>,
+  ) {
+    const counts = new Map<string, number>();
+    engine.script('core', 'core', (call) => {
+      const name = coreCallName(call.prompt) as 'judge' | 'resolveAttention';
+      const answer = answers[name];
+      if (!answer) return (engine.defaultCoreScript as (c: FakeCall) => FakeStep[])(call);
+      const nth = counts.get(name) ?? 0;
+      counts.set(name, nth + 1);
+      return [{ result: { structured: answer(nth) } }];
+    });
+  }
+
+  const resolveInputs = (engine: FakeEngine): ResolveInput[] =>
+    engine
+      .callsFor('core', 'core')
+      .filter((c) => coreCallName(c.prompt) === 'resolveAttention')
+      .map((c) => coreCallInput(c.prompt) as ResolveInput);
+
+  const attempts = (events: MissionEvent[]) =>
+    events.flatMap((e) => (e.type === 'slot.started' ? [e.attempt] : []));
+
+  const attentionCount = (events: MissionEvent[]) =>
+    events.filter((e) => e.type === 'mission.state' && e.state === 'needs_attention').length;
+
+  const failing = () => ({ holds: false, reason: 'One entry lacks a source.' });
+
+  it('gives the Pilot one more Attempt with the Core note instead of Needs Attention', async () => {
+    h = await harness([unit('a', [JUDGED])], [linear([{ name: 'a', unit: 'a' }])], 'none');
+    scriptCore(h.engine, {
+      judge: (nth) => (nth < 2 ? failing() : { holds: true, reason: 'Complete.' }),
+      resolveAttention: () => ({
+        decision: 'retry',
+        reason: 'One entry is left; dropping it is within the Task.',
+        note: 'Drop the unsourced entry.',
+      }),
+    });
+    const id = await h.start();
+    await h.waitFor((es) => es.some((e) => e.type === 'mission.completed'));
+
+    expect(attentionCount(h.events)).toBe(0);
+    expect(attempts(h.events)).toEqual([1, 2, 3]);
+    expect(resolveInputs(h.engine)).toMatchObject([
+      { cause: 'attempt_limit', mayAccept: true, resolutionsLeft: 2 },
+    ]);
+    // the Core's note reaches the Pilot under the Core's name; the transcript has it with the Resolution
+    const third = h.events.filter((e) => e.type === 'slot.started')[2]!;
+    expect(third).not.toHaveProperty('note');
+    expect(
+      (coreCallInput(composeCalls(h.engine, 'a')[2]!.prompt) as { feedback: object }).feedback,
+    ).toMatchObject({ note: 'Drop the unsourced entry.', noteFrom: 'core' });
+    const resolution = {
+      cause: 'attempt_limit',
+      decision: 'retry',
+      note: 'Drop the unsourced entry.',
+    };
+    expect(h.events.find((e) => e.type === 'core.resolved')).toMatchObject({
+      slot: 'a',
+      resolution,
+    });
+    // the final report is written from records that carry the Resolution
+    const report = h.engine
+      .callsFor('core', 'core')
+      .find((c) => coreCallName(c.prompt) === 'finalReport')!;
+    expect(
+      (coreCallInput(report.prompt) as { slots: { resolutions?: object[] }[] }).slots[0]
+        ?.resolutions,
+    ).toMatchObject([resolution]);
+    expect(h.registry.get(id)?.slots[0]?.resolutions).toHaveLength(1);
+  });
+
+  it('accepts a failed judgment as an open point and moves on', async () => {
+    h = await harness(
+      [unit('a', [JUDGED]), unit('b', [PASS])],
+      [
+        linear([
+          { name: 'a', unit: 'a' },
+          { name: 'b', unit: 'b', context: { slotOutputs: ['a'] } },
+        ]),
+      ],
+      'none',
+    );
+    scriptCore(h.engine, {
+      judge: failing,
+      resolveAttention: () => ({ decision: 'accept', reason: 'One entry of seventy is open.' }),
+    });
+    const id = await h.start();
+    await h.waitFor((es) => es.some((e) => e.type === 'mission.completed'));
+
+    expect(attentionCount(h.events)).toBe(0);
+    expect(h.events.flatMap((e) => (e.type === 'slot.started' ? [e.slot] : []))).toEqual([
+      'a',
+      'a',
+      'b',
+    ]);
+    const slotA = h.registry.get(id)!.slots[0]!;
+    expect(slotA.checkResults.map((r) => r.holds)).toEqual([false]);
+    expect(slotA.resolutions).toMatchObject([
+      { decision: 'accept', failedChecks: [{ holds: false }] },
+    ]);
+    expect(slotA.resolutions?.[0]).not.toHaveProperty('note');
+    // the accepted Slot Output reaches the Slot that names it
+    const bundle = coreCallInput(composeCalls(h.engine, 'b')[0]!.prompt) as {
+      bundle: { slotOutputs: { slotName: string }[] };
+    };
+    expect(bundle.bundle.slotOutputs.map((o) => o.slotName)).toEqual(['a']);
+  });
+
+  it('accepts at the Loop limit when the looping Slot fails a judgment', async () => {
+    h = await harness(
+      [unit('w', [PASS]), unit('r', [JUDGED])],
+      [
+        linear([
+          { name: 'w', unit: 'w' },
+          { name: 'r', unit: 'r', loop: { target: 'w', limit: 1 } },
+        ]),
+      ],
+      'none',
+    );
+    scriptCore(h.engine, {
+      judge: failing,
+      resolveAttention: () => ({ decision: 'accept', reason: 'The finding is cosmetic.' }),
+    });
+    await h.start();
+    await h.waitFor((es) => es.some((e) => e.type === 'mission.completed'));
+    expect(attentionCount(h.events)).toBe(0);
+    expect(resolveInputs(h.engine)).toMatchObject([{ cause: 'loop_limit', mayAccept: true }]);
+  });
+
+  it('never lets the Core accept a Check that is not a judgment', async () => {
+    h = await harness([unit('a', [FAIL])], [linear([{ name: 'a', unit: 'a' }])]);
+    scriptCore(h.engine, {
+      resolveAttention: () => ({ decision: 'accept', reason: 'Close enough.' }),
+    });
+    const id = await h.start();
+    await h.waitForState(id, 'needs_attention');
+    expect(resolveInputs(h.engine)).toMatchObject([{ mayAccept: false }]);
+    const attention = h.registry.get(id)!.attention!;
+    expect(attention.cause).toBe('attempt_limit');
+    expect(attention.reason).toContain('Close enough.');
+    expect(attention.reason).toContain('only the Commander may');
+    expect(h.events.some((e) => e.type === 'core.resolved')).toBe(false);
+    await h.registry.stop(id);
+  });
+
+  it('never lets the Core accept the last Exit Condition', async () => {
+    h = await harness(
+      [unit('a', [PASS])],
+      [linear([{ name: 'a', unit: 'a', exitCondition: [JUDGED] }])],
+      'none',
+    );
+    scriptCore(h.engine, {
+      judge: failing,
+      resolveAttention: () => ({ decision: 'accept', reason: 'Close enough.' }),
+    });
+    const id = await h.start();
+    await h.waitForState(id, 'needs_attention');
+    expect(resolveInputs(h.engine)).toMatchObject([
+      { cause: 'last_exit_condition_failed', mayAccept: false },
+    ]);
+    expect(h.registry.get(id)?.attention?.cause).toBe('last_exit_condition_failed');
+    await h.registry.stop(id);
+  });
+
+  it('goes to the Commander when the Resolutions of a Slot are used up; a Retry renews them', async () => {
+    h = await harness([unit('a', [FAIL])], [linear([{ name: 'a', unit: 'a' }])]);
+    scriptCore(h.engine, {
+      resolveAttention: (nth) => ({ decision: 'retry', reason: 'Try again.', note: `fix ${nth}` }),
+    });
+    const id = await h.start();
+    await h.waitForState(id, 'needs_attention');
+    expect(attempts(h.events)).toEqual([1, 2, 3, 4]);
+    expect(resolveInputs(h.engine).map((i) => i.resolutionsLeft)).toEqual([2, 1]);
+    expect(h.registry.get(id)?.attention?.reason).toContain('used its 2 Resolutions');
+
+    h.registry.retry(id, 'my turn');
+    await h.waitFor((es) => attentionCount(es) === 2);
+    expect(attempts(h.events)).toEqual([1, 2, 3, 4, 5, 6, 7]);
+    expect(resolveInputs(h.engine).map((i) => i.resolutionsLeft)).toEqual([2, 1, 2, 1]);
+    await h.registry.stop(id);
+  });
+
+  it('counts the Resolutions of every Slot from zero', async () => {
+    h = await harness(
+      [unit('a', [JUDGED]), unit('b', [JUDGED])],
+      [
+        linear([
+          { name: 'a', unit: 'a' },
+          { name: 'b', unit: 'b' },
+        ]),
+      ],
+      'none',
+    );
+    scriptCore(h.engine, {
+      // each Slot fails its two Attempts and holds on the third
+      judge: (nth) => (nth % 3 < 2 ? failing() : { holds: true, reason: 'Complete.' }),
+      resolveAttention: () => ({ decision: 'retry', reason: 'Try again.', note: 'fix it' }),
+    });
+    await h.start();
+    await h.waitFor((es) => es.some((e) => e.type === 'mission.completed'));
+    expect(resolveInputs(h.engine).map((i) => i.resolutionsLeft)).toEqual([2, 2]);
+  });
+
+  it('lets the Core retry one Engine error and sends the second in a row to the Commander', async () => {
+    h = await harness([unit('a', [PASS])], [linear([{ name: 'a', unit: 'a' }])]);
+    h.engine.script('pilot', 'a', [{ error: 'boom' }]);
+    scriptCore(h.engine, {
+      resolveAttention: () => ({ decision: 'retry', reason: 'A transient failure.' }),
+    });
+    const id = await h.start();
+    await h.waitForState(id, 'needs_attention');
+    expect(attempts(h.events)).toEqual([1, 2]);
+    expect(resolveInputs(h.engine)).toMatchObject([
+      { cause: 'engine_error', mayAccept: false, detail: expect.stringContaining('boom') },
+    ]);
+    expect(h.registry.get(id)?.attention).toMatchObject({ cause: 'engine_error' });
+    expect(h.registry.get(id)?.attention?.reason).toContain('boom');
+    await h.registry.stop(id);
+  });
+
+  it('never asks the Core to decide when the Resolution limit is 0', async () => {
+    const assembly = linear([{ name: 'a', unit: 'a' }]);
+    assembly.core.resolutionLimit = 0;
+    h = await harness([unit('a', [FAIL])], [assembly]);
+    const id = await h.start();
+    await h.waitForState(id, 'needs_attention');
+    expect(resolveInputs(h.engine)).toEqual([]);
+    expect(h.registry.get(id)?.attention?.reason).toBe(
+      'The Mission needs attention: attempt_limit.',
+    );
+    await h.registry.stop(id);
   });
 });

@@ -1,5 +1,6 @@
 import {
   executionId,
+  resolutionNote,
   type ExecutionKey,
   type MissionDetail,
   type MissionEvent,
@@ -249,6 +250,24 @@ function applyEvent(state: ReadyMissionState, event: MissionEvent, now: number):
       return event.acceptedAtLimit
         ? appendEntry(next, event, { kind: 'note', text: ACCEPTED_AT_LIMIT_NOTE })
         : next;
+    }
+    case 'core.resolved': {
+      const next = appendEntry(base, event, {
+        kind: 'note',
+        text: resolutionNote(event.resolution),
+      });
+      const record = next.slots[event.slot];
+      if (!record) return next;
+      return {
+        ...next,
+        slots: {
+          ...next.slots,
+          [event.slot]: {
+            ...record,
+            resolutions: [...(record.resolutions ?? []), event.resolution],
+          },
+        },
+      };
     }
     case 'agent.text':
       return appendEntry(base, event, { kind: 'text', text: event.payload.text });

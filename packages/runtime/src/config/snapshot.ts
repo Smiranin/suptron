@@ -119,6 +119,7 @@ export function resolveCore(core: CoreDirectivesFile): CoreDirectives {
     model: core.model,
     defaultAttemptLimit: core.defaultAttemptLimit ?? DEFAULTS.core.defaultAttemptLimit,
     defaultLoopLimit: core.defaultLoopLimit ?? DEFAULTS.core.defaultLoopLimit,
+    resolutionLimit: core.resolutionLimit ?? DEFAULTS.core.resolutionLimit,
     instructions: core.instructions ?? DEFAULTS.core.instructions,
   };
 }

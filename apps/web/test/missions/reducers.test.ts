@@ -559,3 +559,29 @@ describe('mission page reducer', () => {
     expect(ready1.connection).toBe('closed');
   });
 });
+
+describe('mission page reducer: Resolutions of the Core', () => {
+  it('writes the Resolution into the running Attempt and onto the Slot record', () => {
+    const resolution = {
+      cause: 'attempt_limit' as const,
+      decision: 'retry' as const,
+      reason: 'One entry is left.',
+      note: 'Drop the unsourced entry.',
+      failedChecks: [],
+    };
+    const state = ready(
+      play(
+        initMissionPage(runningDetail()),
+        [{ type: 'core.resolved', slot: 'implementer', resolution }],
+        12,
+      ),
+    );
+    expect(state.summary.state).toBe('running');
+    expect(state.attention).toBeUndefined();
+    expect(state.sections.at(-1)!.entries.at(-1)).toMatchObject({
+      kind: 'note',
+      text: 'The Core decided on one more Attempt: One entry is left.\n\nNote to the Pilot: Drop the unsourced entry.',
+    });
+    expect(state.slots.implementer?.resolutions).toEqual([resolution]);
+  });
+});

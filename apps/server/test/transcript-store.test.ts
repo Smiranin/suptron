@@ -111,4 +111,39 @@ describe('TranscriptStore', () => {
     store.apply(ev('mission.dismissed', {}));
     expect(store.sections(m)).toEqual([]);
   });
+
+  it('writes a Resolution of the Core as a note of the Attempt it closes', () => {
+    const store = new TranscriptStore();
+    store.apply(ev('slot.started', { slot: 'researcher', attempt: 2 }));
+    store.apply(
+      ev('core.resolved', {
+        slot: 'researcher',
+        resolution: {
+          cause: 'attempt_limit',
+          decision: 'retry',
+          reason: 'One entry is left.',
+          note: 'Drop the unsourced entry.',
+          failedChecks: [],
+        },
+      }),
+    );
+    store.apply(
+      ev('core.resolved', {
+        slot: 'researcher',
+        resolution: {
+          cause: 'attempt_limit',
+          decision: 'accept',
+          reason: 'The gap is minor.',
+          failedChecks: [],
+        },
+      }),
+    );
+    expect(store.sections(m).at(-1)!.entries).toMatchObject([
+      {
+        kind: 'note',
+        text: 'The Core decided on one more Attempt: One entry is left.\n\nNote to the Pilot: Drop the unsourced entry.',
+      },
+      { kind: 'note', text: 'The Core accepted this Slot with open points: The gap is minor.' },
+    ]);
+  });
 });

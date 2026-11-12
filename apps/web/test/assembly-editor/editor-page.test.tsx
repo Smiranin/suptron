@@ -441,6 +441,18 @@ describe('Assembly editor: inspector', () => {
     const request = await save(home, user);
     expect((request.body as AssemblyFile).core.model).toBe('sonnet');
   });
+
+  it("sets how many times the Core decides in the Commander's place, 0 included", async () => {
+    const { user, home } = await openEditor();
+    await user.click(screen.getByRole('button', { name: 'Core' }));
+    const panel = await screen.findByTestId('core-panel');
+    const field = within(panel).getByLabelText('Core decision limit');
+    expect(field).toHaveValue(2);
+    // typed over the selected value: an emptied field shows its default again
+    await user.type(field, '0', { initialSelectionStart: 0, initialSelectionEnd: 1 });
+    const request = await save(home, user);
+    expect((request.body as AssemblyFile).core.resolutionLimit).toBe(0);
+  });
 });
 
 describe('Assembly editor: capabilities of the Project', () => {

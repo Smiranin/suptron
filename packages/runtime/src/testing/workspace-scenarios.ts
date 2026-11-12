@@ -78,6 +78,7 @@ export function briefAssembly(name = 'brief'): AssemblyFile {
       model: 'opus',
       defaultAttemptLimit: 2,
       defaultLoopLimit: 3,
+      resolutionLimit: 2,
       instructions: [
         'Compose each Slot prompt from the Task documents, the Knowledge Sources and the Slot',
         'Outputs it is given. Judge Checks strictly against their criterion. Report at the end',

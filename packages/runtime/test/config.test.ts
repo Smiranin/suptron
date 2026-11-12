@@ -362,8 +362,20 @@ describe('serialize round-trips', () => {
   it('omits defaults and writes exitPoint on the last Slot', async () => {
     const text = serializeAssembly(primaryAssembly());
     expect(text).not.toContain('defaultAttemptLimit');
+    expect(text).not.toContain('resolutionLimit');
     expect(text.trim().endsWith('exitPoint: true')).toBe(true);
     expect(assemblyFileSchema.parse(parse(text))).toEqual(primaryAssembly());
+  });
+
+  it('writes a Resolution limit that differs from the default, 0 included', async () => {
+    const doc = primaryAssembly();
+    doc.core.resolutionLimit = 0;
+    const text = serializeAssembly(doc);
+    expect(text).toContain('resolutionLimit: 0');
+    expect(assemblyFileSchema.parse(parse(text)).core.resolutionLimit).toBe(0);
+    expect(
+      assemblyFileSchema.safeParse({ ...doc, core: { ...doc.core, resolutionLimit: -1 } }).success,
+    ).toBe(false);
   });
 
   it('leaves out Git conventions nobody set, and the Branch convention line with them', async () => {

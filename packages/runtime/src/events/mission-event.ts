@@ -5,6 +5,7 @@ import type {
   MissionState,
   MissionSummary,
   NeedsAttentionCause,
+  Resolution,
   SlotRecord,
 } from '../domain/mission.js';
 import type { Answers, Question } from '../domain/transcript.js';
@@ -54,6 +55,8 @@ export type MissionEvent =
       /** The Done Condition failed at the Loop limit but the Accept Condition held. */
       acceptedAtLimit?: true;
     }
+  /** The Core took a Resolution on this Slot instead of sending the Mission to Needs Attention. */
+  | { type: 'core.resolved'; missionId: string; seq: number; slot: string; resolution: Resolution }
   | {
       type: 'agent.text';
       missionId: string;

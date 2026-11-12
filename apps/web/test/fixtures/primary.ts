@@ -123,7 +123,13 @@ export function briefUnits(): UnitFile[] {
 export function briefAssembly(name = 'brief'): AssemblyFile {
   return {
     name,
-    core: { model: 'opus', defaultAttemptLimit: 2, defaultLoopLimit: 3, instructions: '' },
+    core: {
+      model: 'opus',
+      defaultAttemptLimit: 2,
+      defaultLoopLimit: 3,
+      resolutionLimit: 2,
+      instructions: '',
+    },
     slots: [
       { name: 'researcher', unit: 'researcher' },
       {
@@ -144,6 +150,7 @@ export function primaryAssembly(name = 'feature'): AssemblyFile {
       model: 'opus',
       defaultAttemptLimit: 2,
       defaultLoopLimit: 3,
+      resolutionLimit: 2,
       instructions: 'Compose each Slot prompt carefully.',
     },
     slots: [
@@ -171,7 +178,13 @@ export function primaryAssembly(name = 'feature'): AssemblyFile {
 export function invalidAssembly(name = 'broken'): AssemblyFile {
   return {
     name,
-    core: { model: 'opus', defaultAttemptLimit: 2, defaultLoopLimit: 3, instructions: '' },
+    core: {
+      model: 'opus',
+      defaultAttemptLimit: 2,
+      defaultLoopLimit: 3,
+      resolutionLimit: 2,
+      instructions: '',
+    },
     slots: [
       { name: 'analyst', unit: 'analyst', loop: { target: 'tester', limit: 3 } },
       { name: 'tester', unit: 'tester', exitPoint: true },

@@ -140,6 +140,7 @@ export const coreDirectivesSchema = z.object({
   model: z.string().min(1, 'A model is required'),
   defaultAttemptLimit: z.number().int().positive().default(DEFAULTS.core.defaultAttemptLimit),
   defaultLoopLimit: z.number().int().positive().default(DEFAULTS.core.defaultLoopLimit),
+  resolutionLimit: z.number().int().nonnegative().default(DEFAULTS.core.resolutionLimit),
   instructions: z.string().default(DEFAULTS.core.instructions),
 });
 

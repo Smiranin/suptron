@@ -36,10 +36,11 @@ dated 2026-11-05 were taken with the Commander after run 6.
 - [ ] **Two guards before a Loop fires again.** (1) Code: the Loop target's Attempt changed nothing in the
       Workspace and the Task folder and the looping Slot's Done Condition failed again: Needs Attention
       `loop_no_change`, no Core call. (2) Core: something changed; a new call `loopDecision` (the review, the
-      target's handover, the round) answers `continue` or `needs_commander` with a reason, leaning towards asking
-      (a wrong "ask" costs one Retry, a wrong "continue" costs a round). The Retry note of both causes goes to the
-      Loop target; the UI says so. This is also the channel for a finding only the Commander can resolve: the
-      target names it under `Open`. Sessions stay: reviewer `fresh`, writer `persistent`.
+      target's handover, the round) answers `continue` or `needs_commander` with a reason. Since ADR-0006 the
+      Core is the Commander's deputy: both guards go through the Runner's `decide` (a Resolution first, the
+      Commander only when the Core may not or could not), and `loopDecision` leans towards deciding, not asking.
+      The Retry note of both causes goes to the Loop target; the UI says so. A finding only the Commander can
+      resolve is named by the target under `Open`. Sessions stay: reviewer `fresh`, writer `persistent`.
 - [ ] **Loop limit: fix the words, keep the count.** The limit counts how many times the Loop may send the work
       back (limit 5: six runs of the looping Slot). Editor field ("Iteration limit" today) and Mission UI say so;
       the round shows as "Loop 3 of 5". Default stays 3.
@@ -63,6 +64,13 @@ dated 2026-11-05 were taken with the Commander after run 6.
       items above, so the next changes are their own diffs.
 
 ## Open, not designed yet
+
+- **Tell the Commander when a Mission needs them.** With Resolutions (ADR-0006) a Needs Attention is rare and
+  real; the Commander is away by then and learns of it only on return. A notification (system, push) on
+  `needs_attention`, `waiting_for_owner` and `completed`.
+- **The Core reads before it resolves.** Today a Resolution rests on the Check results and the Slot Output the
+  Core already has. Read access to the Task folder and the Workspace would ground an `accept`; design it with
+  the judge item above, only if runs show blind Resolutions going wrong.
 
 - **Cost and usage limits per Mission.** The Commander runs on a subscription: the real limit is usage, which runs
   out and resets hours later. Wants planning (know the window, wait for the reset, resume), not a dollar cap

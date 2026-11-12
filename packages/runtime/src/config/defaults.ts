@@ -15,6 +15,11 @@ export const DEFAULTS = {
     model: 'opus',
     defaultAttemptLimit: 2,
     defaultLoopLimit: 3,
+    /**
+     * How many Resolutions the Core may take on one Slot before the Mission goes to Needs
+     * Attention; 0 sends every such point straight to the Commander.
+     */
+    resolutionLimit: 2,
     instructions: '',
   },
   loopLimit: 3,

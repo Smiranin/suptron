@@ -55,8 +55,12 @@ Whether a Slot's agent is created fresh on every execution (fresh) or keeps its 
 _Avoid_: Session mode, statefulness
 
 **Attempt**:
-One execution of a single Slot. A Slot may be attempted several times before the Mission goes to Needs Attention.
+One execution of a single Slot. A Slot may be attempted several times before its limit is reached; at the limit the Core takes a Resolution or the Mission goes to Needs Attention.
 _Avoid_: Retry, try
+
+**Resolution**:
+A decision the Core takes in the Commander's place at a point where plain code cannot go on (an Attempt or Loop limit, a failed last Exit Condition, a CI timeout, an Engine error): one more Attempt with the Core's own note, or the Slot counted as done with its failed Checks as open points. Each Slot has a limit of Resolutions (Core Directives, default 2, 0 turns them off); a forward move, a Loop into the Slot and the Commander's Retry start the count afresh. Plain code keeps what a Resolution can never be: accepting a Check that is not an `llm_judgment`, accepting an Exit Condition, retrying a second Engine error in a row. Every Resolution is written to the transcript and to the final report.
+_Avoid_: Auto-retry, override, self-healing
 
 **Done Condition**:
 The list of Checks that must all hold for a Slot to count as done, so that the Core may move past it. Deterministic where possible (tests pass, CI green, no open comments); an LLM judgment only when configured.
@@ -75,11 +79,11 @@ One verifiable condition from the system's fixed catalogue (for example: a comma
 _Avoid_: Assertion, validation, test (a test is one thing a Check may run)
 
 **Core**:
-The LLM agent that orchestrates a Mission under the Core Directives of its Assembly: it hands each Pilot its context, checks Done Conditions and Exit Conditions with deterministic tools, decides on Attempts and Loops, and sends the Mission to Needs Attention. It never declares a Mission Completed on its own, never changes the structure of the Assembly and never touches code itself. On the Assembly's clock it is the circle in the centre.
+The LLM agent that orchestrates a Mission under the Core Directives of its Assembly: it hands each Pilot its context, checks Done Conditions and Exit Conditions with deterministic tools, decides on Attempts and Loops, and stands in for the Commander: where a Mission would wait for them it takes a Resolution, and sends the Mission to Needs Attention only when the decision is not its own to take. It never declares a Mission Completed on its own, never changes the structure of the Assembly and never touches code itself. On the Assembly's clock it is the circle in the centre.
 _Avoid_: Orchestrator, supervisor, manager, brain, Master Agent (former name)
 
 **Core Directives**:
-The configurable part of an Assembly that governs the Core: its model, Attempt and Loop limits, how context is assembled, how Checks are judged, when to go to Needs Attention, how to report. Core Directives can never reorder, skip or add Slots.
+The configurable part of an Assembly that governs the Core: its model, Attempt, Loop and Resolution limits, how context is assembled, how Checks are judged, when to go to Needs Attention, how to report. Core Directives can never reorder, skip or add Slots.
 _Avoid_: Core config, orchestration policy, Master Rules (former name)
 
 **Pilot**:
@@ -111,7 +115,7 @@ An existing working copy (the main clone or a git worktree) of a Project whose W
 _Avoid_: Working copy, worktree (a worktree is one kind of Checkout)
 
 **Needs Attention**:
-The state of a Mission that cannot continue without the Commander: a Slot exhausted its Attempts, a Loop reached its limit, or the Core met a situation it may not resolve alone. Nothing runs while a Mission is in Needs Attention; the Mission waits, it does not end.
+The state of a Mission that cannot continue without the Commander: the Core used up its Resolutions on a Slot, judged that the decision belongs to the Commander (it would change the Task, break a Unit's Rules, or the Engine has no access), or met a point plain code reserves for the Commander. Nothing runs while a Mission is in Needs Attention; the Mission waits, it does not end.
 _Avoid_: Failed, error, blocked
 
 **Stopped**:

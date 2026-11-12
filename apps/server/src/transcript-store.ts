@@ -1,8 +1,9 @@
-import type {
-  ExecutionKey,
-  MissionEvent,
-  TranscriptEntry,
-  TranscriptSection,
+import {
+  resolutionNote,
+  type ExecutionKey,
+  type MissionEvent,
+  type TranscriptEntry,
+  type TranscriptSection,
 } from '@suptron/runtime';
 
 type EntryBody = TranscriptEntry extends infer E
@@ -62,6 +63,8 @@ export class TranscriptStore {
       case 'slot.done':
         if (event.acceptedAtLimit) return this.append(event, { kind: 'note', text: ACCEPTED_NOTE });
         return;
+      case 'core.resolved':
+        return this.append(event, { kind: 'note', text: resolutionNote(event.resolution) });
       case 'agent.text':
         return this.append(event, { kind: 'text', text: event.payload.text });
       case 'agent.tool_call':

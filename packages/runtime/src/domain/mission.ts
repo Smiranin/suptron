@@ -21,6 +21,30 @@ export function isActiveState(state: MissionState): boolean {
 export type NeedsAttentionCause =
   'attempt_limit' | 'loop_limit' | 'last_exit_condition_failed' | 'ci_timeout' | 'engine_error';
 
+/**
+ * A decision the Core took in the Commander's place at a point that would otherwise be a Needs
+ * Attention: one more Attempt with the Core's note, or the Slot counted as done although Checks
+ * failed (then `failedChecks` are the open points of the final report).
+ */
+export interface Resolution {
+  cause: NeedsAttentionCause;
+  decision: 'retry' | 'accept';
+  reason: string;
+  /** What the Pilot's next Attempt is told to do; `retry` only. */
+  note?: string;
+  failedChecks: CheckResult[];
+}
+
+/** The transcript line of a Resolution; the server's store and the web reducer both write it. */
+export function resolutionNote(resolution: Resolution): string {
+  const head =
+    resolution.decision === 'accept'
+      ? 'The Core accepted this Slot with open points'
+      : 'The Core decided on one more Attempt';
+  const note = resolution.note === undefined ? '' : `\n\nNote to the Pilot: ${resolution.note}`;
+  return `${head}: ${resolution.reason}${note}`;
+}
+
 /** The Core's cost is recorded under this pseudo-Slot. */
 export const CORE_SLOT_NAME = 'core';
 
@@ -56,6 +80,8 @@ export interface SlotRecord {
   lastOutput?: string;
   cost: Cost;
   checkResults: CheckResult[];
+  /** In the order taken; absent when the Core took none on this Slot. */
+  resolutions?: Resolution[];
 }
 
 export interface PendingQuestion {

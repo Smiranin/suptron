@@ -1,6 +1,11 @@
 import { evaluateCondition, type CheckContext } from '../checks/runners.js';
 import type { MissionSnapshot, ResolvedSlot } from '../config/snapshot.js';
-import type { CoreAgent, Feedback, KnowledgeSourceRef } from '../core-agent/index.js';
+import type {
+  AttentionDecision,
+  CoreAgent,
+  Feedback,
+  KnowledgeSourceRef,
+} from '../core-agent/index.js';
 import type { CheckResult } from '../domain/check.js';
 import { addCost, ZERO_COST, type Cost } from '../domain/cost.js';
 import {
@@ -11,6 +16,7 @@ import {
   type MissionSummary,
   type NeedsAttentionCause,
   type PendingQuestion,
+  type Resolution,
   type SlotRecord,
 } from '../domain/mission.js';
 import type { Answers } from '../domain/transcript.js';
@@ -46,7 +52,17 @@ export interface MissionMeta {
   startedAt: string;
 }
 
-type Control = { kind: 'stop' } | { kind: 'retry'; note?: string };
+/** What the Commander answers in Needs Attention; a Retry may also come from the Core. */
+type Control = { kind: 'stop' } | { kind: 'retry'; note?: string; from: 'commander' | 'core' };
+
+/** What `decide` returns: the Commander's answer, or the Core counting the Slot as done. */
+type Decision = Control | { kind: 'accept' };
+
+/** The causes at which a failed Done Condition may be accepted; the others have nothing to accept. */
+type AcceptableCause = Extract<NeedsAttentionCause, 'attempt_limit' | 'loop_limit'>;
+
+/** A second Engine error in a row is the Commander's: one more blind Attempt would not help. */
+const ENGINE_ERRORS_BEFORE_COMMANDER = 2;
 
 interface QueuedQuestion extends PendingQuestion {
   respond(answers: Answers): void;
@@ -70,8 +86,9 @@ class StopRequested extends Error {
 }
 
 /**
- * The deterministic state machine of one Mission. The Core is consulted only for text (prompts,
- * explanations, the report) and for `llm_judgment` Checks; every transition is plain code.
+ * The deterministic state machine of one Mission. The Core is consulted for text (prompts,
+ * explanations, the report), for `llm_judgment` Checks and, where the Mission would wait for the
+ * Commander, for a Resolution; every transition, and what a Resolution may be, is plain code.
  */
 export class Runner {
   state: MissionState = 'running';
@@ -95,6 +112,9 @@ export class Runner {
   private readonly slotOutputs = new Map<string, string>();
   private finished: Promise<void> | null = null;
   private totalCost: Cost = ZERO_COST;
+  /** Resolutions per Slot since the Slot was last entered or the Commander last decided on it. */
+  private readonly resolutionsUsed = new Map<string, number>();
+  private engineErrorStreak = 0;
 
   constructor(
     private readonly snapshot: MissionSnapshot,
@@ -180,8 +200,8 @@ export class Runner {
     }
     this.control.resolve(
       note !== undefined && note.trim() !== ''
-        ? { kind: 'retry', note: note.trim() }
-        : { kind: 'retry' },
+        ? { kind: 'retry', note: note.trim(), from: 'commander' }
+        : { kind: 'retry', from: 'commander' },
     );
   }
 
@@ -229,6 +249,20 @@ export class Runner {
     let loopEntry: { from: string; iteration: number } | undefined;
     let note: string | undefined;
 
+    /** The same Slot again, told what failed and what the Commander or the Core noted. */
+    const retryWith = (
+      control: Extract<Control, { kind: 'retry' }>,
+      failedChecks: CheckResult[],
+    ) => {
+      feedback = {
+        kind: 'attempt',
+        failedChecks,
+        ...(control.note !== undefined && { note: control.note, noteFrom: control.from }),
+      };
+      // The Core's note is in the transcript already, with its Resolution.
+      note = control.from === 'commander' ? control.note : undefined;
+    };
+
     for (;;) {
       this.throwIfStopping();
       const slot = slots[index]!;
@@ -252,19 +286,14 @@ export class Runner {
       await this.refreshWorkspace();
 
       if (execution.kind === 'error') {
-        const control = await this.needsAttention('engine_error', slot, [], execution.message);
-        if (control.kind === 'retry') {
-          feedback = {
-            kind: 'attempt',
-            failedChecks: [],
-            ...(control.note !== undefined && { note: control.note }),
-          };
-          note = control.note;
-          continue;
-        }
-        return this.finishStopped();
+        this.engineErrorStreak += 1;
+        const control = await this.decide('engine_error', slot, [], execution.message);
+        if (control.kind === 'stop') return this.finishStopped();
+        retryWith(control, []);
+        continue;
       }
       if (execution.kind === 'interrupted') throw new StopRequested();
+      this.engineErrorStreak = 0;
 
       const output = execution.output;
       const done = await this.evaluate(slot, slot.doneCondition, output);
@@ -272,14 +301,9 @@ export class Runner {
       record.checkResults = done.results;
 
       if (done.timedOut) {
-        const control = await this.needsAttention('ci_timeout', slot, done.results);
+        const control = await this.decide('ci_timeout', slot, done.results);
         if (control.kind === 'stop') return this.finishStopped();
-        feedback = {
-          kind: 'attempt',
-          failedChecks: done.results,
-          ...(control.note !== undefined && { note: control.note }),
-        };
-        note = control.note;
+        retryWith(control, done.results);
         continue;
       }
 
@@ -289,80 +313,74 @@ export class Runner {
         : await this.acceptAtLoopLimit(slot, output, loopCounts.get(slot.name) ?? 0);
       if (acceptance) record.checkResults = [...done.results, ...acceptance.results];
 
-      if (done.holds || acceptance?.holds) {
-        this.slotOutputs.set(slot.name, output);
-        record.lastOutput = output;
-        this.deps.emit({
-          type: 'slot.done',
-          missionId: this.meta.id,
-          slot: slot.name,
-          output,
-          ...(acceptance?.holds && { acceptedAtLimit: true }),
-        });
-        if (slot.exitPoint) {
-          const exit = await this.evaluate(slot, slot.exitCondition, output);
-          this.throwIfStopping();
-          if (exit.holds) return this.complete(slot);
-          if (exit.timedOut || index === slots.length - 1) {
-            const cause: NeedsAttentionCause = exit.timedOut
-              ? 'ci_timeout'
-              : 'last_exit_condition_failed';
-            const control = await this.needsAttention(cause, slot, exit.results);
-            if (control.kind === 'stop') return this.finishStopped();
-            feedback = {
-              kind: 'attempt',
-              failedChecks: exit.results,
-              ...(control.note !== undefined && { note: control.note }),
-            };
-            note = control.note;
-            continue;
-          }
+      if (!done.holds && !acceptance?.holds) {
+        const failed = [...done.results, ...(acceptance?.results ?? [])].filter((r) => !r.holds);
+        const loopCount = (loopCounts.get(slot.name) ?? 0) + 1;
+        let limitCause: AcceptableCause | undefined;
+        if (slot.loop) {
+          if (loopCount > slot.loop.limit) limitCause = 'loop_limit';
+        } else if (attempt >= slot.attemptLimit) {
+          limitCause = 'attempt_limit';
         }
-        index += 1;
-        // A forward move starts the next Slot's Attempt count afresh (a Loop does the same for its target).
-        attempts.set(slots[index]!.name, 0);
-        feedback = undefined;
-        loopEntry = undefined;
-        continue;
-      }
 
-      const failed = [...done.results, ...(acceptance?.results ?? [])].filter((r) => !r.holds);
-      if (slot.loop) {
-        const count = (loopCounts.get(slot.name) ?? 0) + 1;
-        if (count > slot.loop.limit) {
-          const control = await this.needsAttention('loop_limit', slot, failed);
-          if (control.kind === 'stop') return this.finishStopped();
-          feedback = {
-            kind: 'attempt',
-            failedChecks: failed,
-            ...(control.note !== undefined && { note: control.note }),
-          };
-          note = control.note;
+        if (limitCause === undefined) {
+          if (slot.loop) {
+            loopCounts.set(slot.name, loopCount);
+            record.loops = loopCount;
+            feedback = { kind: 'loop', fromSlot: slot.name, output, failedChecks: failed };
+            loopEntry = { from: slot.name, iteration: loopCount };
+            this.enterSlot(slot.loop.target, attempts);
+            index = slots.findIndex((s) => s.name === slot.loop!.target);
+          } else {
+            feedback = { kind: 'attempt', failedChecks: failed };
+          }
           continue;
         }
-        loopCounts.set(slot.name, count);
-        record.loops = count;
-        const targetIndex = slots.findIndex((s) => s.name === slot.loop!.target);
-        feedback = { kind: 'loop', fromSlot: slot.name, output, failedChecks: failed };
-        loopEntry = { from: slot.name, iteration: count };
-        attempts.set(slot.loop.target, 0);
-        index = targetIndex;
-        continue;
+
+        const control = await this.decide(limitCause, slot, failed);
+        if (control.kind === 'stop') return this.finishStopped();
+        if (control.kind === 'retry') {
+          retryWith(control, failed);
+          continue;
+        }
+        // Accepted by the Core: the Slot is done with the failed Checks as open points.
       }
 
-      if (attempt >= slot.attemptLimit) {
-        const control = await this.needsAttention('attempt_limit', slot, failed);
-        if (control.kind === 'stop') return this.finishStopped();
-        feedback = {
-          kind: 'attempt',
-          failedChecks: failed,
-          ...(control.note !== undefined && { note: control.note }),
-        };
-        note = control.note;
-        continue;
+      this.slotOutputs.set(slot.name, output);
+      record.lastOutput = output;
+      this.deps.emit({
+        type: 'slot.done',
+        missionId: this.meta.id,
+        slot: slot.name,
+        output,
+        ...(acceptance?.holds && { acceptedAtLimit: true }),
+      });
+      if (slot.exitPoint) {
+        const exit = await this.evaluate(slot, slot.exitCondition, output);
+        this.throwIfStopping();
+        if (exit.holds) return this.complete(slot);
+        if (exit.timedOut || index === slots.length - 1) {
+          const cause: NeedsAttentionCause = exit.timedOut
+            ? 'ci_timeout'
+            : 'last_exit_condition_failed';
+          const control = await this.decide(cause, slot, exit.results);
+          if (control.kind === 'stop') return this.finishStopped();
+          retryWith(control, exit.results);
+          continue;
+        }
       }
-      feedback = { kind: 'attempt', failedChecks: failed };
+      index += 1;
+      // A forward move starts the next Slot afresh (a Loop does the same for its target).
+      this.enterSlot(slots[index]!.name, attempts);
+      feedback = undefined;
+      loopEntry = undefined;
     }
+  }
+
+  /** A Slot entered by a forward move or a Loop counts its Attempts and its Resolutions from zero. */
+  private enterSlot(name: string, attempts: Map<string, number>): void {
+    attempts.set(name, 0);
+    this.resolutionsUsed.delete(name);
   }
 
   private throwIfStopping(): void {
@@ -567,19 +585,120 @@ export class Runner {
     }
   }
 
-  private async needsAttention(
+  /**
+   * A point the Mission cannot pass by plain code. The Core decides in the Commander's place while
+   * the Slot has Resolutions left; otherwise, and whenever the Core says so, the Commander decides.
+   * Plain code keeps what is never the Core's: accepting a Check that is not a judgment, accepting
+   * an Exit Condition (that would declare the Mission completed), a second Engine error in a row.
+   */
+  private decide(
+    cause: AcceptableCause,
+    slot: ResolvedSlot,
+    failedChecks: CheckResult[],
+  ): Promise<Decision>;
+  private decide(
     cause: NeedsAttentionCause,
     slot: ResolvedSlot,
     failedChecks: CheckResult[],
     detail?: string,
-  ): Promise<Control> {
-    let reason: string;
-    try {
-      reason = await this.deps.core.explainNeedsAttention({ cause, slot, failedChecks });
-      if (detail) reason = `${reason}\n\n${detail}`;
-    } catch (error) {
-      reason = detail ?? `The Core could not explain the situation: ${errorMessage(error)}`;
+  ): Promise<Control>;
+  private async decide(
+    cause: NeedsAttentionCause,
+    slot: ResolvedSlot,
+    failedChecks: CheckResult[],
+    detail?: string,
+  ): Promise<Decision> {
+    const limit = this.snapshot.assembly.core.resolutionLimit;
+    const used = this.resolutionsUsed.get(slot.name) ?? 0;
+    const coreMayDecide =
+      used < limit &&
+      !(cause === 'engine_error' && this.engineErrorStreak >= ENGINE_ERRORS_BEFORE_COMMANDER);
+    // What the Commander reads besides the Core's words, in the order it happened.
+    const details: string[] = [];
+    let reason: string | undefined;
+
+    if (coreMayDecide) {
+      const mayAccept =
+        (cause === 'attempt_limit' || cause === 'loop_limit') &&
+        failedChecks.length > 0 &&
+        failedChecks.every((result) => result.check.kind === 'llm_judgment');
+      let decision: AttentionDecision | undefined;
+      try {
+        decision = await this.deps.core.resolveAttention({
+          cause,
+          slot,
+          failedChecks,
+          ...(detail !== undefined && { detail }),
+          mayAccept,
+          resolutionsLeft: limit - used,
+        });
+      } catch (error) {
+        details.push(`The Core could not decide: ${errorMessage(error)}`);
+      }
+      this.throwIfStopping();
+      if (decision?.decision === 'retry' || (decision?.decision === 'accept' && mayAccept)) {
+        const note = decision.note?.trim();
+        const resolution: Resolution = {
+          cause,
+          decision: decision.decision,
+          reason: decision.reason,
+          ...(decision.decision === 'retry' && note && { note }),
+          failedChecks,
+        };
+        this.resolutionsUsed.set(slot.name, used + 1);
+        const record = this.records.get(slot.name)!;
+        record.resolutions = [...(record.resolutions ?? []), resolution];
+        this.deps.emit({
+          type: 'core.resolved',
+          missionId: this.meta.id,
+          slot: slot.name,
+          resolution,
+        });
+        if (resolution.decision === 'accept') return { kind: 'accept' };
+        return {
+          kind: 'retry',
+          from: 'core',
+          ...(resolution.note !== undefined && { note: resolution.note }),
+        };
+      }
+      if (decision) {
+        reason = decision.reason;
+        if (decision.decision === 'accept') {
+          details.push('The Core would accept the Slot as it is; here only the Commander may.');
+        }
+      }
+    } else if (limit > 0 && used >= limit) {
+      details.push(`The Core used its ${limit} Resolutions on this Slot.`);
     }
+
+    if (detail !== undefined) details.push(detail);
+    const control = await this.needsAttention(cause, slot, failedChecks, details, reason);
+    if (control.kind === 'retry') {
+      // The Commander's Retry is a fresh start for the Core on this Slot.
+      this.resolutionsUsed.delete(slot.name);
+      this.engineErrorStreak = 0;
+    }
+    return control;
+  }
+
+  /** Waits for the Commander. `reason` is the Core's when it already gave one; else it is asked. */
+  private async needsAttention(
+    cause: NeedsAttentionCause,
+    slot: ResolvedSlot,
+    failedChecks: CheckResult[],
+    details: string[],
+    reason?: string,
+  ): Promise<Control> {
+    if (reason === undefined) {
+      try {
+        reason = await this.deps.core.explainNeedsAttention({ cause, slot, failedChecks });
+      } catch (error) {
+        if (details.length === 0) {
+          details = [`The Core could not explain the situation: ${errorMessage(error)}`];
+        }
+      }
+    }
+    reason = [...(reason === undefined ? [] : [reason]), ...details].join('\n\n');
     this.throwIfStopping();
     this.attention = { cause, reason, slot: slot.name, failedChecks };
     this.control = new Deferred<Control>();

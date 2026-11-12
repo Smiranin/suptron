@@ -134,6 +134,7 @@ export function AssemblyEditorPage({
         model: DEFAULTS.core.model,
         defaultAttemptLimit: DEFAULTS.core.defaultAttemptLimit,
         defaultLoopLimit: DEFAULTS.core.defaultLoopLimit,
+        resolutionLimit: DEFAULTS.core.resolutionLimit,
         instructions: '',
       },
       slots: [],

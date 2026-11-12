@@ -80,6 +80,18 @@ export function defaultCoreScript(call: FakeCall): FakeStep[] {
           },
         },
       ];
+    // Hands every decision to the Commander, so a scenario opts into a Resolution by scripting one.
+    case 'resolveAttention':
+      return [
+        {
+          result: {
+            structured: {
+              decision: 'commander',
+              reason: `The Mission needs attention: ${String(input?.cause)}.`,
+            },
+          },
+        },
+      ];
     case 'finalReport':
       return [{ result: { structured: { report: 'All Slots completed.' } } }];
     default:

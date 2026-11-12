@@ -125,6 +125,7 @@ export function primaryAssembly(name = 'feature'): AssemblyFile {
       model: 'opus',
       defaultAttemptLimit: 2,
       defaultLoopLimit: 3,
+      resolutionLimit: 2,
       instructions: [
         'Compose each Slot prompt from the Task documents, the Knowledge Sources, the Git',
         'conventions and the Slot Outputs it is given. Judge Checks strictly against their',

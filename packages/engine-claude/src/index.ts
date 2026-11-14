@@ -1,5 +1,6 @@
 // Engine implementation on the Claude Agent SDK. The only package that imports the SDK.
 export {
+  AUTONOMY_PROMPT,
   ClaudeEngine,
   COMMANDER_CHANNEL_PROMPT,
   FALLBACK_MODELS,

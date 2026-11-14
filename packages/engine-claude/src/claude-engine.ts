@@ -51,6 +51,22 @@ const ASK_USER_QUESTION = 'AskUserQuestion';
 const AGENT_TOOL = 'Agent';
 
 /**
+ * Appended to every Pilot's system prompt. Claude Code loads the instructions of the repository
+ * (`settingSources: ['project']`, so CLAUDE.md), and those are written for a session with a
+ * person in it: "present options", "wait for approval". A Pilot that obeyed them would end its
+ * Slot with a question nobody reads. This is a fact about a Mission, not about a Unit, so it is
+ * said once here instead of in the Rules of every Unit.
+ */
+export const AUTONOMY_PROMPT = `## You work on your own
+
+You run inside a Mission with nobody watching. The Task is approved: analysis, design
+and plan were agreed before the Mission started. The conventions of the repository
+(CLAUDE.md and the like) apply to how you write and change things. Whatever in them asks
+you to present options, to wait for a confirmation or to get an approval does not apply:
+nobody reads what you write while you work. Where you would wait, decide yourself, go
+on, and name the decision in your report.`;
+
+/**
  * Appended to every Pilot's system prompt. A reply without a tool call ends the SDK query, and
  * with it every background sub-agent; the runtime cannot wait for work the Pilot detached.
  */
@@ -76,14 +92,15 @@ Never end your turn with a question in your output: it reaches nobody, and the S
 judged on what you produced.`;
 
 /**
- * The system text of an agent: its Rules, then its Instructions, then, for a Pilot, how a Slot
- * ends and, when it may ask the Commander, how to reach them. The Core gets neither. (How a
- * Pilot hands over is the runtime's and arrives as part of the Instructions.)
+ * The system text of an agent: its Rules, then its Instructions, then, for a Pilot, that it
+ * works on its own, how a Slot ends and, when it may ask the Commander, how to reach them. The
+ * Core gets none of these. (How a Pilot hands over is the runtime's and arrives as part of the
+ * Instructions.)
  */
 export function systemText(spec: SystemTextSpec): string {
   const parts = [spec.systemPrompt.rules.trim(), spec.systemPrompt.instructions.trim()];
   if (spec.role === 'pilot') {
-    parts.push(SLOT_END_PROMPT);
+    parts.push(AUTONOMY_PROMPT, SLOT_END_PROMPT);
     if (spec.allowQuestions) parts.push(COMMANDER_CHANNEL_PROMPT);
   }
   return parts.join('\n\n');

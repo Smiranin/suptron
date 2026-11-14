@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  AUTONOMY_PROMPT,
   COMMANDER_CHANNEL_PROMPT,
   ClaudeEngine,
   SLOT_END_PROMPT,
@@ -33,16 +34,21 @@ describe('systemText', () => {
     expect(text).toBe('Never push.\n\nWrite the plan.');
   });
 
-  it('tells every Pilot how a Slot ends', () => {
+  it('tells every Pilot that it works on its own and how a Slot ends', () => {
     const text = systemText({ role: 'pilot', systemPrompt, allowQuestions: false });
-    expect(text).toBe(`Never push.\n\nWrite the plan.\n\n${SLOT_END_PROMPT}`);
+    expect(text).toBe(`Never push.\n\nWrite the plan.\n\n${AUTONOMY_PROMPT}\n\n${SLOT_END_PROMPT}`);
     expect(text).not.toContain('AskUserQuestion');
+  });
+
+  it('sets aside what the repository says about waiting for an approval, not its conventions', () => {
+    expect(AUTONOMY_PROMPT).toContain('conventions of the repository');
+    expect(AUTONOMY_PROMPT).toContain('to get an approval does not apply');
   });
 
   it('tells a Pilot that may ask the Commander how to reach them', () => {
     const text = systemText({ role: 'pilot', systemPrompt, allowQuestions: true });
     expect(text).toBe(
-      `Never push.\n\nWrite the plan.\n\n${SLOT_END_PROMPT}\n\n${COMMANDER_CHANNEL_PROMPT}`,
+      `Never push.\n\nWrite the plan.\n\n${AUTONOMY_PROMPT}\n\n${SLOT_END_PROMPT}\n\n${COMMANDER_CHANNEL_PROMPT}`,
     );
     expect(COMMANDER_CHANNEL_PROMPT).toContain('AskUserQuestion');
   });

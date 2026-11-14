@@ -127,6 +127,8 @@ export class Runner {
   private totalCost: Cost = ZERO_COST;
   /** Resolutions per Slot since the Slot was last entered or the Commander last decided on it. */
   private readonly resolutionsUsed = new Map<string, number>();
+  /** Looping Slots with a granted round under way: their next entry does not renew their Resolutions. */
+  private readonly keepResolutions = new Set<string>();
   private engineErrorStreak = 0;
 
   constructor(
@@ -259,7 +261,8 @@ export class Runner {
     const loopCounts = new Map<string, number>();
     let index = 0;
     let feedback: Feedback | undefined;
-    let loopEntry: { from: string; iteration: number } | undefined;
+    let loopEntry:
+      { from: string; iteration: number; grantedBy?: 'commander' | 'core' } | undefined;
     let note: string | undefined;
 
     /** The same Slot again, told what failed and what the Commander or the Core noted. */
@@ -276,6 +279,35 @@ export class Runner {
       note = control.from === 'commander' ? control.note : undefined;
     };
 
+    /**
+     * The work goes back to the Loop target with the looping Slot's findings. Inside the limit that
+     * is plain code; at the limit it is one round granted by the Core or the Commander, with their
+     * note. A granted round counts like any other, so the next failure is the limit again.
+     */
+    const loopBack = (
+      slot: ResolvedSlot & { loop: NonNullable<ResolvedSlot['loop']> },
+      iteration: number,
+      output: string,
+      failedChecks: CheckResult[],
+      grant?: Extract<Control, { kind: 'retry' }>,
+    ) => {
+      loopCounts.set(slot.name, iteration);
+      this.records.get(slot.name)!.loops = iteration;
+      feedback = {
+        kind: 'loop',
+        fromSlot: slot.name,
+        output,
+        failedChecks,
+        ...(grant?.note !== undefined && { note: grant.note, noteFrom: grant.from }),
+      };
+      loopEntry = { from: slot.name, iteration, ...(grant && { grantedBy: grant.from }) };
+      note = grant?.from === 'commander' ? grant.note : undefined;
+      // The granting Slot keeps its count of Resolutions, or the Core could grant rounds for ever.
+      if (grant) this.keepResolutions.add(slot.name);
+      this.enterSlot(slot.loop.target, attempts);
+      index = slots.findIndex((s) => s.name === slot.loop.target);
+    };
+
     for (;;) {
       this.throwIfStopping();
       const slot = slots[index]!;
@@ -290,6 +322,7 @@ export class Runner {
         slot: slot.name,
         attempt,
         ...(loopEntry && { loopIteration: loopEntry.iteration, loopFrom: loopEntry.from }),
+        ...(loopEntry?.grantedBy && { loopGrantedBy: loopEntry.grantedBy }),
         ...(note !== undefined && { note }),
       });
       note = undefined;
@@ -354,23 +387,17 @@ export class Runner {
         }
 
         if (limitCause === undefined) {
-          if (slot.loop) {
-            loopCounts.set(slot.name, loopCount);
-            record.loops = loopCount;
-            feedback = { kind: 'loop', fromSlot: slot.name, output, failedChecks: failed };
-            loopEntry = { from: slot.name, iteration: loopCount };
-            this.enterSlot(slot.loop.target, attempts);
-            index = slots.findIndex((s) => s.name === slot.loop!.target);
-          } else {
-            feedback = { kind: 'attempt', failedChecks: failed };
-          }
+          if (hasLoop(slot)) loopBack(slot, loopCount, output, failed);
+          else feedback = { kind: 'attempt', failedChecks: failed };
           continue;
         }
 
         const control = await this.decide(limitCause, slot, failed, { output });
         if (control.kind === 'stop') return this.finishStopped();
         if (control.kind === 'retry') {
-          retryWith(control, failed);
+          // Reviewing unchanged work again would find the same: at the Loop limit a Retry is a round.
+          if (hasLoop(slot)) loopBack(slot, loopCount, output, failed, control);
+          else retryWith(control, failed);
           continue;
         }
         // Accepted by the Core: the Slot is done with the failed Checks as open points.
@@ -407,10 +434,13 @@ export class Runner {
     }
   }
 
-  /** A Slot entered by a forward move or a Loop counts its Attempts and its Resolutions from zero. */
+  /**
+   * A Slot entered by a forward move or a Loop counts its Attempts and its Resolutions from zero;
+   * a looping Slot reached again after a round it was granted keeps its Resolutions.
+   */
   private enterSlot(name: string, attempts: Map<string, number>): void {
     attempts.set(name, 0);
-    this.resolutionsUsed.delete(name);
+    if (!this.keepResolutions.delete(name)) this.resolutionsUsed.delete(name);
   }
 
   private throwIfStopping(): void {
@@ -839,6 +869,12 @@ export class MissionStateError extends Error {
     super(message);
     this.name = 'MissionStateError';
   }
+}
+
+function hasLoop(
+  slot: ResolvedSlot,
+): slot is ResolvedSlot & { loop: NonNullable<ResolvedSlot['loop']> } {
+  return slot.loop !== undefined && slot.loop !== null;
 }
 
 /** What the Core and the Commander are told about a Handover that is not `done`. */

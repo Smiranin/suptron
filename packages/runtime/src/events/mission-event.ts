@@ -44,6 +44,8 @@ export type MissionEvent =
       attempt: number;
       loopIteration?: number;
       loopFrom?: string;
+      /** Who granted this round at the Loop limit; absent for a round inside the limit. */
+      loopGrantedBy?: 'commander' | 'core';
       note?: string;
     }
   | {

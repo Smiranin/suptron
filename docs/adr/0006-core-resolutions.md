@@ -1,6 +1,6 @@
 # The Core decides in the Commander's place before a Mission waits for them
 
-Status: accepted (2026-11-12); implemented in the runtime (`Runner.decide`, the Core call `resolveAttention`). Extended by [ADR-0007](0007-handover-and-the-reading-core.md): the Handover as a further cause, the final word when the Resolutions are used up, and a Core that reads files.
+Status: accepted (2026-11-12); implemented in the runtime (`Runner.decide`, the Core call `resolveAttention`). Extended by [ADR-0007](0007-handover-and-the-reading-core.md): the Handover as a further cause, the final word when the Resolutions are used up, a Core that reads files, and a `retry` at the Loop limit that grants a round instead of repeating the looping Slot.
 
 Suptron exists to run Missions while the Commander does something else. In the POC every point plain code could not pass (an Attempt or Loop limit, a failed last Exit Condition, a CI timeout, an Engine error) sent the Mission to Needs Attention, and the Core was only asked to explain it. Across the runs of the content scenario this stopped Missions at arbitrary Slots, and the Commander found on return that nothing had finished. The run that triggered this decision is typical: the researcher's `llm_judgment` failed on one Card of seventy, the Core's explanation named both ways to fix it and worded the note, and the Commander's Retry added nothing the Core did not already have.
 
@@ -10,7 +10,7 @@ The limits are split by who can hold them:
 
 | Limit                                                                 | Held by                                      |
 | --------------------------------------------------------------------- | -------------------------------------------- |
-| At most `core.resolutionLimit` Resolutions per Slot (default 2)        | plain code                                   |
+| At most `core.resolutionLimit` Resolutions per Slot (default 3; 2 until ADR-0007)        | plain code                                   |
 | `accept` only at an Attempt or Loop limit, only when every failed Check is an `llm_judgment` | plain code                |
 | The last Exit Condition is never accepted (it would declare the Mission Completed) | plain code                      |
 | A second Engine error in a row goes to the Commander                  | plain code                                   |

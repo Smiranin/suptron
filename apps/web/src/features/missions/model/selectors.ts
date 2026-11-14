@@ -76,6 +76,16 @@ export interface MissionDecorations {
   core: { state: MissionState; cost: Cost };
 }
 
+/**
+ * The badge of a Loop on the clock: how many times the work went back, against the limit. Rounds
+ * past the limit were granted by the Core or the Commander and are counted apart.
+ */
+export function loopBadge(iterations: number, limit: number): string {
+  const granted = iterations - limit;
+  // Short on purpose: the badge sits on the chord of the clock.
+  return granted > 0 ? `Loop ${limit} of ${limit} +${granted}` : `Loop ${iterations} of ${limit}`;
+}
+
 /** Turns the page store into what the clock draws; the clock never sees Mission state directly. */
 export function missionDecorations(state: ReadyMissionState): MissionDecorations {
   const active = state.summary.state === 'running' || state.summary.state === 'waiting_for_owner';

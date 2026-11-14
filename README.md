@@ -38,7 +38,7 @@ Execution (what happens when you press Launch):
 | **Core**            | The orchestrating agent in the centre: composes each Pilot's prompt, judges Checks, decides in your place where it may. It reads files, never edits them.  |
 | **Check**           | A deterministic verification: a shell command, CI green, a Pull Request exists, no open review comments, or an LLM judgement on a criterion.               |
 | **Done Condition**  | The Checks a Slot must pass before the Mission moves on; a failure starts a new **Attempt** up to the Slot's limit.                                        |
-| **Loop**            | A Slot sending the Mission back to an earlier Slot with feedback (reviewer to implementer), up to a limit.                                                 |
+| **Loop**            | A Slot sending the Mission back to an earlier Slot with feedback (reviewer to implementer), up to a limit; there the Core may grant one more round.        |
 | **Exit Point**      | A Slot where the Mission may end, when its Exit Condition holds; the last Slot is always one.                                                              |
 | **Slot Output**     | The final message of a Pilot; later Slots may read it when their context says so.                                                                          |
 | **Handover**        | How every Slot Output ends: what was produced, what is open, and a Status (`done`, `open`, `failed`). `done` is trusted; otherwise the Core decides.       |

@@ -2,6 +2,7 @@ import {
   DEFAULTS,
   assemblyFileSchema,
   capabilitiesOf,
+  executionKeyOf,
   profileFileSchema,
   resolveCore,
   resolveSlot,
@@ -327,12 +328,7 @@ export class FakeHome {
       }
       if (event.type === 'slot.started') {
         detail.summary.currentSlot = event.slot;
-        const execution = {
-          slot: event.slot,
-          attempt: event.attempt,
-          ...(event.loopIteration !== undefined && { loopIteration: event.loopIteration }),
-          ...(event.loopFrom !== undefined && { loopFrom: event.loopFrom }),
-        };
+        const execution = executionKeyOf(event);
         const entries =
           event.note !== undefined
             ? [

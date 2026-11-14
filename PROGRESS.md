@@ -1,51 +1,11 @@
 # Progress
 
 The plan agreed with the Commander on 2026-11-12, in the order of work: A, B, D, C, F; E along the way. A group
-leaves this file when it is done; the file is deleted after the last one. Done: A (Handover and the Core,
-ADR-0007). The groups below are not implemented yet.
+leaves this file when it is done; the file is deleted after the last one. Done: A (Handover and the Core) and
+B (Loop), both in ADR-0007. The groups below are not implemented yet.
 
 The Units, the Project `dojo-content` and the Assemblies `cards` and `cards-write` live in `~/.suptron` (the
 only copies). The Commander commits; never commit or push unasked.
-
-## B. Loop
-
-### Rules
-
-- **Inner Loop.** The work goes back at most 3 times by default (the looping Slot runs up to four times);
-  the Core takes no part.
-- **At the Loop limit the Core decides.** `retry` grants one round: the Loop target runs with the Core's
-  note and the last review, then the looping Slot runs once. The Loop count is not reset, so a second
-  failure is the limit again and the Core decides again. The Commander's Retry from Needs Attention takes
-  the same path. Today a `retry` at the limit runs the looping Slot again, which re-reviews unchanged work.
-- **Core decision limit** (`core.resolutionLimit`): default 3 instead of 2; after them the final word.
-- No `loop_no_change` guard and no `loopDecision` call.
-
-### Runtime
-
-- `runner/runner.ts`: a `retry` at `loop_limit` sends the work to the Loop target with Loop feedback that
-  carries the note; the Resolutions of the looping Slot are not reset when it is entered after such a round.
-- `core-agent/index.ts`: Loop feedback may carry a note and its author.
-- `config/defaults.ts`: `resolutionLimit: 3`.
-
-### Web
-
-- Editor: "Iteration limit" becomes "Loop limit", with a line saying it counts how many times the work may
-  go back.
-- Mission: the round shows as "Loop 2 of 3"; a round granted by the Core is marked as such.
-- The help text of "Core decision limit" follows the new default and the final word.
-
-### Tests
-
-- A round granted by the Core reaches the Loop target; a second failure returns to the Core at once; three
-  rounds, then the final word; the Commander's Retry takes the same path.
-
-### Configuration (`~/.suptron`)
-
-- Assemblies `cards` and `cards-write`: remove `limit: 5` from the reviewer's Loop.
-
-### Docs
-
-- ADR-0006 (amended by ADR-0007 or in place), `docs/GLOSSARY.md` (Loop, Resolution), `README.md`.
 
 ## D. Small UI
 

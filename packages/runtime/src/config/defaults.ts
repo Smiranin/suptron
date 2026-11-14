@@ -16,10 +16,10 @@ export const DEFAULTS = {
     defaultAttemptLimit: 2,
     defaultLoopLimit: 3,
     /**
-     * How many Resolutions the Core may take on one Slot before the Mission goes to Needs
-     * Attention; 0 sends every such point straight to the Commander.
+     * How many Resolutions the Core may take on one Slot before it has the final word (accept, or
+     * Needs Attention); 0 sends every such point straight to the Commander.
      */
-    resolutionLimit: 2,
+    resolutionLimit: 3,
     instructions: '',
   },
   loopLimit: 3,

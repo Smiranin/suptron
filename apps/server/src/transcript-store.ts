@@ -1,6 +1,6 @@
 import {
+  executionKeyOf,
   resolutionNote,
-  type ExecutionKey,
   type MissionEvent,
   type TranscriptEntry,
   type TranscriptSection,
@@ -47,12 +47,7 @@ export class TranscriptStore {
       case 'slot.started': {
         const transcript = this.transcript(event.missionId);
         for (const section of transcript.sections) this.trim(section);
-        const execution: ExecutionKey = {
-          slot: event.slot,
-          attempt: event.attempt,
-          ...(event.loopIteration !== undefined && { loopIteration: event.loopIteration }),
-          ...(event.loopFrom !== undefined && { loopFrom: event.loopFrom }),
-        };
+        const execution = executionKeyOf(event);
         const section: TranscriptSection = { execution, entries: [], dropped: 0 };
         if (event.note !== undefined) {
           section.entries.push(this.entry(event, { kind: 'note', text: event.note }));

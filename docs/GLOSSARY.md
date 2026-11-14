@@ -51,7 +51,7 @@ The block every Pilot ends its Slot Output with: what it produced, what is done,
 _Avoid_: Report, summary, handoff, sign-off
 
 **Loop**:
-A rule on a Slot: "if my Done Condition does not hold, go back to Slot X", with an iteration limit (default 3). When the limit is reached the Mission goes to Needs Attention.
+A rule on a Slot: "if my Done Condition does not hold, go back to Slot X", with a Loop limit: how many times the work may go back (default 3, so the looping Slot runs up to four times). At the limit the Core takes a Resolution: its `retry` grants one more round (the target works again with the Core's note and the last findings, then the looping Slot runs once), and when that fails the limit is reached again. The Commander's Retry from Needs Attention grants a round the same way.
 _Avoid_: Cycle, retry (a retry is one Slot repeating, a Loop is several)
 
 **Memory Mode**:
@@ -63,7 +63,7 @@ One execution of a single Slot. A Slot may be attempted several times before its
 _Avoid_: Retry, try
 
 **Resolution**:
-A decision the Core takes in the Commander's place at a point where plain code cannot go on (a Handover that is not `done`, an Attempt or Loop limit, a failed last Exit Condition, a CI timeout, an Engine error): one more Attempt with the Core's own note, or the result accepted with its open points. An accepted Handover still has to pass the Done Condition. Each Slot has a limit of Resolutions (Core Directives, default 2, 0 turns them off); a forward move, a Loop into the Slot and the Commander's Retry start the count afresh. When the limit is used up and there is something to accept, the Core has the final word: it accepts or hands the Mission to the Commander, with no further Attempt to grant. Plain code keeps what a Resolution can never be: accepting a Check that is not an `llm_judgment`, accepting an Exit Condition, retrying a second Engine error in a row. Every Resolution is written to the transcript and to the final report.
+A decision the Core takes in the Commander's place at a point where plain code cannot go on (a Handover that is not `done`, an Attempt or Loop limit, a failed last Exit Condition, a CI timeout, an Engine error): one more Attempt with the Core's own note, or the result accepted with its open points. An accepted Handover still has to pass the Done Condition. Each Slot has a limit of Resolutions (Core Directives, default 3, 0 turns them off); a forward move, a Loop into the Slot and the Commander's Retry start the count afresh; a looping Slot keeps its count across a round it was granted. When the limit is used up and there is something to accept, the Core has the final word: it accepts or hands the Mission to the Commander, with no further Attempt to grant. Plain code keeps what a Resolution can never be: accepting a Check that is not an `llm_judgment`, accepting an Exit Condition, retrying a second Engine error in a row. Every Resolution is written to the transcript and to the final report.
 _Avoid_: Auto-retry, override, self-healing
 
 **Done Condition**:

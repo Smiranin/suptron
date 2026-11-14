@@ -1246,6 +1246,99 @@ describe('Runner scenarios with Core Resolutions', () => {
     await h.registry.stop(id);
   });
 
+  describe('at the Loop limit', () => {
+    const looping = (limit: number): AssemblyFile =>
+      linear([
+        { name: 'w', unit: 'w', memoryMode: 'persistent' },
+        { name: 'r', unit: 'r', loop: { target: 'w', limit } },
+      ]);
+
+    const started = (events: MissionEvent[]) =>
+      events.flatMap((e) =>
+        e.type === 'slot.started' ? [[e.slot, e.loopIteration, e.loopGrantedBy]] : [],
+      );
+
+    it('grants one round on the Core retry: the target works with the note, then the looping Slot runs once', async () => {
+      h = await harness([unit('w', [PASS]), unit('r', [JUDGED])], [looping(1)], 'none');
+      scriptCore(h.engine, {
+        judge: (nth) => (nth < 2 ? failing() : { holds: true, reason: 'Clean.' }),
+        resolveAttention: () => ({
+          decision: 'retry',
+          reason: 'One finding is left and its fix is clear.',
+          note: 'Fix the date in card 7.',
+        }),
+      });
+      const id = await h.start();
+      await h.waitFor((es) => es.some((e) => e.type === 'mission.completed'));
+      expect(attentionCount(h.events)).toBe(0);
+      expect(started(h.events)).toEqual([
+        ['w', undefined, undefined],
+        ['r', undefined, undefined],
+        ['w', 1, undefined],
+        ['r', undefined, undefined],
+        ['w', 2, 'core'],
+        ['r', undefined, undefined],
+      ]);
+      // the target gets the last review and the Core's note as Loop feedback
+      expect(
+        (coreCallInput(composeCalls(h.engine, 'w')[2]!.prompt) as { feedback: object }).feedback,
+      ).toMatchObject({
+        kind: 'loop',
+        fromSlot: 'r',
+        output: handedOver('r output'),
+        note: 'Fix the date in card 7.',
+        noteFrom: 'core',
+      });
+      expect(h.registry.get(id)!.slots.find((s) => s.name === 'r')?.loops).toBe(2);
+    });
+
+    it('returns to the Core at once when the granted round fails, and gives it the final word after its Resolutions', async () => {
+      h = await harness([unit('w', [PASS]), unit('r', [JUDGED])], [looping(1)], 'none');
+      scriptCore(h.engine, {
+        judge: failing,
+        resolveAttention: (nth) =>
+          nth < 2
+            ? { decision: 'retry', reason: 'Try again.', note: `fix ${nth}` }
+            : { decision: 'accept', reason: 'The finding is cosmetic.' },
+      });
+      await h.start();
+      await h.waitFor((es) => es.some((e) => e.type === 'mission.completed'));
+      // one round inside the limit, two granted; the looping Slot ran once after each
+      expect(started(h.events).filter(([slot]) => slot === 'w')).toEqual([
+        ['w', undefined, undefined],
+        ['w', 1, undefined],
+        ['w', 2, 'core'],
+        ['w', 3, 'core'],
+      ]);
+      expect(h.events.filter((e) => e.type === 'slot.started' && e.slot === 'r')).toHaveLength(4);
+      expect(resolveInputs(h.engine).map((i) => [i.cause, i.mayRetry, i.resolutionsLeft])).toEqual([
+        ['loop_limit', true, 2],
+        ['loop_limit', true, 1],
+        ['loop_limit', false, 0],
+      ]);
+    });
+
+    it("sends the Commander's Retry down the same path, with their note", async () => {
+      h = await harness([unit('w', [PASS]), unit('r', [FAIL])], [looping(1)]);
+      const id = await h.start();
+      await h.waitForState(id, 'needs_attention');
+      expect(h.registry.get(id)?.attention?.cause).toBe('loop_limit');
+      h.registry.retry(id, 'rewrite the intro');
+      await h.waitFor((es) => attentionCount(es) === 2);
+      expect(started(h.events).slice(4)).toEqual([
+        ['w', 2, 'commander'],
+        ['r', undefined, undefined],
+      ]);
+      expect(h.events.filter((e) => e.type === 'slot.started')[4]).toMatchObject({
+        note: 'rewrite the intro',
+      });
+      expect(
+        (coreCallInput(composeCalls(h.engine, 'w')[2]!.prompt) as { feedback: object }).feedback,
+      ).toMatchObject({ kind: 'loop', note: 'rewrite the intro', noteFrom: 'commander' });
+      await h.registry.stop(id);
+    });
+  });
+
   it('never asks the Core to decide when the Resolution limit is 0', async () => {
     const assembly = linear([{ name: 'a', unit: 'a' }]);
     assembly.core.resolutionLimit = 0;

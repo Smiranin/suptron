@@ -386,7 +386,11 @@ function SlotInspector({
               {slot.loop && (
                 <>
                   <div className="flex flex-col gap-1">
-                    <Label htmlFor="loop-limit">Iteration limit</Label>
+                    <Label htmlFor="loop-limit">Loop limit</Label>
+                    <p className="text-muted-foreground text-xs">
+                      How many times the work may go back to the target. At the limit the Core
+                      decides: one more round with its note, or Needs Attention.
+                    </p>
                     <Input
                       id="loop-limit"
                       type="number"

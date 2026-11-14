@@ -89,9 +89,9 @@ export function CoreDirectivesPanel({
           onChange={(e) => number('resolutionLimit', e.target.value, 0)}
         />
         <p className="text-muted-foreground text-xs">
-          How many times per Slot the Core decides in your place before the Mission goes to Needs
-          Attention: one more Attempt with its own note, or a failed judgment accepted as an open
-          point. 0: every such point waits for you.
+          How many times per Slot the Core decides in your place: one more Attempt (at a Loop limit,
+          one more round) with its own note, or the result accepted with open points. After that it
+          has the final word: accept, or Needs Attention. 0: every such point waits for you.
         </p>
       </div>
       <CollapsibleSection title="Built-in directives">

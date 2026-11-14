@@ -127,7 +127,7 @@ export function briefAssembly(name = 'brief'): AssemblyFile {
       model: 'opus',
       defaultAttemptLimit: 2,
       defaultLoopLimit: 3,
-      resolutionLimit: 2,
+      resolutionLimit: 3,
       instructions: '',
     },
     slots: [
@@ -150,7 +150,7 @@ export function primaryAssembly(name = 'feature'): AssemblyFile {
       model: 'opus',
       defaultAttemptLimit: 2,
       defaultLoopLimit: 3,
-      resolutionLimit: 2,
+      resolutionLimit: 3,
       instructions: 'Compose each Slot prompt carefully.',
     },
     slots: [
@@ -182,7 +182,7 @@ export function invalidAssembly(name = 'broken'): AssemblyFile {
       model: 'opus',
       defaultAttemptLimit: 2,
       defaultLoopLimit: 3,
-      resolutionLimit: 2,
+      resolutionLimit: 3,
       instructions: '',
     },
     slots: [

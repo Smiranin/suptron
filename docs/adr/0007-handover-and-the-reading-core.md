@@ -4,13 +4,15 @@ Status: accepted (2026-11-12); implemented in the runtime (`domain/handover.ts`,
 
 ADR-0006 made the Core the Commander's deputy but left it blind: it decided on Check results and on what the judge had said, and an `llm_judgment` was judged on the Slot Output and a change summary, never on the files. In the content scenario this failed in both directions. A researcher wrote in its own output that entries were missing and the Mission went on, because nothing read that. A judge asked whether a document was complete answered from the Pilot's summary of the document.
 
-We decided three things.
+We decided four things.
 
 **Every Pilot ends with a Handover.** The runtime appends to the Instructions of every Slot how to end the Slot Output: a block `Produced / Done / Open` and a last line `Status: done | open | failed`. No Unit says anything about it. Plain code reads the last Status line. `done`: the Core is not asked, the Done Condition runs. `open`, `failed`, or no readable Status line: the Runner asks the Core for a Resolution with the new cause `handover_not_done`, the same way for all three.
 
 **The Core has the final word.** While a Slot has Resolutions left, the Core may answer `retry`, `accept` or `commander`. When they are used up and an `accept` is possible, the Core is asked once more with `mayRetry: false`: it accepts the result as it is or sends the Mission to the Commander. The final word is not counted against the limit. An accepted Handover does not replace the Done Condition: its Checks still run. What plain code keeps from ADR-0006 is unchanged: a failed Check that is not an `llm_judgment` and the last Exit Condition are never accepted, and there the Mission goes straight to the Commander when the Resolutions are used up.
 
 **The Core can read, always; its instructions say when.** The Core gets `Read`, `Glob` and `Grep` in every call, with the Task folder as its working directory and the Workspace next to it. It reads at a Resolution (to see what is really open or failed) and in an `llm_judgment` (the Commander asked for a check of the result); never while composing a prompt, explaining a Needs Attention or writing the report. A Handover that says `done` is trusted and not verified. An `llm_judgment` is therefore an explicit, strict test that costs a Core call with file reads, set only where a real check is wanted.
+
+**At the Loop limit a Retry is a round.** A looping Slot (a reviewer) that fails at its Loop limit used to get one more Attempt itself, which reviews unchanged work again. Now a `retry` there, from the Core or from the Commander, grants one round: the Loop target works again with the last findings and the granter's note, the Slots in between run, and the looping Slot runs once. The granted round counts as a Loop like any other, so the next failure is the limit again and the Core decides again. The looping Slot keeps its count of Resolutions across a granted round, which bounds the rounds the Core can grant; then it has the final word. The default Resolution limit rises from 2 to 3, the same as the default Loop limit. There is no guard for "the round changed nothing" and no separate Core call for the Loop: the Resolution is the one place where it is decided.
 
 ## Considered Options
 

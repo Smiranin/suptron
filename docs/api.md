@@ -99,7 +99,7 @@ interface MissionDetail {
                                     // workspace.path: the Checkout or the folder, null for kind none; workspace.branch: the Checkout's branch, null otherwise
   assembly: AssemblyFile;           // the document at start, for the clock
   slots: SlotRecord[];              // Assembly order, then 'core': { name, attempts, loops, lastOutput?, cost, checkResults, resolutions? }
-  transcript: TranscriptSection[];  // one section per execution: { execution: { slot, attempt, loopIteration?, loopFrom? }, entries, dropped }
+  transcript: TranscriptSection[];  // one section per execution: { execution: { slot, attempt, loopIteration?, loopFrom?, loopGrantedBy? }, entries, dropped }
   transcriptLost: boolean;          // true for Missions recovered from the ledger after a restart
   pendingQuestion?: { id, slot, questions: Question[] };   // one at a time: questions a Pilot asks while one is pending queue up and are shown after the answer
   attention?: { cause, reason, slot, failedChecks };        // cause: 'handover_not_done' | 'attempt_limit' | 'loop_limit' | 'last_exit_condition_failed' | 'ci_timeout' | 'engine_error'
@@ -131,7 +131,7 @@ its `seq`. Without `?mission=`, the stream carries every Mission's events except
 
 Event types: `mission.started`, `mission.state` (`state`, and `cause`, `reason`, `slot`, `failedChecks`
 for `needs_attention`; `slot` for `waiting_for_owner`), `slot.started` (`attempt`, `loopIteration?`,
-`loopFrom?`, `note?`), `slot.done` (`output`, `acceptedAtLimit?: true` when the Loop's Accept Condition stood in for the Done Condition at the limit), `agent.text`, `agent.tool_call`, `agent.tool_result`, `agent.error`, `agent.activity` (`payload: { phase: 'thinking' | 'writing' | 'tool', detail? }`: a sign of life at most once a second while the Pilot thinks, writes or runs a tool; not a transcript entry, never replayed),
+`loopFrom?`, `loopGrantedBy?: 'commander' | 'core'` on a round granted at the Loop limit, `note?`), `slot.done` (`output`, `acceptedAtLimit?: true` when the Loop's Accept Condition stood in for the Done Condition at the limit), `agent.text`, `agent.tool_call`, `agent.tool_result`, `agent.error`, `agent.activity` (`payload: { phase: 'thinking' | 'writing' | 'tool', detail? }`: a sign of life at most once a second while the Pilot thinks, writes or runs a tool; not a transcript entry, never replayed),
 `check.evaluated`, `core.resolved` (`slot`, `resolution: { cause, decision: 'retry' | 'accept', reason, note?, failedChecks }`: the Core decided in the Commander's place; a `retry` is followed by `slot.started` without a `note`, an `accept` by `slot.done`, or, for the cause `handover_not_done`, by the Checks of the Done Condition first), `question.asked`, `question.answered`, `cost.updated`, `mission.completed` (`report`,
 `pr`, `exitSlot`, `slots`, `cost`), `mission.stopped` (`note?: 'interrupted'`), `mission.dismissed`.
 

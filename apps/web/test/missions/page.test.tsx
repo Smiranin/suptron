@@ -16,7 +16,7 @@ import { renderApp } from '../render';
 const card = (name: string) => screen.getByRole('button', { name: `Slot ${name}` });
 
 describe('Mission page', () => {
-  it('draws the running fixture: six cards, the current implementer, the reviewer chord 1 / 3, the title', async () => {
+  it('draws the running fixture: six cards, the current implementer, the reviewer chord Loop 1 of 3, the title', async () => {
     const home = useFakeHome();
     home.seedMissions(runningDetail());
     renderApp('/missions/m-running', home.live);
@@ -30,7 +30,7 @@ describe('Mission page', () => {
     expect(card('analyst')).toHaveAttribute('data-state', 'done');
     expect(within(card('analyst')).queryByTestId('attempt-counter')).toBeNull();
     const chord = screen.getAllByTestId('loop-chord').find((c) => c.dataset.from === 'reviewer')!;
-    expect(chord).toHaveTextContent('1 / 3');
+    expect(chord).toHaveTextContent('Loop 1 of 3');
     expect(screen.getByTestId('core-state')).toHaveTextContent('Running');
     expect(document.title).toBe('feature · my-task · Suptron');
     expect(screen.getByTestId('tab-main')).toHaveTextContent('implementer');

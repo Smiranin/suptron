@@ -21,7 +21,15 @@ export interface ContextBundle {
 }
 
 export type Feedback =
-  | { kind: 'loop'; fromSlot: string; output: string; failedChecks: CheckResult[] }
+  | {
+      kind: 'loop';
+      fromSlot: string;
+      output: string;
+      failedChecks: CheckResult[];
+      /** Present on a round granted at the Loop limit: what the granter wants done. */
+      note?: string;
+      noteFrom?: 'commander' | 'core';
+    }
   | {
       kind: 'attempt';
       failedChecks: CheckResult[];
@@ -134,7 +142,7 @@ export const CORE_CALL_INSTRUCTIONS: Readonly<Record<string, string>> = {
   explainNeedsAttention:
     'Explain why this Mission needs the Commander and what they can do (Retry with a note, or Stop).',
   resolveAttention:
-    'The Mission reached a point where it would wait for the Commander. Decide as they would. With the cause handover_not_done the Pilot itself handed over with Status "open" or "failed", or without a Status line (detail says which): read the Handover in slotOutput and, where it helps, the files it names, to see what is really open and whether a further Attempt can close it. "retry" (only when mayRetry is true): the Pilot gets one more Attempt with your note; the note tells the Pilot exactly what to do about every open point and every failed Check, and where there are alternative fixes it picks one. "accept" (only when mayAccept is true): the result goes on although points are open or Checks did not hold; choose it only when the remaining gap is minor against the Task and another Attempt is unlikely to close it, and name the gap in the reason, which goes to the final report as an open point. After an accepted Handover the Done Condition of the Slot still runs. "commander": the Mission waits for the Commander; choose it when the fix would change what the Task asks for or leave the limits its documents state, when it would need the Pilot to break its Rules (delete, commit, push, write where it may not), or when an Engine error is about access, credentials or a usage limit. Prefer retry while a concrete fix exists. When mayRetry is false your Resolutions on this Slot are used up and this is your final word: accept the result as it is, or send the Mission to the Commander. The reason is two or three sentences for the Commander; for "commander" it also says what they can do (Retry with a note, or Stop).',
+    'The Mission reached a point where it would wait for the Commander. Decide as they would. With the cause handover_not_done the Pilot itself handed over with Status "open" or "failed", or without a Status line (detail says which): read the Handover in slotOutput and, where it helps, the files it names, to see what is really open and whether a further Attempt can close it. "retry" (only when mayRetry is true): the Pilot gets one more Attempt with your note; the note tells the Pilot exactly what to do about every open point and every failed Check, and where there are alternative fixes it picks one. "accept" (only when mayAccept is true): the result goes on although points are open or Checks did not hold; choose it only when the remaining gap is minor against the Task and another Attempt is unlikely to close it, and name the gap in the reason, which goes to the final report as an open point. After an accepted Handover the Done Condition of the Slot still runs. "commander": the Mission waits for the Commander; choose it when the fix would change what the Task asks for or leave the limits its documents state, when it would need the Pilot to break its Rules (delete, commit, push, write where it may not), or when an Engine error is about access, credentials or a usage limit. With the cause loop_limit a retry grants one more round: the Loop target works again with your note and the last findings, then this Slot runs once more; a round without a concrete fix in the note changes nothing, so grant it only when you can name the fix. Prefer retry while a concrete fix exists. When mayRetry is false your Resolutions on this Slot are used up and this is your final word: accept the result as it is, or send the Mission to the Commander. The reason is two or three sentences for the Commander; for "commander" it also says what they can do (Retry with a note, or Stop).',
   finalReport:
     'Write the final report: what was produced and where it is (the Workspace fragment names the place; the Pull Request when there is one), how it was verified, and costs. Add a part "Open points": what the Handover at the end of each Slot Output lists as open, and for every accepted resolution its reason and its failed Checks; write "none" when there are none. When a Slot record carries resolutions, add a part "Decisions the Core took": per resolution the Slot, the decision and its reason.',
 };

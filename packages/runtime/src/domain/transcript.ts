@@ -6,6 +6,21 @@ export interface ExecutionKey {
   attempt: number;
   loopIteration?: number;
   loopFrom?: string;
+  /** Who granted the round at the Loop limit; absent for a round inside the limit. */
+  loopGrantedBy?: 'commander' | 'core';
+}
+
+const GRANTER_NAMES = { commander: 'the Commander', core: 'the Core' } as const;
+
+/** The execution a `slot.started` event opens; the server's store and the web reducer both build it. */
+export function executionKeyOf(event: ExecutionKey): ExecutionKey {
+  return {
+    slot: event.slot,
+    attempt: event.attempt,
+    ...(event.loopIteration !== undefined && { loopIteration: event.loopIteration }),
+    ...(event.loopFrom !== undefined && { loopFrom: event.loopFrom }),
+    ...(event.loopGrantedBy !== undefined && { loopGrantedBy: event.loopGrantedBy }),
+  };
 }
 
 export function executionId(key: ExecutionKey): string {
@@ -14,7 +29,8 @@ export function executionId(key: ExecutionKey): string {
 
 export function sectionTitle(key: ExecutionKey): string {
   if (key.loopFrom) {
-    const loop = `Loop ${key.loopIteration ?? 1} from ${key.loopFrom}`;
+    const granted = key.loopGrantedBy ? `, granted by ${GRANTER_NAMES[key.loopGrantedBy]}` : '';
+    const loop = `Loop ${key.loopIteration ?? 1} from ${key.loopFrom}${granted}`;
     return key.attempt > 1 ? `${loop} · Attempt ${key.attempt}` : loop;
   }
   return `Attempt ${key.attempt}`;

@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { CostLabel } from '../../../components/cost-label';
 import { STATE_LABELS } from '../../../components/state-badge';
 import { ClockView, layoutClock, useViewportSize, type Viewport } from '../../clock';
-import { missionDecorations, type MissionDecorations } from '../model/selectors';
+import { loopBadge, missionDecorations, type MissionDecorations } from '../model/selectors';
 import type { ReadyMissionState } from '../model/types';
 
 const HIGHLIGHT_MS = 1500;
@@ -146,7 +146,7 @@ export function MissionClock({
         loops={Object.fromEntries(
           Object.entries(decorations.loops).map(([from, loop]) => [
             from,
-            { badge: `${loop.iterations} / ${loop.limit}`, highlighted: fired.has(from) },
+            { badge: loopBadge(loop.iterations, loop.limit), highlighted: fired.has(from) },
           ]),
         )}
         exits={Object.fromEntries(

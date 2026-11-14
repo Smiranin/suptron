@@ -349,7 +349,7 @@ describe('Assembly editor: inspector', () => {
     await user.click(within(inspector).getByRole('combobox', { name: 'Loop target' }));
     await user.click(await screen.findByRole('option', { name: 'implementer' }));
     await waitFor(() => expect(chords()).toContain('publisher>implementer'));
-    expect(within(inspector).getByLabelText('Iteration limit')).toHaveValue(3);
+    expect(within(inspector).getByLabelText('Loop limit')).toHaveValue(3);
     await user.click(within(inspector).getByRole('button', { name: 'Remove Loop' }));
     await waitFor(() => expect(chords()).not.toContain('publisher>implementer'));
   });
@@ -447,7 +447,7 @@ describe('Assembly editor: inspector', () => {
     await user.click(screen.getByRole('button', { name: 'Core' }));
     const panel = await screen.findByTestId('core-panel');
     const field = within(panel).getByLabelText('Core decision limit');
-    expect(field).toHaveValue(2);
+    expect(field).toHaveValue(3);
     // typed over the selected value: an emptied field shows its default again
     await user.type(field, '0', { initialSelectionStart: 0, initialSelectionEnd: 1 });
     const request = await save(home, user);

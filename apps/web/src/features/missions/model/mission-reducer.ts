@@ -1,7 +1,7 @@
 import {
   executionId,
+  executionKeyOf,
   resolutionNote,
-  type ExecutionKey,
   type MissionDetail,
   type MissionEvent,
   type TranscriptEntry,
@@ -183,12 +183,7 @@ function applyEvent(state: ReadyMissionState, event: MissionEvent, now: number):
       return { ...base, summary };
     }
     case 'slot.started': {
-      const execution: ExecutionKey = {
-        slot: event.slot,
-        attempt: event.attempt,
-        ...(event.loopIteration !== undefined && { loopIteration: event.loopIteration }),
-        ...(event.loopFrom !== undefined && { loopFrom: event.loopFrom }),
-      };
+      const execution = executionKeyOf(event);
       const section: TranscriptSection = { execution, entries: [], dropped: 0 };
       if (event.note !== undefined) {
         section.entries.push({

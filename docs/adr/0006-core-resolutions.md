@@ -31,5 +31,5 @@ Secondary decisions taken in the same session:
 
 - **`resolutionLimit: 0` is the switch back** to the POC's behaviour; there is no separate autonomy flag.
 - **Human Checkpoints stay the Commander's.** A Pilot flagged "may ask the Commander" asks at a moment the Commander chose (the planner's interview at the start); the Core does not answer for them.
-- **A limit on tokens or cost is not part of this**; the Resolution limit bounds extra Attempts, not spend (see PROGRESS.md, cost and usage limits).
+- **A limit on tokens or cost is not part of this**; the Resolution limit bounds extra Attempts, not spend (a spend limit is not designed; the wait at the Engine's usage limit is ADR-0008).
 - **ADR-0001 stands**: the Core still can never reorder, skip or add Slots, and never declares a Mission Completed. What changes is the runtime's rule that the Core is consulted for text and judgments only: it now also decides what the Commander would at the points listed above.

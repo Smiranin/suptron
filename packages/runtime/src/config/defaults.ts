@@ -31,6 +31,8 @@ export const DEFAULTS = {
       gitConventions: false,
       slotOutputs: [] as const,
     },
+    // Off by default: a tester or a publication must run again after every change.
+    skipWhenDone: false,
     exitPoint: false,
     exitCondition: [] as const,
   },

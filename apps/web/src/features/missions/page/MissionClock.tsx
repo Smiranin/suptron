@@ -18,7 +18,7 @@ export function MissionSlotCard({
   unit: string;
   decoration: MissionDecorations['slots'][string];
 }) {
-  const { state, current, marker, attempts, cost } = decoration;
+  const { state, current, marker, attempts, skipped, cost } = decoration;
   return (
     <div
       className="flex size-full flex-col justify-between"
@@ -57,6 +57,14 @@ export function MissionSlotCard({
           {state}
         </span>
         {attempts > 1 && <span data-testid="attempt-counter">Attempt {attempts}</span>}
+        {skipped > 0 && (
+          <span
+            data-testid="skipped-counter"
+            title="Passed by in a later Slot's Loop: its Slot Output is from before those rounds"
+          >
+            Skipped {skipped}×
+          </span>
+        )}
         <CostLabel cost={cost} />
       </div>
     </div>

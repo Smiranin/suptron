@@ -68,6 +68,8 @@ export interface RunnerProgress {
   /** The session of the Attempt under way; a Resume continues it. */
   openSession?: { slot: string; sessionId: string };
   slotOutputs: Record<string, string>;
+  /** Looping Slots whose round is under way: the work went back and has not reached them again. */
+  openRounds?: string[];
 }
 
 /** What a resumed Runner starts from. */
@@ -202,6 +204,8 @@ export class Runner {
   private index = 0;
   private feedback: Feedback | undefined;
   private loopEntry: LoopEntry | undefined;
+  /** Looping Slots whose round is under way: the work went back and has not reached them again. */
+  private readonly openRounds = new Set<string>();
   /** The session of the Attempt under way, or of the one a Stop or a restart interrupted. */
   private openSession: { slot: string; sessionId: string } | undefined;
   /** True until the first Slot of a resumed Mission has started. */
@@ -266,6 +270,7 @@ export class Runner {
     for (const [slot, id] of Object.entries(progress.sessions)) this.sessions.set(slot, id);
     for (const [slot, output] of Object.entries(progress.slotOutputs))
       this.slotOutputs.set(slot, output);
+    for (const slot of progress.openRounds ?? []) this.openRounds.add(slot);
     this.openSession = progress.openSession;
     this.resumed = true;
   }
@@ -283,6 +288,7 @@ export class Runner {
       sessions: Object.fromEntries(this.sessions),
       ...(this.openSession && { openSession: this.openSession }),
       slotOutputs: Object.fromEntries(this.slotOutputs),
+      openRounds: [...this.openRounds],
     });
   }
 
@@ -419,7 +425,44 @@ export class Runner {
       // The granting Slot keeps its count of Resolutions, or the Core could grant rounds for ever.
       if (grant) this.keepResolutions.add(slot.name);
       this.enterSlot(slot.loop.target);
+      const from = this.index;
       this.index = slots.findIndex((s) => s.name === slot.loop.target);
+      this.openRounds.add(slot.name);
+      // Every round of an outer Loop is new work: the Loops inside it count from zero again.
+      for (const inner of slots.slice(this.index, from)) {
+        this.loopCounts.delete(inner.name);
+        this.records.get(inner.name)!.loops = 0;
+      }
+    };
+
+    /**
+     * The next Slot in order. A done Slot with `skipWhenDone` is passed by while the round of a
+     * later Slot's Loop is under way; in the round of its own Loop it runs as ever.
+     */
+    const moveOn = () => {
+      for (;;) {
+        this.index += 1;
+        const next = slots[this.index]!;
+        const outer = slots.slice(this.index + 1).find((later) => this.openRounds.has(later.name));
+        const passedBy =
+          next.skipWhenDone &&
+          this.slotOutputs.has(next.name) &&
+          outer !== undefined &&
+          !this.openRounds.has(next.name);
+        if (!passedBy) break;
+        const record = this.records.get(next.name)!;
+        record.skipped = (record.skipped ?? 0) + 1;
+        this.deps.emit({
+          type: 'slot.skipped',
+          missionId: this.meta.id,
+          slot: next.name,
+          loopFrom: outer!.name,
+        });
+      }
+      // A forward move starts the next Slot afresh (a Loop does the same for its target).
+      this.enterSlot(slots[this.index]!.name);
+      this.feedback = undefined;
+      this.loopEntry = undefined;
     };
 
     for (;;) {
@@ -430,6 +473,8 @@ export class Runner {
       this.attempts.set(slot.name, attempt);
       record.attempts += 1;
       this.summary.currentSlot = slot.name;
+      // The work is back at the looping Slot: its round is over.
+      this.openRounds.delete(slot.name);
       const loopEntry = this.loopEntry;
       // The Slot a Resume starts with is told that its previous Attempt was interrupted.
       const interrupted = this.resumed;
@@ -544,11 +589,7 @@ export class Runner {
           continue;
         }
       }
-      this.index += 1;
-      // A forward move starts the next Slot afresh (a Loop does the same for its target).
-      this.enterSlot(slots[this.index]!.name);
-      this.feedback = undefined;
-      this.loopEntry = undefined;
+      moveOn();
     }
   }
 

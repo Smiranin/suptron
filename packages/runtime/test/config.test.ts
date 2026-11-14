@@ -209,6 +209,7 @@ describe('buildSnapshot', () => {
     expect(analyst!.memoryMode).toBe('fresh');
     expect(analyst!.context).toEqual({ ...DEFAULTS.slot.context, slotOutputs: [] });
     expect(analyst!.exitPoint).toBe(false);
+    expect(analyst!.skipWhenDone).toBe(false);
     expect(reviewer!.model).toBe('sonnet');
     expect(reviewer!.instructions).toMatch(/^Review the diff[\s\S]*Also check the docs\.$/);
     expect(reviewer!.doneCondition).toEqual([{ kind: 'command', command: 'pnpm lint' }]);
@@ -365,6 +366,20 @@ describe('serialize round-trips', () => {
     expect(text).not.toContain('resolutionLimit');
     expect(text.trim().endsWith('exitPoint: true')).toBe(true);
     expect(assemblyFileSchema.parse(parse(text))).toEqual(primaryAssembly());
+  });
+
+  it('writes skipWhenDone only when it is set', async () => {
+    const doc = primaryAssembly();
+    doc.slots[2] = { ...doc.slots[2]!, skipWhenDone: true };
+    const text = serializeAssembly(doc);
+    expect(text.match(/skipWhenDone/g)).toHaveLength(1);
+    const reparsed = assemblyFileSchema.parse(parse(text));
+    expect(reparsed).toEqual(doc);
+    expect(buildSnapshot(primaryProfile('/repo'), reparsed, units).assembly.slots[2]).toMatchObject(
+      { name: 'reviewer', skipWhenDone: true },
+    );
+    doc.slots[2] = { ...doc.slots[2]!, skipWhenDone: false };
+    expect(serializeAssembly(doc)).not.toContain('skipWhenDone');
   });
 
   it('writes a Resolution limit that differs from the default, 0 included', async () => {

@@ -104,7 +104,13 @@ export interface MissionSummary {
 export interface SlotRecord {
   name: string;
   attempts: number;
+  /** Rounds of this Slot's Loop since a later Slot's Loop last brought the Mission back before it. */
   loops: number;
+  /**
+   * How often the Slot was passed by in the round of a later Slot's Loop (its `skipWhenDone`);
+   * `lastOutput` then describes the work as it was before those rounds. Absent when never.
+   */
+  skipped?: number;
   lastOutput?: string;
   cost: Cost;
   checkResults: CheckResult[];

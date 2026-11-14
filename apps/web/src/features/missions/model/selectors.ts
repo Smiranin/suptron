@@ -86,6 +86,8 @@ export interface MissionDecorations {
       current: boolean;
       marker?: 'waiting' | 'attention';
       attempts: number;
+      /** How often the Slot was passed by in a later Slot's Loop; 0 when never. */
+      skipped: number;
       cost: Cost;
     }
   >;
@@ -127,6 +129,7 @@ export function missionDecorations(state: ReadyMissionState): MissionDecorations
         state.summary.state !== 'completed',
       ...(marker && { marker }),
       attempts: record?.attempts ?? 0,
+      skipped: record?.skipped ?? 0,
       cost: record?.cost ?? { usd: 0, inputTokens: 0, outputTokens: 0 },
     };
   }

@@ -622,6 +622,30 @@ describe('mission page reducer', () => {
     expect(groupMissions(list).finished).toHaveLength(0);
   });
 
+  it('a round of a later Loop renews the count of the Loops inside it; a Slot passed by is counted', () => {
+    const state = ready(
+      play(
+        initMissionPage(runningDetail()),
+        [
+          {
+            type: 'slot.started',
+            slot: 'implementer',
+            attempt: 1,
+            loopIteration: 1,
+            loopFrom: 'tester',
+          },
+          { type: 'slot.skipped', slot: 'reviewer', loopFrom: 'tester' },
+        ],
+        12,
+      ),
+    );
+    // The fixture's reviewer had looped once; the tester's round is new work for it.
+    expect(state.slots.reviewer).toMatchObject({ loops: 0, skipped: 1 });
+    expect(state.slots.tester).toMatchObject({ loops: 1 });
+    expect(missionDecorations(state).slots.reviewer).toMatchObject({ skipped: 1 });
+    expect(missionDecorations(state).slots.tester).toMatchObject({ skipped: 0 });
+  });
+
   it('absent and connection actions', () => {
     let state: MissionPageState = { status: 'loading', connection: 'connecting' };
     state = reduceMissionPage(state, { type: 'connection', status: 'closed' });

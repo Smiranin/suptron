@@ -85,6 +85,7 @@ function plainSlot(slot: SlotFile, isLast: boolean): Plain {
     put(loop, 'acceptCondition', plainCondition(slot.loop.acceptCondition));
     out.loop = loop;
   }
+  put(out, 'skipWhenDone', unlessDefault(slot.skipWhenDone, DEFAULTS.slot.skipWhenDone));
   // The last Slot always states exitPoint: true so the file reads unambiguously.
   if (isLast) out.exitPoint = true;
   else put(out, 'exitPoint', unlessDefault(slot.exitPoint, DEFAULTS.slot.exitPoint));

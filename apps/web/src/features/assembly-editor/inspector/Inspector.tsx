@@ -457,6 +457,20 @@ function SlotInspector({
               Default from the Core Directives: {effective.attemptLimit.inherited}.
             </p>
           </div>
+          <div className="flex flex-col gap-1">
+            <label className="flex items-center justify-between gap-2 text-sm">
+              Do not run again
+              <Switch
+                checked={slot.skipWhenDone === true}
+                aria-label="Do not run again"
+                onCheckedChange={(v) => patch({ skipWhenDone: v ? true : undefined })}
+              />
+            </label>
+            <p className="text-muted-foreground text-xs">
+              Once this Slot is done, the Loop of a later Slot passes it by: it keeps its last Slot
+              Output. Its own Loop works as before.
+            </p>
+          </div>
         </TabsContent>
 
         <TabsContent value="exit" className="flex flex-col gap-3 pt-2">

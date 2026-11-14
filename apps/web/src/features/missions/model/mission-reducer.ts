@@ -227,11 +227,13 @@ function applyEvent(state: ReadyMissionState, event: MissionEvent, now: number):
       const record = slots[event.slot];
       if (record) slots[event.slot] = { ...record, attempts: record.attempts + 1 };
       if (event.loopFrom && slots[event.loopFrom]) {
+        // A round of this Loop is new work: the Loops inside it count from zero, as in the Runner.
+        const order = base.assembly.slots.map((s) => s.name);
+        for (const inner of order.slice(order.indexOf(event.slot), order.indexOf(event.loopFrom))) {
+          if (slots[inner]) slots[inner] = { ...slots[inner], loops: 0 };
+        }
         const from = slots[event.loopFrom]!;
-        slots[event.loopFrom] = {
-          ...from,
-          loops: Math.max(from.loops, event.loopIteration ?? from.loops + 1),
-        };
+        slots[event.loopFrom] = { ...from, loops: event.loopIteration ?? from.loops + 1 };
       }
       const { attention: _dropped, ...rest } = withoutActivity(base);
       void _dropped;
@@ -267,6 +269,14 @@ function applyEvent(state: ReadyMissionState, event: MissionEvent, now: number):
       return event.acceptedAtLimit
         ? appendEntry(next, event, { kind: 'note', text: ACCEPTED_AT_LIMIT_NOTE })
         : next;
+    }
+    case 'slot.skipped': {
+      const record = base.slots[event.slot];
+      if (!record) return base;
+      return {
+        ...base,
+        slots: { ...base.slots, [event.slot]: { ...record, skipped: (record.skipped ?? 0) + 1 } },
+      };
     }
     case 'core.resolved': {
       const next = appendEntry(base, event, {

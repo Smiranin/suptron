@@ -1843,3 +1843,126 @@ describe('Runner scenarios with the usage limit', () => {
     await h.waitFor((es) => es.some((e) => e.type === 'mission.completed'));
   });
 });
+
+describe('Runner scenarios with a Loop inside a Loop', () => {
+  let h: Harness | undefined;
+  afterEach(() => cleanup(h));
+
+  const REVIEWED = { kind: 'llm_judgment', criterion: 'The review found nothing.' } as const;
+  const GREEN = { kind: 'llm_judgment', criterion: 'CI is green.' } as const;
+
+  /** implementer, reviewer (loops to it), publication, a CI Slot that loops to the implementer too. */
+  const nested = (reviewer: Partial<AssemblyFile['slots'][number]>) =>
+    linear([
+      { name: 'impl', unit: 'impl' },
+      { name: 'rev', unit: 'rev', loop: { target: 'impl', limit: 1 }, ...reviewer },
+      { name: 'pub', unit: 'pub', context: { slotOutputs: ['rev'] } },
+      { name: 'ci', unit: 'ci', loop: { target: 'impl', limit: 2 } },
+    ]);
+  const nestedUnits = () => [
+    unit('impl', [PASS]),
+    unit('rev', [REVIEWED]),
+    unit('pub', [PASS]),
+    unit('ci', [GREEN]),
+  ];
+
+  /** Answers the judge per criterion from a list of verdicts, in the order of the calls. */
+  function scriptJudge(engine: FakeEngine, verdicts: { review: boolean[]; ci: boolean[] }) {
+    engine.script('core', 'core', (call) => {
+      if (coreCallName(call.prompt) !== 'judge') {
+        return (engine.defaultCoreScript as (c: FakeCall) => FakeStep[])(call);
+      }
+      const { criterion } = coreCallInput(call.prompt) as { criterion: string };
+      const holds = (criterion === REVIEWED.criterion ? verdicts.review : verdicts.ci).shift();
+      return [{ result: { structured: { holds: holds ?? true, reason: 'Scripted.' } } }];
+    });
+  }
+
+  const startedSlots = (events: MissionEvent[]) =>
+    events.flatMap((e) => (e.type === 'slot.started' ? [e.slot] : []));
+
+  it('passes a done Slot by in the round of a later Loop when the Slot says so', async () => {
+    h = await harness(nestedUnits(), [nested({ skipWhenDone: true })]);
+    scriptJudge(h.engine, { review: [false, true], ci: [false, true] });
+    h.engine.script('pilot', 'rev', (call) => [{ result: { output: `review ${call.index + 1}` } }]);
+    const id = await h.start();
+    await h.waitFor((es) => es.some((e) => e.type === 'mission.completed'));
+
+    // Its own Loop works as ever; in the round the CI Slot started, the reviewer does not run.
+    expect(startedSlots(h.events)).toEqual([
+      'impl',
+      'rev',
+      'impl',
+      'rev',
+      'pub',
+      'ci',
+      'impl',
+      'pub',
+      'ci',
+    ]);
+    expect(h.events.filter((e) => e.type === 'slot.skipped')).toEqual([
+      expect.objectContaining({ slot: 'rev', loopFrom: 'ci' }),
+    ]);
+    expect(h.registry.get(id)!.slots.find((s) => s.name === 'rev')).toMatchObject({
+      attempts: 2,
+      skipped: 1,
+      lastOutput: handedOver('review 2'),
+    });
+    // The Slots that read it still get its last Slot Output.
+    const bundle = coreCallInput(composeCalls(h.engine, 'pub')[1]!.prompt) as {
+      bundle: { slotOutputs: { slotName: string; output: string }[] };
+    };
+    expect(bundle.bundle.slotOutputs).toEqual([
+      { slotName: 'rev', output: handedOver('review 2') },
+    ]);
+    // The report is told which Slots were passed by.
+    const report = h.engine
+      .callsFor('core', 'core')
+      .find((c) => coreCallName(c.prompt) === 'finalReport')!;
+    expect(
+      (coreCallInput(report.prompt) as { slots: { name: string; skipped?: number }[] }).slots.find(
+        (s) => s.name === 'rev',
+      )!.skipped,
+    ).toBe(1);
+  });
+
+  it('runs every Slot again without the setting, the inner Loop counting from zero', async () => {
+    h = await harness(nestedUnits(), [nested({})]);
+    // The reviewer sends the work back once in the first pass and once in the round of the CI Slot.
+    scriptJudge(h.engine, { review: [false, true, false, true], ci: [false, true] });
+    const id = await h.start();
+    await h.waitFor((es) =>
+      es.some(
+        (e) =>
+          e.type === 'mission.completed' ||
+          (e.type === 'mission.state' && e.state === 'needs_attention'),
+      ),
+    );
+    // With its count kept for the whole Mission the reviewer would be at its Loop limit of 1.
+    expect(h.registry.get(id)!.summary.state).toBe('completed');
+    expect(startedSlots(h.events)).toEqual([
+      'impl',
+      'rev',
+      'impl',
+      'rev',
+      'pub',
+      'ci',
+      'impl',
+      'rev',
+      'impl',
+      'rev',
+      'pub',
+      'ci',
+    ]);
+    const rounds = h.events.flatMap((e) =>
+      e.type === 'slot.started' && e.loopFrom ? [[e.loopFrom, e.loopIteration]] : [],
+    );
+    expect(rounds).toEqual([
+      ['rev', 1],
+      ['ci', 1],
+      ['rev', 1],
+    ]);
+    expect(h.types(id)).not.toContain('slot.skipped');
+    expect(h.registry.get(id)!.slots.find((s) => s.name === 'rev')!.skipped).toBeUndefined();
+  });
+});

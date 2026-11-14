@@ -30,6 +30,8 @@ export interface ResolvedSlot {
   context: ResolvedContext;
   /** The Loop rule with its limit resolved against the Core Directives. */
   loop?: LoopRule & { limit: number };
+  /** Done once, the Slot is passed by when a later Slot's Loop brings the Mission through it again. */
+  skipWhenDone: boolean;
   exitPoint: boolean;
   exitCondition: Check[];
 }
@@ -91,6 +93,7 @@ export function resolveSlot(
       gitConventions: slot.context?.gitConventions ?? DEFAULTS.slot.context.gitConventions,
       slotOutputs: [...(slot.context?.slotOutputs ?? [])],
     },
+    skipWhenDone: slot.skipWhenDone ?? DEFAULTS.slot.skipWhenDone,
     exitPoint: isLast ? true : (slot.exitPoint ?? DEFAULTS.slot.exitPoint),
     exitCondition: [...(slot.exitCondition ?? [])],
   };

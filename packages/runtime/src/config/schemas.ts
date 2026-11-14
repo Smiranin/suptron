@@ -185,6 +185,11 @@ export const slotFileSchema = z.object({
   doneCondition: conditionSchema.optional(),
   attemptLimit: z.number().int().positive().optional(),
   loop: loopRuleSchema.optional(),
+  /**
+   * Once the Slot is done, the Loop of a later Slot passes it by: it keeps its last Slot Output
+   * and does not run again. Its own Loop is not affected.
+   */
+  skipWhenDone: z.boolean().optional(),
   exitPoint: z.boolean().optional(),
   exitCondition: conditionSchema.optional(),
 });

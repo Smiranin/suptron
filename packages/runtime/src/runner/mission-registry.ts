@@ -643,6 +643,7 @@ export class MissionRegistry {
 const LEDGER_EVENT_TYPES: ReadonlySet<MissionEvent['type']> = new Set<MissionEvent['type']>([
   'slot.started',
   'slot.done',
+  'slot.skipped',
   'core.resolved',
   'cost.updated',
   'mission.state',

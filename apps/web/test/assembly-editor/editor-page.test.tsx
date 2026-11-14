@@ -355,6 +355,12 @@ describe('Assembly editor: inspector', () => {
     expect(loopLimit).toHaveAttribute('placeholder', '3');
     await user.click(within(inspector).getByRole('button', { name: 'Remove Loop' }));
     await waitFor(() => expect(chords()).not.toContain('publisher>implementer'));
+
+    // off unless set: a tester or a publication must run again after every change
+    const once = within(inspector).getByRole('switch', { name: 'Do not run again' });
+    expect(once).toHaveAttribute('aria-checked', 'false');
+    await user.click(once);
+    expect(once).toHaveAttribute('aria-checked', 'true');
   });
 
   it('renames a Slot and rewrites the Loop targets', async () => {

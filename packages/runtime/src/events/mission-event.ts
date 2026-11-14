@@ -61,6 +61,11 @@ export type MissionEvent =
       /** The Done Condition failed at the Loop limit but the Accept Condition held. */
       acceptedAtLimit?: true;
     }
+  /**
+   * The Mission passed a done Slot by on its way through the round of a later Slot's Loop
+   * (`loopFrom`): the Slot did not run and keeps its last Slot Output.
+   */
+  | { type: 'slot.skipped'; missionId: string; seq: number; slot: string; loopFrom: string }
   /** The Core took a Resolution on this Slot instead of sending the Mission to Needs Attention. */
   | { type: 'core.resolved'; missionId: string; seq: number; slot: string; resolution: Resolution }
   | {
@@ -162,6 +167,7 @@ export const GLOBAL_STREAM_EVENT_TYPES: ReadonlySet<MissionEventType> = new Set<
   'mission.resumed',
   'slot.started',
   'slot.done',
+  'slot.skipped',
   'question.asked',
   'question.answered',
   'cost.updated',

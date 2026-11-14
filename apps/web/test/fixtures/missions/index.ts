@@ -117,6 +117,7 @@ export function runningDetail(id = 'm-running'): MissionDetail {
       },
     ],
     transcriptLost: false,
+    resumable: false,
     seq: 11,
   };
 }
@@ -155,6 +156,7 @@ export function waitingDetail(id = 'm-waiting'): MissionDetail {
       },
     ],
     transcriptLost: false,
+    resumable: false,
     pendingQuestion: { id: 'q-1', slot: 'analyst', questions },
     seq: 4,
   };
@@ -201,6 +203,7 @@ export function attentionDetail(id = 'm-attention'): MissionDetail {
       },
     ],
     transcriptLost: false,
+    resumable: false,
     attention: {
       cause: 'loop_limit',
       reason:
@@ -242,6 +245,7 @@ export function completedDetail(id = 'm-completed'): MissionDetail {
       { execution: { slot: 'pr-reviewer', attempt: 1 }, entries: [], dropped: 0 },
     ],
     transcriptLost: false,
+    resumable: false,
     result: {
       report: '# Mission report\n\nThe login form was built and **verified**.',
       pr: { number: 42, url: 'https://github.com/me/my-app/pull/42' },
@@ -269,6 +273,7 @@ export function stoppedDetail(id = 'm-stopped'): MissionDetail {
       },
     ],
     transcriptLost: false,
+    resumable: false,
     seq: 6,
   };
 }
@@ -285,6 +290,7 @@ export function interruptedDetail(id = 'm-interrupted'): MissionDetail {
     slots: records({ analyst: { attempts: 1, lastOutput: 'ok' }, implementer: { attempts: 1 } }),
     transcript: [],
     transcriptLost: true,
+    resumable: true,
     seq: 0,
   };
 }
@@ -329,6 +335,7 @@ export function completedNoneDetail(id = 'm-brief'): MissionDetail {
       },
     ],
     transcriptLost: false,
+    resumable: false,
     result: {
       report: '# Brief\n\nBRIEF.md sits next to the Task.',
       pr: null,
@@ -355,6 +362,7 @@ export function runningFolderDetail(id = 'm-notes'): MissionDetail {
     slots: briefRecords({ researcher: { attempts: 1 } }),
     transcript: [{ execution: { slot: 'researcher', attempt: 1 }, entries: [], dropped: 0 }],
     transcriptLost: false,
+    resumable: false,
     seq: 3,
   };
 }

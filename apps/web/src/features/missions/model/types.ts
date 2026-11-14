@@ -50,6 +50,8 @@ export interface ReadyMissionState {
   /** What each Slot's last execution came to, from the events seen so far. */
   slotStatus: Record<string, SlotVisualState>;
   transcriptLost: boolean;
+  /** True for a Stopped Mission the server can resume. */
+  resumable: boolean;
   pendingQuestion?: MissionDetail['pendingQuestion'];
   attention?: MissionDetail['attention'];
   result?: MissionDetail['result'];

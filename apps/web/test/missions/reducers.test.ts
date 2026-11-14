@@ -548,6 +548,80 @@ describe('mission page reducer', () => {
     expect(ready(initMissionPage(attentionDetail())).panel.tab).toBe('attention');
   });
 
+  it('Waiting for usage carries the reset time, counts as in progress and ends with it', () => {
+    const resetsAt = '2026-10-23T15:00:00.000Z';
+    const waiting = ready(
+      play(
+        initMissionPage(runningDetail()),
+        [{ type: 'mission.state', state: 'waiting_for_usage', resetsAt }],
+        12,
+      ),
+    );
+    expect(waiting.summary).toMatchObject({ state: 'waiting_for_usage', usageResetsAt: resetsAt });
+    // The Slot is still under way: the clock keeps it lit, the live row says nothing.
+    expect(missionDecorations(waiting).slots.implementer).toMatchObject({ state: 'running' });
+    expect(liveRow(waiting, 2000)).toBeNull();
+    const running = ready(play(waiting, [{ type: 'mission.state', state: 'running' }], 13));
+    expect(running.summary.state).toBe('running');
+    expect(running.summary.usageResetsAt).toBeUndefined();
+
+    let list = replaceMissions(initialMissionsListState, [runningDetail().summary]);
+    list = applyMissionsListEvent(list, {
+      type: 'mission.state',
+      missionId: 'm-running',
+      seq: 12,
+      state: 'waiting_for_usage',
+      resetsAt,
+    });
+    expect(groupMissions(list).running.map((m) => m.usageResetsAt)).toEqual([resetsAt]);
+    expect(needsYouCount(list)).toBe(0);
+    list = applyMissionsListEvent(list, {
+      type: 'mission.stopped',
+      missionId: 'm-running',
+      seq: 13,
+    });
+    expect(list.missions['m-running']!.usageResetsAt).toBeUndefined();
+  });
+
+  it('a Stopped Mission can be resumed; the Resume replaces the summary and the Slot runs again', () => {
+    const stopped = ready(
+      play(
+        initMissionPage(runningDetail()),
+        [{ type: 'mission.stopped', note: 'interrupted' }],
+        12,
+      ),
+    );
+    expect(stopped.resumable).toBe(true);
+    const mission: MissionSummary = { ...runningDetail().summary, state: 'running' };
+    const resumed = ready(
+      play(
+        stopped,
+        [
+          { type: 'mission.resumed', mission },
+          { type: 'slot.started', slot: 'implementer', attempt: 3, note: 'Resumed.' },
+        ],
+        13,
+      ),
+    );
+    expect(resumed.resumable).toBe(false);
+    expect(resumed.summary).toMatchObject({ state: 'running', currentSlot: 'implementer' });
+    expect(resumed.summary.note).toBeUndefined();
+    expect(resumed.sections.at(-1)).toMatchObject({
+      execution: { slot: 'implementer', attempt: 3 },
+      entries: [{ kind: 'note', text: 'Resumed.' }],
+    });
+
+    let list = replaceMissions(initialMissionsListState, [stopped.summary]);
+    list = applyMissionsListEvent(list, {
+      type: 'mission.resumed',
+      missionId: 'm-running',
+      seq: 13,
+      mission,
+    });
+    expect(groupMissions(list).running).toHaveLength(1);
+    expect(groupMissions(list).finished).toHaveLength(0);
+  });
+
   it('absent and connection actions', () => {
     let state: MissionPageState = { status: 'loading', connection: 'connecting' };
     state = reduceMissionPage(state, { type: 'connection', status: 'closed' });

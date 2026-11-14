@@ -115,6 +115,11 @@ export interface ClaudeEngineOptions {
   pathToClaudeCodeExecutable?: string;
   /** Replaces `process.env` as the base environment of every agent (tests). */
   env?: NodeJS.ProcessEnv;
+  /**
+   * The file that keeps what every session has cost so far, so a session resumed after a restart
+   * is not charged its running total again. In memory when omitted.
+   */
+  sessionCostsPath?: string;
 }
 
 /** Turns the AskUserQuestion tool input into the runtime's Question shape. */
@@ -267,6 +272,7 @@ class ClaudeAgentHandle implements AgentHandle {
 
   private async pump(): Promise<void> {
     try {
+      await this.costs.load();
       const options = await this.buildOptions();
       const active = query({ prompt: this.input(), options });
       this.active = active;
@@ -295,9 +301,11 @@ class ClaudeAgentHandle implements AgentHandle {
 /** The Engine on the Claude Agent SDK; the only place the SDK is imported. */
 export class ClaudeEngine implements Engine {
   /** Shared by every handle: a resumed session's total was reported by an earlier handle. */
-  private readonly costs = new SessionCostLedger();
+  private readonly costs: SessionCostLedger;
 
-  constructor(private readonly options: ClaudeEngineOptions = {}) {}
+  constructor(private readonly options: ClaudeEngineOptions = {}) {
+    this.costs = new SessionCostLedger(options.sessionCostsPath);
+  }
 
   createAgent(spec: AgentSpec): AgentHandle {
     return new ClaudeAgentHandle(spec, this.options, this.costs);

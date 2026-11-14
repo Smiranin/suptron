@@ -44,6 +44,7 @@ Execution (what happens when you press Launch):
 | **Handover**        | How every Slot Output ends: what was produced, what is open, and a Status (`done`, `open`, `failed`). `done` is trusted; otherwise the Core decides.       |
 | **Resolution**      | The Core deciding in your place where the Mission would wait for you: one more Attempt with its note, or the result accepted with its open points.         |
 | **Needs Attention** | The Mission is paused for the Commander: Retry with a note, or Stop. Only what the Core may not or could not resolve gets here.                            |
+| **Resume**          | Lets a Stopped Mission go on, stopped by hand or interrupted by a restart: the Slot it stood at runs again, the Slots before it do not.                    |
 | **Engine**          | The coding agent that runs Pilots and the Core. The POC has one: Claude Code, using its local login.                                                       |
 
 ## Repository layout
@@ -109,7 +110,8 @@ $SUPTRON_HOME/
   hangar/<unit-name>.md
   projects/<project-name>/profile.yaml
   projects/<project-name>/assemblies/<assembly-name>.yaml
-  missions/active.json        # written by the server, not configuration
+  missions/active.json        # the Missions that are not over, with what a Resume needs; written by the server
+  missions/session-costs.json # what every Engine session has cost so far; written by the server
 ```
 
 ## First Mission

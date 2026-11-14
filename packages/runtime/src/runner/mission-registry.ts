@@ -32,11 +32,12 @@ import {
   type WorkspaceIssueField,
 } from '../workspace/workspace.js';
 import { resolveKnowledgeSources } from './context.js';
-import { Ledger, type LedgerEntry } from './ledger.js';
-import { MissionStateError, Runner } from './runner.js';
+import { Ledger, type LedgerEntry, type MissionOrigin, type ResumeState } from './ledger.js';
+import { MissionStateError, Runner, type RunnerRestore } from './runner.js';
 import {
   createMissionFolder,
   listTaskDocuments,
+  missionFolder,
   removeMissionFolder,
   storeTaskText,
   textTaskDocument,
@@ -79,6 +80,7 @@ export interface MissionRecord {
   snapshot: MissionSnapshot | null;
   slots: SlotRecord[];
   transcriptLost: boolean;
+  resumable: boolean;
   pendingQuestion?: PendingQuestion;
   attention?: MissionAttention;
   result?: MissionResult;
@@ -87,11 +89,17 @@ export interface MissionRecord {
 
 interface Entry {
   runner: Runner | null;
+  /** The Core of `runner`; its session goes to the ledger. */
+  core: EngineCoreAgent | null;
   recovered: LedgerEntry | null;
   assembly: AssemblyFile;
   snapshot: MissionSnapshot | null;
-  /** The open Workspace of a running Mission; null for a recovered one (its key is not rebuilt). */
+  /** The open Workspace of a running Mission; null for a recovered one until it is resumed. */
   workspace: Workspace | null;
+  /** Null for a Mission recovered from a ledger that held nothing to resume from. */
+  origin: MissionOrigin | null;
+  /** True for a Mission recovered from the ledger: what was said before the restart is gone. */
+  transcriptLost: boolean;
   seq: number;
 }
 
@@ -104,6 +112,7 @@ export interface MissionRegistryDeps {
   ciPollIntervalMs?: number;
   ciNoneGraceMs?: number;
   ciWaitTimeoutMs?: number;
+  usageResetMarginMs?: number;
   now?: () => Date;
   newId?: () => string;
 }
@@ -118,6 +127,8 @@ const WORK_ITEM_ID = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 export class MissionRegistry {
   readonly events = new TypedEmitter<MissionEvent>();
   private readonly entries = new Map<string, Entry>();
+  /** Missions with a Resume under way: a second one is refused. */
+  private readonly resuming = new Set<string>();
   private readonly ledger: Ledger;
   private readonly loadConfig: (home: string) => Promise<LoadedConfig>;
 
@@ -144,7 +155,8 @@ export class MissionRegistry {
         assembly: entry.assembly,
         snapshot: entry.snapshot,
         slots: structuredClone(runner.slotRecords()),
-        transcriptLost: false,
+        transcriptLost: entry.transcriptLost,
+        resumable: runner.state === 'stopped' && entry.origin !== null,
         ...(runner.pendingQuestion && { pendingQuestion: structuredClone(runner.pendingQuestion) }),
         ...(runner.attention && { attention: structuredClone(runner.attention) }),
         ...(runner.result && { result: structuredClone(runner.result) }),
@@ -158,6 +170,7 @@ export class MissionRegistry {
       snapshot: null,
       slots: structuredClone(recovered.slots),
       transcriptLost: true,
+      resumable: recovered.resume !== undefined,
       seq: entry.seq,
     };
   }
@@ -301,6 +314,7 @@ export class MissionRegistry {
         taskIsFile,
         workItemId,
         workspace,
+        ...(input.checkoutPath !== undefined && { checkoutPath: input.checkoutPath }),
       });
     } catch (error) {
       await removeMissionFolder(this.deps.home, id);
@@ -321,6 +335,7 @@ export class MissionRegistry {
     taskIsFile: boolean;
     workItemId: string | undefined;
     workspace: Workspace;
+    checkoutPath?: string;
   }): Promise<MissionSummary> {
     const { id, profile, document, snapshot, task, taskPath, taskIsFile, workItemId, workspace } =
       args;
@@ -335,32 +350,9 @@ export class MissionRegistry {
       taskTitle,
       taskSlug: slugify(taskTitle) || 'task',
     });
-    const entry: Entry = {
-      runner: null,
-      recovered: null,
-      assembly: document,
+    const origin: MissionOrigin = {
       snapshot,
-      workspace,
-      seq: 0,
-    };
-    this.entries.set(id, entry);
-    const emit = (event: MissionEventInput) => this.emit(id, event);
-    const core = new EngineCoreAgent(this.deps.engine, {
-      model: snapshot.assembly.core.model,
-      instructions: snapshot.assembly.core.instructions,
-      cwd: taskIsFile ? resolve(taskPath, '..') : taskPath,
-      readDirectories: [workspace.cwd],
-      guard: buildGuard(workspace, {
-        cwd: taskIsFile ? resolve(taskPath, '..') : taskPath,
-        taskPath,
-        taskDocuments,
-        configHome: this.deps.home,
-      }),
-      onCost: (cost) => entry.runner?.addCoreCost(cost),
-    });
-    const runner = new Runner(
-      snapshot,
-      {
+      meta: {
         id,
         projectName: profile.name,
         assemblyName: document.name,
@@ -373,11 +365,65 @@ export class MissionRegistry {
         knowledgeSources: resolveKnowledgeSources(profile.knowledgeSources, workspace.cwd),
         startedAt: startedAt.toISOString(),
       },
+      coreCwd: taskIsFile ? resolve(taskPath, '..') : taskPath,
+      ...(args.checkoutPath !== undefined && { checkoutPath: args.checkoutPath }),
+    };
+    const entry: Entry = {
+      runner: null,
+      core: null,
+      recovered: null,
+      assembly: document,
+      snapshot,
+      workspace,
+      origin,
+      transcriptLost: false,
+      seq: 0,
+    };
+    this.entries.set(id, entry);
+    const runner = this.engage(entry, origin, workspace);
+    await this.writeLedger();
+    this.emit(id, {
+      type: 'mission.started',
+      missionId: id,
+      mission: structuredClone(runner.summary),
+    });
+    void runner.run();
+    return structuredClone(runner.summary);
+  }
+
+  /** Gives the entry its Core and its Runner on an open Workspace; a Resume passes where to go on. */
+  private engage(
+    entry: Entry,
+    origin: MissionOrigin,
+    workspace: Workspace,
+    resume?: RunnerRestore & { coreSessionId?: string },
+  ): Runner {
+    const { snapshot, meta } = origin;
+    const core = new EngineCoreAgent(this.deps.engine, {
+      model: snapshot.assembly.core.model,
+      instructions: snapshot.assembly.core.instructions,
+      cwd: origin.coreCwd,
+      readDirectories: [workspace.cwd],
+      guard: buildGuard(workspace, {
+        cwd: origin.coreCwd,
+        taskPath: meta.taskPath,
+        taskDocuments: meta.taskDocuments,
+        configHome: this.deps.home,
+      }),
+      ...(resume?.coreSessionId !== undefined && { resumeSessionId: resume.coreSessionId }),
+      onCost: (cost) => runner.addCoreCost(cost),
+      onUsageLimit: (resetsAt) => runner.waitForUsage(resetsAt),
+    });
+    const runner: Runner = new Runner(
+      snapshot,
+      meta,
       {
         engine: this.deps.engine,
         workspace,
         core,
-        emit,
+        emit: (event) => this.emit(meta.id, event),
+        // The session of an Attempt is known before any event that rewrites the ledger.
+        onProgress: () => this.saveLedger(),
         ...(this.deps.ciPollIntervalMs !== undefined && {
           ciPollIntervalMs: this.deps.ciPollIntervalMs,
         }),
@@ -385,13 +431,91 @@ export class MissionRegistry {
         ...(this.deps.ciWaitTimeoutMs !== undefined && {
           ciWaitTimeoutMs: this.deps.ciWaitTimeoutMs,
         }),
+        ...(this.deps.usageResetMarginMs !== undefined && {
+          usageResetMarginMs: this.deps.usageResetMarginMs,
+        }),
       },
+      resume && { progress: resume.progress, records: resume.records },
     );
     entry.runner = runner;
-    await this.writeLedger();
-    emit({ type: 'mission.started', missionId: id, mission: structuredClone(runner.summary) });
-    void runner.run();
-    return structuredClone(runner.summary);
+    entry.core = core;
+    entry.recovered = null;
+    entry.workspace = workspace;
+    entry.snapshot = snapshot;
+    return runner;
+  }
+
+  /**
+   * Resumes a Stopped Mission, stopped by hand or interrupted by a restart: the Workspace is
+   * reopened and the Slot the Mission stood at runs again, on the configuration it started with.
+   */
+  async resume(id: string): Promise<MissionSummary> {
+    const entry = this.requireEntry(id);
+    if (this.summaryOf(id)!.state !== 'stopped' || this.resuming.has(id)) {
+      throw new MissionStateError('not_stopped', 'Only a Stopped Mission can be resumed');
+    }
+    const state = this.resumeStateOf(entry);
+    if (!state) {
+      throw new MissionStateError(
+        'cannot_resume',
+        'This Mission holds nothing to resume from: it was stopped by an earlier version of Suptron',
+      );
+    }
+    const slots = entry.runner ? entry.runner.slotRecords() : entry.recovered!.slots;
+    this.resuming.add(id);
+    try {
+      const missionDir = missionFolder(this.deps.home, id);
+      await requirePath('The Mission folder', missionDir);
+      await requirePath('The Task location', state.meta.taskPath);
+      let workspace: Workspace;
+      try {
+        workspace = await openWorkspace(
+          state.snapshot.profile,
+          {
+            missionDir,
+            ...(state.checkoutPath !== undefined && { checkoutPath: state.checkoutPath }),
+          },
+          { git: this.deps.git, host: this.deps.host },
+        );
+      } catch (error) {
+        if (!(error instanceof WorkspaceOpenError)) throw error;
+        throw new MissionStateError(
+          'cannot_resume',
+          error.issues.map((issue) => issue.message).join('; '),
+        );
+      }
+      const busy = this.isWorkspaceBusy(workspace.busyKey);
+      if (busy) throw new WorkspaceBusyError(busy);
+      const { progress, coreSessionId, ...origin } = state;
+      entry.origin = origin;
+      const runner = this.engage(entry, origin, workspace, {
+        progress,
+        records: structuredClone(slots),
+        ...(coreSessionId !== undefined && { coreSessionId }),
+      });
+      await this.writeLedger();
+      this.emit(id, {
+        type: 'mission.resumed',
+        missionId: id,
+        mission: structuredClone(runner.summary),
+      });
+      void runner.run();
+      return structuredClone(runner.summary);
+    } finally {
+      this.resuming.delete(id);
+    }
+  }
+
+  /** What a Resume of this entry starts from; undefined when the entry holds none. */
+  private resumeStateOf(entry: Entry): ResumeState | undefined {
+    if (!entry.runner) return entry.recovered?.resume;
+    if (!entry.origin) return undefined;
+    const coreSessionId = entry.core?.session;
+    return {
+      ...entry.origin,
+      progress: entry.runner.progress(),
+      ...(coreSessionId !== undefined && { coreSessionId }),
+    };
   }
 
   async stop(id: string): Promise<void> {
@@ -417,7 +541,7 @@ export class MissionRegistry {
   async dismiss(id: string): Promise<void> {
     const entry = this.requireEntry(id);
     const summary = this.summaryOf(id)!;
-    if (isActiveState(summary.state)) {
+    if (isActiveState(summary.state) || this.resuming.has(id)) {
       throw new MissionStateError(
         'not_finished',
         'Only Completed and Stopped Missions can be dismissed',
@@ -429,29 +553,41 @@ export class MissionRegistry {
     this.events.emit({ type: 'mission.dismissed', missionId: id, seq });
   }
 
-  /** Turns leftover ledger entries into Stopped Missions with the `interrupted` note. */
+  /**
+   * Takes over the ledger of the previous run: a Mission that was active becomes Stopped with the
+   * `interrupted` note, a Stopped one stays as it was. Both wait for a Resume or a Dismiss.
+   */
   async recoverInterrupted(): Promise<MissionSummary[]> {
     const content = await this.ledger.read();
     const recovered: MissionSummary[] = [];
     for (const [id, raw] of Object.entries(content)) {
       if (this.entries.has(id) || !raw?.summary) continue;
+      const { usageResetsAt: _dropped, ...kept } = raw.summary;
+      void _dropped;
       const summary: MissionSummary = {
-        ...raw.summary,
+        ...kept,
         state: 'stopped',
-        note: 'interrupted',
+        ...(isActiveState(raw.summary.state) && { note: 'interrupted' as const }),
         currentSlot: null,
       };
       this.entries.set(id, {
         runner: null,
-        recovered: { summary, assembly: raw.assembly, slots: raw.slots ?? [] },
+        core: null,
+        recovered: {
+          summary,
+          assembly: raw.assembly,
+          slots: raw.slots ?? [],
+          ...(raw.resume && { resume: raw.resume }),
+        },
         assembly: raw.assembly,
-        snapshot: null,
+        snapshot: raw.resume?.snapshot ?? null,
         workspace: null,
+        origin: null,
+        transcriptLost: true,
         seq: 0,
       });
       recovered.push(structuredClone(summary));
     }
-    // Recovered Missions live in memory until Dismiss or the next restart.
     await this.writeLedger();
     return recovered;
   }
@@ -473,29 +609,52 @@ export class MissionRegistry {
     entry.seq += 1;
     const stamped = { ...event, seq: entry.seq } as MissionEvent;
     this.events.emit(stamped);
-    if (
-      stamped.type === 'slot.started' ||
-      stamped.type === 'slot.done' ||
-      stamped.type === 'mission.completed' ||
-      stamped.type === 'mission.stopped'
-    ) {
-      void this.writeLedger().catch((error) =>
-        console.error('[suptron] ledger write failed', error),
-      );
-    }
+    if (LEDGER_EVENT_TYPES.has(stamped.type)) this.saveLedger();
   }
 
+  /** Rewrites the ledger without making the caller wait; a failed write is logged. */
+  private saveLedger(): void {
+    void this.writeLedger().catch((error) => console.error('[suptron] ledger write failed', error));
+  }
+
+  /** Every Mission that is not over: active and Stopped ones, with what a Resume needs. */
   private writeLedger(): Promise<void> {
     const content: Record<string, LedgerEntry> = {};
     for (const [id, entry] of this.entries) {
       const runner = entry.runner;
-      if (!runner || !isActiveState(runner.state)) continue;
+      if (!runner) {
+        content[id] = entry.recovered!;
+        continue;
+      }
+      if (runner.state === 'completed') continue;
+      const resume = this.resumeStateOf(entry);
       content[id] = {
         summary: structuredClone(runner.summary),
         assembly: entry.assembly,
         slots: structuredClone(runner.slotRecords()),
+        ...(resume && { resume }),
       };
     }
     return this.ledger.write(content);
+  }
+}
+
+/** The events after which the ledger is rewritten: each changes what a Resume would start from. */
+const LEDGER_EVENT_TYPES: ReadonlySet<MissionEvent['type']> = new Set<MissionEvent['type']>([
+  'slot.started',
+  'slot.done',
+  'core.resolved',
+  'cost.updated',
+  'mission.state',
+  'mission.resumed',
+  'mission.completed',
+  'mission.stopped',
+]);
+
+async function requirePath(what: string, path: string): Promise<void> {
+  try {
+    await stat(path);
+  } catch {
+    throw new MissionStateError('cannot_resume', `${what} does not exist any more: ${path}`);
   }
 }

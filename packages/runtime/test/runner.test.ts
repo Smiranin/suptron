@@ -15,7 +15,10 @@ import {
   type ProfileFile,
   type Question,
   type UnitFile,
+  RESUME_NOTE,
+  USAGE_CONTINUE_PROMPT,
   defaultMissionTitle,
+  ledgerRelPath,
   withHandover,
 } from '../src/index.js';
 import {
@@ -108,6 +111,7 @@ async function harness(
     ciPollIntervalMs: 5,
     ciNoneGraceMs: 0,
     ciWaitTimeoutMs: 300,
+    usageResetMarginMs: 0,
   });
   const events: MissionEvent[] = [];
   registry.events.onAny((e) => events.push(e));
@@ -792,10 +796,12 @@ describe('Runner scenarios', () => {
     h = await harness([unit('a', [PASS])], [linear([{ name: 'a', unit: 'a' }])]);
     let release!: () => void;
     const gate = new Promise<void>((r) => (release = r));
-    h.engine.script('pilot', 'a', [{ wait: gate }, { result: { output: 'ok' } }]);
+    h.engine.script('pilot', 'a', [{ text: 'busy' }, { wait: gate }, { result: { output: 'ok' } }]);
     const running = await h.start();
-    await h.waitFor((es) => es.some((e) => e.type === 'slot.started'));
+    await h.waitFor((es) => es.some((e) => e.type === 'agent.text'));
     await expect(h.registry.dismiss(running)).rejects.toMatchObject({ reason: 'not_finished' });
+    // Two registries never share a home outside this test: let the first one finish writing.
+    await h.registry.flush();
 
     // "restart": a new registry on the same home sees the leftover ledger entry
     const restarted = new MissionRegistry({
@@ -1517,6 +1523,323 @@ describe('Runner scenarios with Handovers', () => {
     expect(resolveCalls(h.engine)).toEqual([]);
     expect(h.registry.get(id)?.attention?.reason).toContain('Status "open"');
     h.registry.retry(id, 'close it');
+    await h.waitFor((es) => es.some((e) => e.type === 'mission.completed'));
+  });
+});
+
+describe('Runner scenarios with Resume', () => {
+  let h: Harness | undefined;
+  afterEach(() => cleanup(h));
+
+  const twoSlots = () =>
+    linear([
+      { name: 'a', unit: 'a' },
+      { name: 'b', unit: 'b', context: { slotOutputs: ['a'] } },
+    ]);
+
+  /** A second registry on the same home: what the server is after a restart. */
+  const restart = (harness: Harness) => {
+    const registry = new MissionRegistry({
+      home: harness.home,
+      engine: harness.engine,
+      host: harness.host,
+      git: new RealGitClient(),
+    });
+    registry.events.onAny((e) => harness.events.push(e));
+    return registry;
+  };
+
+  /** `b` hangs in its first turn and answers in every later one. */
+  function hangFirstTurnOfB(engine: FakeEngine): () => void {
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    engine.script('pilot', 'b', (call) =>
+      call.index === 0
+        ? [{ text: 'busy' }, { wait: gate }, { result: { output: 'never' } }]
+        : [{ result: { output: 'b done' } }],
+    );
+    return release;
+  }
+
+  const composeInput = (engine: FakeEngine, slot: string, nth: number) =>
+    coreCallInput(composeCalls(engine, slot)[nth]!.prompt) as {
+      interrupted?: true;
+      bundle: { slotOutputs: { slotName: string; output: string }[] };
+    };
+
+  it('resumes a Mission stopped by hand at the Slot it stood at, in the session of the interrupted Attempt', async () => {
+    h = await harness([unit('a', [PASS]), unit('b', [PASS])], [twoSlots()]);
+    const release = hangFirstTurnOfB(h.engine);
+    const id = await h.start();
+    await h.waitFor((es) => es.some((e) => e.type === 'agent.text' && e.slot === 'b'));
+    await expect(h.registry.resume(id)).rejects.toMatchObject({ reason: 'not_stopped' });
+    await h.registry.stop(id);
+    release();
+    expect(h.registry.get(id)).toMatchObject({ resumable: true, transcriptLost: false });
+    const costBefore = h.registry.get(id)!.summary.cost.usd;
+
+    const summary = await h.registry.resume(id);
+    expect(summary).toMatchObject({ id, state: 'running' });
+    expect(summary.cost.usd).toBe(costBefore);
+    await h.waitFor((es) => es.some((e) => e.type === 'mission.completed'));
+
+    expect(h.engine.callsFor('pilot', 'a')).toHaveLength(1);
+    const [first, second] = h.engine.callsFor('pilot', 'b');
+    expect(second!.spec.resumeSessionId).toBe(first!.sessionId);
+    expect(composeInput(h.engine, 'b', 0).interrupted).toBeUndefined();
+    expect(composeInput(h.engine, 'b', 1)).toMatchObject({
+      interrupted: true,
+      bundle: { slotOutputs: [{ slotName: 'a', output: handedOver('a output') }] },
+    });
+    const started = h.events.flatMap((e) => (e.type === 'slot.started' ? [e] : []));
+    expect(started.map((e) => [e.slot, e.attempt, e.note])).toEqual([
+      ['a', 1, undefined],
+      ['b', 1, undefined],
+      ['b', 2, RESUME_NOTE],
+    ]);
+    expect(h.types(id)).toContain('mission.resumed');
+    expect(h.registry.get(id)!.summary.cost.usd).toBeGreaterThan(costBefore);
+  });
+
+  it('resumes an interrupted Mission after a restart on the stored snapshot, the Core in its session', async () => {
+    h = await harness([unit('a', [PASS]), unit('b', [PASS])], [twoSlots()]);
+    hangFirstTurnOfB(h.engine);
+    const id = await h.start();
+    await h.waitFor((es) => es.some((e) => e.type === 'agent.text' && e.slot === 'b'));
+    await h.registry.flush();
+    const coreSession = h.engine.callsFor('core', 'core').at(-1)!.sessionId;
+    // The files on disk change after the start: a Resume must not see it.
+    await writeHome(h.home, {
+      units: [unit('a', [FAIL]), unit('b', [FAIL])],
+      projects: [{ profile: primaryProfile(h.repo.clonePath), assemblies: [twoSlots()] }],
+    });
+
+    const restarted = restart(h);
+    const [recovered] = await restarted.recoverInterrupted();
+    expect(recovered).toMatchObject({ id, state: 'stopped', note: 'interrupted' });
+    expect(restarted.get(id)).toMatchObject({ resumable: true, transcriptLost: true });
+    // The old registry still holds the Checkout in this test; a real restart has freed it.
+    await h.registry.stop(id);
+
+    const summary = await restarted.resume(id);
+    expect(summary.note).toBeUndefined();
+    await h.waitFor((es) => es.some((e) => e.type === 'mission.completed'));
+    expect(h.engine.callsFor('pilot', 'a')).toHaveLength(1);
+    expect(h.engine.callsFor('pilot', 'b')[1]!.spec.resumeSessionId).toBe(
+      h.engine.callsFor('pilot', 'b')[0]!.sessionId,
+    );
+    expect(composeInput(h.engine, 'b', 1).interrupted).toBe(true);
+    expect(composeCalls(h.engine, 'b')[1]!.spec.resumeSessionId).toBe(coreSession);
+    const detail = restarted.get(id)!;
+    expect(detail.summary.state).toBe('completed');
+    expect(detail.transcriptLost).toBe(true);
+    expect(detail.slots.find((s) => s.name === 'a')).toMatchObject({ attempts: 1 });
+    expect(detail.slots.find((s) => s.name === 'b')).toMatchObject({ attempts: 2 });
+    // Completed: nothing is left to resume, so the ledger lets go of it.
+    await restarted.flush();
+    expect(await restart(h).recoverInterrupted()).toEqual([]);
+  });
+
+  it('keeps a Mission stopped by hand over a restart, without the interrupted note', async () => {
+    h = await harness([unit('a', [PASS]), unit('b', [PASS])], [twoSlots()]);
+    const release = hangFirstTurnOfB(h.engine);
+    const id = await h.start();
+    await h.waitFor((es) => es.some((e) => e.type === 'agent.text' && e.slot === 'b'));
+    await h.registry.stop(id);
+    release();
+    await h.registry.flush();
+
+    const restarted = restart(h);
+    const [recovered] = await restarted.recoverInterrupted();
+    expect(recovered).toMatchObject({ id, state: 'stopped' });
+    expect(recovered!.note).toBeUndefined();
+    await restarted.resume(id);
+    await h.waitFor((es) => es.some((e) => e.type === 'mission.completed'));
+  });
+
+  it('starts a new session with the note when the session cannot be resumed', async () => {
+    h = await harness([unit('a', [PASS]), unit('b', [PASS])], [twoSlots()]);
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    h.engine.script('pilot', 'b', (call) => {
+      if (call.index === 0) return [{ text: 'busy' }, { wait: gate }];
+      if (call.spec.resumeSessionId !== undefined) {
+        return [{ error: 'No conversation found', sessionLost: true }];
+      }
+      return [{ result: { output: 'b done' } }];
+    });
+    const id = await h.start();
+    await h.waitFor((es) => es.some((e) => e.type === 'agent.text' && e.slot === 'b'));
+    await h.registry.stop(id);
+    release();
+    await h.registry.resume(id);
+    await h.waitFor((es) => es.some((e) => e.type === 'mission.completed'));
+    const calls = h.engine.callsFor('pilot', 'b');
+    expect(calls.map((c) => c.spec.resumeSessionId !== undefined)).toEqual([false, true, false]);
+    expect(calls[2]!.prompt).toBe(calls[1]!.prompt);
+    // One Attempt for the Resume: the lost session costs none.
+    expect(h.registry.get(id)!.slots.find((s) => s.name === 'b')!.attempts).toBe(2);
+  });
+
+  it('goes on in a Loop where it stood: the round, the findings and the counts', async () => {
+    h = await harness(
+      [unit('impl', [PASS]), unit('rev', [FAIL])],
+      [
+        linear([
+          { name: 'impl', unit: 'impl' },
+          { name: 'rev', unit: 'rev', loop: { target: 'impl', limit: 1 } },
+        ]),
+      ],
+    );
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    h.engine.script('pilot', 'impl', (call) =>
+      call.index === 1 ? [{ text: 'round 2' }, { wait: gate }] : [{ result: { output: 'impl' } }],
+    );
+    const id = await h.start();
+    await h.waitFor((es) =>
+      es.some((e) => e.type === 'agent.text' && e.payload.text === 'round 2'),
+    );
+    await h.registry.stop(id);
+    release();
+    await h.registry.resume(id);
+    await h.waitForState(id, 'needs_attention');
+    const input = coreCallInput(composeCalls(h.engine, 'impl')[2]!.prompt) as {
+      interrupted?: true;
+      feedback?: { kind: string; fromSlot: string };
+    };
+    expect(input).toMatchObject({ interrupted: true, feedback: { kind: 'loop', fromSlot: 'rev' } });
+    // The round before the Stop still counts: the reviewer is at its Loop limit, not at round 1.
+    expect(h.registry.get(id)!.attention).toMatchObject({ cause: 'loop_limit', slot: 'rev' });
+    await h.registry.stop(id);
+  });
+
+  it('refuses a Resume on a busy Checkout, without the Workspace folder, and without anything to go on from', async () => {
+    h = await harness([unit('a', [PASS]), unit('b', [PASS])], [twoSlots()], 'folder');
+    const release = hangFirstTurnOfB(h.engine);
+    const id = await h.start();
+    await h.waitFor((es) => es.some((e) => e.type === 'agent.text' && e.slot === 'b'));
+    await h.registry.stop(id);
+    release();
+
+    // Another Mission took the folder meanwhile.
+    let free!: () => void;
+    const held = new Promise<void>((r) => (free = r));
+    h.engine.script('pilot', 'a', [{ text: 'holding' }, { wait: held }, { result: {} }]);
+    const other = await h.start();
+    await expect(h.registry.resume(id)).rejects.toBeInstanceOf(WorkspaceBusyError);
+    await h.registry.stop(other);
+    free();
+
+    await rm(h.folder, { recursive: true, force: true });
+    await expect(h.registry.resume(id)).rejects.toMatchObject({
+      reason: 'cannot_resume',
+      message: expect.stringContaining('does not exist') as string,
+    });
+    expect(h.registry.get(id)!.summary.state).toBe('stopped');
+
+    // A ledger entry of a version that kept nothing to resume from.
+    await h.registry.flush();
+    const ledgerPath = join(h.home, ledgerRelPath());
+    const ledger = JSON.parse(await readFile(ledgerPath, 'utf8')) as Record<string, object>;
+    const { resume: _dropped, ...legacy } = ledger[id] as { resume: unknown };
+    void _dropped;
+    await writeFile(ledgerPath, JSON.stringify({ [id]: legacy }));
+    const restarted = restart(h);
+    await restarted.recoverInterrupted();
+    expect(restarted.get(id)!.resumable).toBe(false);
+    await expect(restarted.resume(id)).rejects.toMatchObject({ reason: 'cannot_resume' });
+    await expect(restarted.resume('nope')).rejects.toMatchObject({ reason: 'not_found' });
+  });
+});
+
+describe('Runner scenarios with the usage limit', () => {
+  let h: Harness | undefined;
+  afterEach(() => cleanup(h));
+
+  const soon = () => new Date(Date.now() + 40).toISOString();
+  const states = (events: MissionEvent[]) =>
+    events.flatMap((e) => (e.type === 'mission.state' ? [e.state] : []));
+
+  it('waits for the reset and goes on with the same Attempt in the same session', async () => {
+    h = await harness([unit('a', [PASS])], [linear([{ name: 'a', unit: 'a' }])]);
+    let resetsAt = '';
+    h.engine.script('pilot', 'a', (call) => {
+      if (call.index > 0) return [{ result: { output: 'a done' } }];
+      resetsAt = soon();
+      return [{ text: 'half way' }, { usageLimit: { resetsAt } }];
+    });
+    const id = await h.start();
+    await h.waitForState(id, 'waiting_for_usage');
+    expect(h.registry.get(id)!.summary).toMatchObject({
+      state: 'waiting_for_usage',
+      usageResetsAt: resetsAt,
+    });
+    expect(h.events.find((e) => e.type === 'mission.state')).toMatchObject({ resetsAt });
+    expect(h.registry.isCheckoutBusy(h.repo.clonePath)).toBe(id);
+    await h.waitFor((es) => es.some((e) => e.type === 'mission.completed'));
+
+    const [refused, continued] = h.engine.callsFor('pilot', 'a');
+    expect(continued!.spec.resumeSessionId).toBe(refused!.sessionId);
+    expect(continued!.prompt).toBe(USAGE_CONTINUE_PROMPT);
+    expect(states(h.events)).toEqual(['waiting_for_usage', 'running', 'completed']);
+    // Neither an Attempt nor a Resolution was spent on the wait.
+    expect(h.events.filter((e) => e.type === 'slot.started')).toHaveLength(1);
+    expect(h.types(id)).not.toContain('core.resolved');
+    expect(h.registry.get(id)!.summary.usageResetsAt).toBeUndefined();
+  });
+
+  it('starts the Attempt over when the refused session is gone after the reset', async () => {
+    h = await harness([unit('a', [PASS])], [linear([{ name: 'a', unit: 'a' }])]);
+    h.engine.script('pilot', 'a', (call) => {
+      if (call.index === 0) return [{ usageLimit: { resetsAt: soon() } }];
+      if (call.index === 1) return [{ error: 'No conversation found', sessionLost: true }];
+      return [{ result: { output: 'a done' } }];
+    });
+    await h.start();
+    await h.waitFor((es) => es.some((e) => e.type === 'mission.completed'));
+    const calls = h.engine.callsFor('pilot', 'a');
+    expect(calls).toHaveLength(3);
+    expect(calls[2]!.prompt).toBe(calls[0]!.prompt);
+    expect(calls[2]!.spec.resumeSessionId).toBeUndefined();
+  });
+
+  it('waits in a Core call too and makes the same call again', async () => {
+    h = await harness([unit('a', [PASS])], [linear([{ name: 'a', unit: 'a' }])]);
+    let refused = false;
+    h.engine.script('core', 'core', (call) => {
+      if (!refused && coreCallName(call.prompt) === 'composeSlotPrompt') {
+        refused = true;
+        return [{ usageLimit: { resetsAt: soon() } }];
+      }
+      return (h!.engine.defaultCoreScript as (c: FakeCall) => FakeStep[])(call);
+    });
+    const id = await h.start();
+    await h.waitFor((es) => es.some((e) => e.type === 'mission.completed'));
+    expect(states(h.events)).toEqual(['waiting_for_usage', 'running', 'completed']);
+    const composes = composeCalls(h.engine, 'a');
+    expect(composes).toHaveLength(2);
+    expect(composes[1]!.prompt).toBe(composes[0]!.prompt);
+    expect(h.types(id)).not.toContain('agent.error');
+  });
+
+  it('stops during the wait and leaves the Mission resumable', async () => {
+    h = await harness([unit('a', [PASS])], [linear([{ name: 'a', unit: 'a' }])]);
+    const tomorrow = new Date(Date.now() + 24 * 3600 * 1000).toISOString();
+    h.engine.script('pilot', 'a', (call) =>
+      call.index === 0
+        ? [{ usageLimit: { resetsAt: tomorrow } }]
+        : [{ result: { output: 'a done' } }],
+    );
+    const id = await h.start();
+    await h.waitForState(id, 'waiting_for_usage');
+    await h.registry.stop(id);
+    expect(h.registry.get(id)).toMatchObject({
+      summary: { state: 'stopped' },
+      resumable: true,
+    });
+    expect(h.registry.get(id)!.summary.usageResetsAt).toBeUndefined();
+    await h.registry.resume(id);
     await h.waitFor((es) => es.some((e) => e.type === 'mission.completed'));
   });
 });

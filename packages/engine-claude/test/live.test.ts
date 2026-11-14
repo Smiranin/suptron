@@ -152,6 +152,46 @@ describe.skipIf(process.env.SUPTRON_LIVE !== '1')('ClaudeEngine (live)', () => {
     );
   }, 300_000);
 
+  it('resumes a session from a new Engine, as a Resume after a server restart does', async () => {
+    const spec = {
+      role: 'pilot' as const,
+      label: 'memory',
+      model: 'sonnet',
+      systemPrompt: { rules: 'Be brief.', instructions: 'Do exactly what the user asks.' },
+      cwd: dir,
+      additionalDirectories: [],
+      allowQuestions: false,
+      guard: {
+        cwd: dir,
+        writeRoots: [dir],
+        protectedBranch: null,
+        taskPath: join(dir, 'task'),
+        taskDocuments: [],
+        configHome: join(dir, 'home'),
+      },
+    };
+    const run = async (resumeSessionId: string | undefined, prompt: string) => {
+      // Every query is a new Claude Code process; a new Engine also forgets what this one knew.
+      const handle = new ClaudeEngine().createAgent({
+        ...spec,
+        ...(resumeSessionId !== undefined && { resumeSessionId }),
+      });
+      handle.send(prompt);
+      const events: AgentEvent[] = [];
+      for await (const event of handle.events()) events.push(event);
+      const result = events.find((e) => e.type === 'result');
+      if (result?.type !== 'result') throw new Error(`no result: ${JSON.stringify(events)}`);
+      return result;
+    };
+    const first = await run(undefined, 'Remember the word "quokka". Reply with OK.');
+    const second = await run(
+      first.sessionId,
+      'Which word did I ask you to remember? Reply with that word only.',
+    );
+    expect(second.output.toLowerCase()).toContain('quokka');
+    expect(second.sessionId).toBe(first.sessionId);
+  }, 300_000);
+
   it('reports health and models', async () => {
     const engine = new ClaudeEngine();
     expect(await engine.healthCheck()).toEqual({ ok: true });

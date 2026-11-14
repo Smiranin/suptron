@@ -49,6 +49,21 @@ export const missionsApi = {
       throw error;
     }
   },
+  /** Refused with a message when the Workspace is busy or gone, or the Mission holds nothing to go on from. */
+  async resume(id: string): Promise<MissionSummary> {
+    try {
+      return await request<MissionSummary>(`/api/missions/${encodeURIComponent(id)}/resume`, {
+        method: 'POST',
+      });
+    } catch (error) {
+      if (error instanceof HttpError && error.status === 409) {
+        const body = error.body as { reason?: string; message?: string; missionId?: string };
+        if (body?.reason === 'workspace_busy') throw new WorkspaceBusyError(body.missionId ?? '');
+        throw new Error(body?.message ?? 'The Mission cannot be resumed', { cause: error });
+      }
+      throw error;
+    }
+  },
   stop: (id: string) =>
     request<void>(`/api/missions/${encodeURIComponent(id)}/stop`, { method: 'POST' }),
   retry: (id: string, note: string) =>

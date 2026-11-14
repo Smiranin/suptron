@@ -4,6 +4,7 @@ import { StatusBadge, type StatusTone } from './status-badge';
 export const STATE_LABELS: Record<MissionState, string> = {
   running: 'Running',
   waiting_for_owner: 'Waiting for you',
+  waiting_for_usage: 'Waiting for usage',
   needs_attention: 'Needs attention',
   stopped: 'Stopped',
   completed: 'Completed',
@@ -12,6 +13,7 @@ export const STATE_LABELS: Record<MissionState, string> = {
 const TONES: Record<MissionState, StatusTone> = {
   running: 'success',
   waiting_for_owner: 'warning',
+  waiting_for_usage: 'warning',
   needs_attention: 'destructive',
   stopped: 'neutral',
   completed: 'success',

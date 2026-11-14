@@ -6,11 +6,18 @@ import type { Question, TranscriptSection } from './transcript.js';
 import type { WorkspaceSummary } from '../workspace/kinds.js';
 
 export type MissionState =
-  'running' | 'waiting_for_owner' | 'needs_attention' | 'stopped' | 'completed';
+  | 'running'
+  | 'waiting_for_owner'
+  /** The Engine refused a call by the usage limit; the Mission goes on by itself when it resets. */
+  | 'waiting_for_usage'
+  | 'needs_attention'
+  | 'stopped'
+  | 'completed';
 
 export const ACTIVE_MISSION_STATES: readonly MissionState[] = [
   'running',
   'waiting_for_owner',
+  'waiting_for_usage',
   'needs_attention',
 ];
 
@@ -90,6 +97,8 @@ export interface MissionSummary {
   cost: Cost & { estimated: true };
   pr?: PullRequestRef;
   note?: 'interrupted';
+  /** When the usage limit resets; present only in Waiting for usage. */
+  usageResetsAt?: string;
 }
 
 export interface SlotRecord {
@@ -130,8 +139,10 @@ export interface MissionDetail {
   /** Assembly order, then the `core` pseudo-Slot. */
   slots: SlotRecord[];
   transcript: TranscriptSection[];
-  /** True for Missions recovered from the ledger after a restart. */
+  /** True for Missions recovered from the ledger after a restart, resumed or not. */
   transcriptLost: boolean;
+  /** True for a Stopped Mission that holds what a Resume needs. */
+  resumable: boolean;
   pendingQuestion?: PendingQuestion;
   attention?: MissionAttention;
   result?: MissionResult;

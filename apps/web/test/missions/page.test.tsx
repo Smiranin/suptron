@@ -200,7 +200,7 @@ describe('Mission page', () => {
     await screen.findByText('Addressing the review feedback.');
     await user.click(screen.getByRole('button', { name: /Stop/ }));
     const dialog = await screen.findByRole('alertdialog');
-    expect(dialog).toHaveTextContent('cannot be resumed');
+    expect(dialog).toHaveTextContent('can be resumed later');
     await user.click(within(dialog).getByRole('button', { name: 'Stop Mission' }));
     await waitFor(() =>
       expect(home.requestsTo('POST', '/api/missions/m-running/stop')).toHaveLength(1),
@@ -289,5 +289,46 @@ describe('Mission page', () => {
     await waitFor(() => expect(router.state.location.pathname).toBe('/missions'));
     expect(await screen.findByRole('heading', { name: 'Missions' })).toBeInTheDocument();
     expect(screen.queryByText('Stopped · interrupted')).toBeNull();
+  });
+
+  it('resumes an interrupted Mission from its page and shows a wait for usage', async () => {
+    const home = useFakeHome();
+    home.seedMissions(interruptedDetail());
+    const user = userEvent.setup();
+    renderApp('/missions/m-interrupted', home.live);
+    await screen.findByTestId('transcript-lost');
+    await user.click(await screen.findByRole('button', { name: 'Resume' }));
+    await waitFor(() =>
+      expect(home.requestsTo('POST', '/api/missions/m-interrupted/resume')).toHaveLength(1),
+    );
+    const header = screen.getByTestId('mission-header');
+    expect(await within(header).findByText('Running')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Resume' })).toBeNull();
+    expect(screen.getByRole('button', { name: /Stop/ })).toBeInTheDocument();
+
+    // The resumed Slot has a transcript again; the Slot that ran before the restart has not.
+    home.emit({
+      type: 'slot.started',
+      missionId: 'm-interrupted',
+      seq: home.nextSeq('m-interrupted'),
+      slot: 'implementer',
+      attempt: 2,
+      note: 'The Commander resumed the Mission.',
+    });
+    expect(await screen.findByText('The Commander resumed the Mission.')).toBeInTheDocument();
+    expect(screen.queryByTestId('transcript-lost')).toBeNull();
+
+    home.emit({
+      type: 'mission.state',
+      missionId: 'm-interrupted',
+      seq: home.nextSeq('m-interrupted'),
+      state: 'waiting_for_usage',
+      resetsAt: new Date(Date.now() + 3600_000).toISOString(),
+    });
+    expect(await within(header).findByText('Waiting for usage')).toBeInTheDocument();
+    expect(screen.getByTestId('mission-banners')).toHaveTextContent(
+      /Waiting for usage: the limit resets at .+, then the Mission goes on/,
+    );
+    expect(screen.getByRole('button', { name: /Stop/ })).toBeInTheDocument();
   });
 });

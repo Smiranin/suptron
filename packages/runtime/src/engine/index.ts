@@ -41,7 +41,7 @@ export interface AgentSpec {
   additionalDirectories: string[];
   /** false removes AskUserQuestion from the agent. */
   allowQuestions: boolean;
-  /** Persistent Memory Mode: continue this session. */
+  /** Continue this session: Persistent Memory Mode, a Resume, or the turn after a usage limit. */
   resumeSessionId?: string;
   guard: GuardContext;
   /** Structured output for Core calls. */
@@ -61,8 +61,16 @@ export type AgentEvent =
       respond(answers: Answers): void;
       dismiss(): void;
     }
+  /** The session of this turn, as soon as the Engine knows it: what continues an interrupted turn. */
+  | { type: 'session'; sessionId: string }
+  /**
+   * The Engine refused to go on by the usage limit and says when it resets (ISO). Nothing useful
+   * follows it in this turn.
+   */
+  | { type: 'usage_limit'; resetsAt: string }
   | { type: 'result'; output: string; structured?: unknown; cost: Cost; sessionId: string }
-  | { type: 'error'; message: string };
+  /** `sessionLost`: the session to resume does not exist any more; the turn did not start. */
+  | { type: 'error'; message: string; sessionLost?: true };
 
 export interface AgentHandle {
   /** One user turn; the handle supports exactly one turn per Slot execution. */

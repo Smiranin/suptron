@@ -58,7 +58,7 @@ describe('FakeEngine', () => {
       events.push(event);
       if (event.type === 'question') void handle.interrupt();
     }
-    expect(events.map((e) => e.type)).toEqual(['question']);
+    expect(events.map((e) => e.type)).toEqual(['session', 'question']);
     expect(engine.calls[0]?.interrupted).toBe(true);
   });
 

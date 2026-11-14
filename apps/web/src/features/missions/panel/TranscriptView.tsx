@@ -86,7 +86,8 @@ export function TranscriptView({
   const { ref, following, follow } = useAutoScroll(
     `${sections.length}:${lastEntryId}:${state.activity?.phase ?? ''}`,
   );
-  if (state.transcriptLost) {
+  // A resumed Mission has sections again: only the Slots that ran before the restart have none.
+  if (state.transcriptLost && sections.length === 0 && (state.slots[slot]?.attempts ?? 0) > 0) {
     return (
       <p className="text-muted-foreground p-4 text-sm" data-testid="transcript-lost">
         The transcript was lost when the application restarted. The header and the Slots show what

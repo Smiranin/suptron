@@ -26,6 +26,24 @@ export function needsYou(state: MissionState): boolean {
   return state === 'waiting_for_owner' || state === 'needs_attention';
 }
 
+/** At work, or going on by itself when the usage limit resets: nothing for the Commander to do. */
+export function inProgress(state: MissionState): boolean {
+  return state === 'running' || state === 'waiting_for_usage';
+}
+
+/** A Slot is under way: the Mission runs, waits for an answer or waits for usage. */
+export function slotUnderWay(state: MissionState): boolean {
+  return inProgress(state) || state === 'waiting_for_owner';
+}
+
+/** "15:00", or "Mon 15:00" when the moment is not today: when a usage limit resets. */
+export function formatResetTime(iso: string, now: Date = new Date()): string {
+  const at = new Date(iso);
+  const time = at.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  if (at.toDateString() === now.toDateString()) return time;
+  return `${at.toLocaleDateString([], { weekday: 'short' })} ${time}`;
+}
+
 export interface MissionGroups {
   needsYou: MissionSummary[];
   running: MissionSummary[];
@@ -40,7 +58,7 @@ export function groupMissions(state: MissionsListState): MissionGroups {
   const all = Object.values(state.missions).sort(newestFirst);
   return {
     needsYou: all.filter((m) => needsYou(m.state)),
-    running: all.filter((m) => m.state === 'running'),
+    running: all.filter((m) => inProgress(m.state)),
     finished: all.filter((m) => !isActiveState(m.state)),
   };
 }
@@ -88,7 +106,7 @@ export function loopBadge(iterations: number, limit: number): string {
 
 /** Turns the page store into what the clock draws; the clock never sees Mission state directly. */
 export function missionDecorations(state: ReadyMissionState): MissionDecorations {
-  const active = state.summary.state === 'running' || state.summary.state === 'waiting_for_owner';
+  const active = slotUnderWay(state.summary.state);
   const currentSlot = active ? (state.current?.slot ?? state.summary.currentSlot) : null;
   const slots: MissionDecorations['slots'] = {};
   for (const slot of state.assembly.slots) {

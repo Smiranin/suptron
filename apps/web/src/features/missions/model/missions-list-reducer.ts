@@ -1,4 +1,5 @@
 import type { MissionEvent, MissionSummary } from '@suptron/runtime/browser';
+import { withState } from './mission-reducer';
 import type { MissionsListState } from './types';
 
 export const initialMissionsListState: MissionsListState = {
@@ -19,7 +20,7 @@ export function applyMissionsListEvent(
   state: MissionsListState,
   event: MissionEvent,
 ): MissionsListState {
-  if (event.type === 'mission.started') {
+  if (event.type === 'mission.started' || event.type === 'mission.resumed') {
     return { ...state, missions: { ...state.missions, [event.missionId]: event.mission } };
   }
   if (event.type === 'mission.dismissed') {
@@ -33,7 +34,7 @@ export function applyMissionsListEvent(
   let next: MissionSummary;
   switch (event.type) {
     case 'mission.state':
-      next = { ...current, state: event.state };
+      next = withState(current, event);
       break;
     case 'cost.updated':
       next = { ...current, cost: { ...event.missionTotal, estimated: true } };
@@ -52,8 +53,7 @@ export function applyMissionsListEvent(
       break;
     case 'mission.stopped':
       next = {
-        ...current,
-        state: 'stopped',
+        ...withState(current, { ...event, type: 'mission.state', state: 'stopped' }),
         currentSlot: null,
         ...(event.note && { note: event.note }),
       };

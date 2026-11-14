@@ -35,7 +35,11 @@ export type MissionEvent =
       reason?: string;
       slot?: string;
       failedChecks?: CheckResult[];
+      /** When the usage limit resets; with `waiting_for_usage` only. */
+      resetsAt?: string;
     }
+  /** The Commander resumed a Stopped Mission; `mission` replaces the summary (the note is gone). */
+  | { type: 'mission.resumed'; missionId: string; seq: number; mission: MissionSummary }
   | {
       type: 'slot.started';
       missionId: string;
@@ -155,6 +159,7 @@ export type MissionEventInput = DistributiveOmit<MissionEvent, 'seq'>;
 export const GLOBAL_STREAM_EVENT_TYPES: ReadonlySet<MissionEventType> = new Set<MissionEventType>([
   'mission.started',
   'mission.state',
+  'mission.resumed',
   'slot.started',
   'slot.done',
   'question.asked',

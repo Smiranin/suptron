@@ -4,9 +4,11 @@ import {
   resolutionNote,
   type MissionDetail,
   type MissionEvent,
+  type MissionSummary,
   type TranscriptEntry,
   type TranscriptSection,
 } from '@suptron/runtime/browser';
+import { slotUnderWay } from './selectors';
 import type {
   MissionPageAction,
   MissionPageState,
@@ -58,9 +60,7 @@ function statusFromDetail(detail: MissionDetail): Record<string, SlotVisualState
   }
   const current = detail.summary.currentSlot;
   if (current && current in status) {
-    const active =
-      detail.summary.state === 'running' || detail.summary.state === 'waiting_for_owner';
-    if (active) status[current] = 'running';
+    if (slotUnderWay(detail.summary.state)) status[current] = 'running';
   }
   if (detail.attention) status[detail.attention.slot] = 'failed';
   if (detail.result) status[detail.result.exitSlot] = 'done';
@@ -92,6 +92,7 @@ export function initMissionPage(
     current: detail.transcript.at(-1)?.execution ?? null,
     slotStatus: statusFromDetail(detail),
     transcriptLost: detail.transcriptLost,
+    resumable: detail.resumable,
     ...(detail.pendingQuestion && { pendingQuestion: detail.pendingQuestion }),
     ...(detail.attention && { attention: detail.attention }),
     ...(detail.result && { result: detail.result }),
@@ -132,6 +133,21 @@ function withoutActivity(state: ReadyMissionState): ReadyMissionState {
   return rest;
 }
 
+/** The summary after a `mission.state`: the reset time lives only in Waiting for usage. */
+export function withState(
+  summary: MissionSummary,
+  event: Extract<MissionEvent, { type: 'mission.state' }>,
+): MissionSummary {
+  const { usageResetsAt: _dropped, ...rest } = summary;
+  void _dropped;
+  return {
+    ...rest,
+    state: event.state,
+    ...(event.state === 'waiting_for_usage' &&
+      event.resetsAt !== undefined && { usageResetsAt: event.resetsAt }),
+  };
+}
+
 function applyEvent(state: ReadyMissionState, event: MissionEvent, now: number): ReadyMissionState {
   if (event.seq <= state.seq) return state;
   const base: ReadyMissionState = { ...state, seq: event.seq, lastEventAt: now };
@@ -155,7 +171,7 @@ function applyEvent(state: ReadyMissionState, event: MissionEvent, now: number):
       };
     }
     case 'mission.state': {
-      const summary = { ...base.summary, state: event.state };
+      const summary = withState(base.summary, event);
       if (event.state === 'needs_attention') {
         const attention = {
           cause: event.cause ?? 'engine_error',
@@ -181,6 +197,12 @@ function applyEvent(state: ReadyMissionState, event: MissionEvent, now: number):
         };
       }
       return { ...base, summary };
+    }
+    case 'mission.resumed': {
+      const { attention: _a, pendingQuestion: _q, ...rest } = withoutActivity(base);
+      void _a;
+      void _q;
+      return { ...rest, summary: event.mission, resumable: false };
     }
     case 'slot.started': {
       const execution = executionKeyOf(event);
@@ -386,14 +408,18 @@ function applyEvent(state: ReadyMissionState, event: MissionEvent, now: number):
       const { pendingQuestion: _q, attention: _a, ...rest } = withoutActivity(base);
       void _q;
       void _a;
+      const { usageResetsAt: _u, ...summary } = base.summary;
+      void _u;
       return {
         ...rest,
         summary: {
-          ...base.summary,
+          ...summary,
           state: 'stopped',
           currentSlot: null,
           ...(event.note && { note: event.note }),
         },
+        // The server keeps what a Mission it has just stopped needs to go on.
+        resumable: true,
         panel: { ...base.panel, tab: 'main' },
       };
     }

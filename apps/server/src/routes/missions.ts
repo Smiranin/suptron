@@ -54,8 +54,10 @@ export function missionDetail(ctx: ServerContext, id: string): MissionDetail | u
     summary: record.summary,
     assembly: record.assembly,
     slots: record.slots,
-    transcript: record.transcriptLost ? [] : ctx.transcripts.sections(id),
+    // A recovered Mission has no sections until it is resumed; then only the new ones.
+    transcript: ctx.transcripts.sections(id),
     transcriptLost: record.transcriptLost,
+    resumable: record.resumable,
     ...(record.pendingQuestion && { pendingQuestion: record.pendingQuestion }),
     ...(record.attention && { attention: record.attention }),
     ...(record.result && { result: record.result }),
@@ -102,6 +104,17 @@ export function registerMissionRoutes(app: FastifyInstance, ctx: ServerContext):
       await ctx.registry.stop(request.params.id);
       return reply.status(204).send();
     } catch (error) {
+      return stateError(reply, error);
+    }
+  });
+
+  app.post<{ Params: { id: string } }>('/api/missions/:id/resume', async (request, reply) => {
+    try {
+      return await ctx.registry.resume(request.params.id);
+    } catch (error) {
+      if (error instanceof WorkspaceBusyError) {
+        return fail(reply, 409, { reason: 'workspace_busy', missionId: error.missionId });
+      }
       return stateError(reply, error);
     }
   });

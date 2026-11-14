@@ -7,6 +7,8 @@ export const ASSEMBLIES_DIR = 'assemblies';
 export const PROFILE_FILE = 'profile.yaml';
 export const MISSIONS_DIR = 'missions';
 export const LEDGER_FILE = 'active.json';
+/** What every Engine session has cost so far, kept next to the ledger. */
+export const SESSION_COSTS_FILE = 'session-costs.json';
 /** A Task given as text is stored under this name in the Mission folder. */
 export const MISSION_TASK_FILE = 'task.md';
 
@@ -34,6 +36,10 @@ export function assemblyRelPath(project: string, assembly: string): string {
 
 export function ledgerRelPath(): string {
   return join(MISSIONS_DIR, LEDGER_FILE);
+}
+
+export function sessionCostsRelPath(): string {
+  return join(MISSIONS_DIR, SESSION_COSTS_FILE);
 }
 
 /** The folder of one Mission; it holds the Task document when the Task was given as text. */

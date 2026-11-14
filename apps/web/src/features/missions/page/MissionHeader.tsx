@@ -1,7 +1,7 @@
 import { Button } from '@suptron/ui/components/button';
 import { toast } from '@suptron/ui/components/sonner';
 import { useNavigate } from '@tanstack/react-router';
-import { CircleStop, ExternalLink, Trash2 } from 'lucide-react';
+import { CircleStop, ExternalLink, Play, Trash2 } from 'lucide-react';
 import { useState } from 'react';
 import { missionsApi } from '../../../api/missions';
 import { CostLabel } from '../../../components/cost-label';
@@ -19,7 +19,7 @@ export function useStopMission(id: string) {
   return { open, request: () => setOpen(true), cancel: () => setOpen(false), confirm };
 }
 
-/** Project / Assembly, Task, Workspace, state, cost, PR link, Stop or Dismiss (FR-14, FR-33). */
+/** Project / Assembly, Task, Workspace, state, cost, PR link, Stop, or Resume and Dismiss (FR-14, FR-33). */
 export function MissionHeader({ state, onStop }: { state: ReadyMissionState; onStop: () => void }) {
   const navigate = useNavigate();
   const { summary } = state;
@@ -30,6 +30,14 @@ export function MissionHeader({ state, onStop }: { state: ReadyMissionState; onS
       .dismiss(summary.id)
       .then(() => navigate({ to: '/missions' }))
       .catch((error: Error) => toast.error(`Could not dismiss: ${error.message}`));
+  const [resuming, setResuming] = useState(false);
+  const resume = () => {
+    setResuming(true);
+    missionsApi
+      .resume(summary.id)
+      .catch((error: Error) => toast.error(`Could not resume: ${error.message}`))
+      .finally(() => setResuming(false));
+  };
   return (
     <header
       className="flex flex-wrap items-start justify-between gap-4"
@@ -70,9 +78,16 @@ export function MissionHeader({ state, onStop }: { state: ReadyMissionState; onS
       </div>
       <div className="flex items-center gap-2">
         {terminal ? (
-          <Button type="button" variant="outline" onClick={dismiss}>
-            <Trash2 aria-hidden="true" /> Dismiss
-          </Button>
+          <>
+            {summary.state === 'stopped' && state.resumable && (
+              <Button type="button" onClick={resume} disabled={resuming}>
+                <Play aria-hidden="true" /> Resume
+              </Button>
+            )}
+            <Button type="button" variant="outline" onClick={dismiss}>
+              <Trash2 aria-hidden="true" /> Dismiss
+            </Button>
+          </>
         ) : (
           <Button type="button" variant="destructive" onClick={onStop}>
             <CircleStop aria-hidden="true" /> Stop

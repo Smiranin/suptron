@@ -274,6 +274,7 @@ export class FakeHome {
       slots,
       transcript: [],
       transcriptLost: false,
+      resumable: false,
       seq: 1,
     };
     this.missions.set(id, detail);
@@ -316,7 +317,12 @@ export class FakeHome {
         detail.summary.currentSlot = null;
         detail.result = { report: event.report, pr: event.pr, exitSlot: event.exitSlot };
       }
+      if (event.type === 'mission.resumed') {
+        detail.summary = structuredClone(event.mission);
+        detail.resumable = false;
+      }
       if (event.type === 'mission.stopped') {
+        detail.resumable = true;
         detail.summary.state = 'stopped';
         detail.summary.currentSlot = null;
         delete detail.pendingQuestion;
@@ -784,6 +790,29 @@ export function handlersFor(home: FakeHome): HttpHandler[] {
         home.emit({ type: 'mission.stopped', missionId: id, seq: home.nextSeq(id) });
       }
       return new HttpResponse(null, { status: 204 });
+    }),
+    http.post('/api/missions/:id/resume', async ({ params, request }) => {
+      await record(request);
+      const id = String(params.id);
+      const m = home.missions.get(id);
+      if (!m) return json({ reason: 'not_found' }, 404);
+      if (m.summary.state !== 'stopped') {
+        return json(
+          { reason: 'not_stopped', message: 'Only a Stopped Mission can be resumed' },
+          409,
+        );
+      }
+      if (!m.resumable) {
+        return json(
+          { reason: 'cannot_resume', message: 'This Mission holds nothing to resume from' },
+          409,
+        );
+      }
+      const { note: _dropped, ...rest } = m.summary;
+      void _dropped;
+      const mission: MissionSummary = { ...rest, state: 'running' };
+      home.emit({ type: 'mission.resumed', missionId: id, seq: home.nextSeq(id), mission });
+      return json(mission);
     }),
     http.post('/api/missions/:id/retry', async ({ params, request }) => {
       const body = ((await record(request)) ?? {}) as { note?: string };

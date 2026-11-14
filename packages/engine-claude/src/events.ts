@@ -13,6 +13,15 @@ interface ContentBlock {
   is_error?: boolean;
 }
 
+/** `resetsAt` of a rate limit event is in seconds since the epoch (seen 2026-11-13). */
+const MS_PER_SECOND = 1000;
+
+/**
+ * What Claude Code answers to `resume` with a session it does not have (seen 2026-11-13:
+ * "No conversation found with session ID: <id>").
+ */
+const SESSION_NOT_FOUND = /No conversation found with session ID/i;
+
 /** The structured-output pseudo tool is the Core's answer, not a tool call worth showing. */
 const STRUCTURED_OUTPUT_TOOL = 'StructuredOutput';
 
@@ -111,8 +120,16 @@ export function sdkMessageToEvents(message: SDKMessage): AgentEvent[] {
       return activity ? [activity] : [];
     }
     case 'system': {
+      // The first message of a query names its session: what a later turn can continue.
+      if (message.subtype === 'init') return [{ type: 'session', sessionId: message.session_id }];
       // The CLI estimates thinking progress while the model thinks (no stream frame yet).
       return message.subtype === 'thinking_tokens' ? [{ type: 'activity', phase: 'thinking' }] : [];
+    }
+    case 'rate_limit_event': {
+      // Sent whenever the limits change; only a refusal with a known reset is ours to wait for.
+      const { status, resetsAt } = message.rate_limit_info;
+      if (status !== 'rejected' || resetsAt === undefined) return [];
+      return [{ type: 'usage_limit', resetsAt: new Date(resetsAt * MS_PER_SECOND).toISOString() }];
     }
     case 'assistant': {
       const events: AgentEvent[] = [];
@@ -159,7 +176,13 @@ export function sdkMessageToEvents(message: SDKMessage): AgentEvent[] {
         ];
       }
       const detail = message.errors.length > 0 ? message.errors.join('; ') : message.subtype;
-      return [{ type: 'error', message: `Engine error (${message.subtype}): ${detail}` }];
+      return [
+        {
+          type: 'error',
+          message: `Engine error (${message.subtype}): ${detail}`,
+          ...(SESSION_NOT_FOUND.test(detail) && { sessionLost: true as const }),
+        },
+      ];
     }
     default:
       return [];

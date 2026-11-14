@@ -78,7 +78,7 @@ macOS; the path must be inside `SUPTRON_HOME`.
 ## Missions
 
 ```
-GET    /api/missions                  MissionSummary[]   (every Mission since start; Completed, Stopped and interrupted stay until Dismiss)
+GET    /api/missions                  MissionSummary[]   (every Mission since start; Completed ones stay until Dismiss or a restart, Stopped and interrupted ones until Dismiss)
 POST   /api/missions                  { project, assembly, task, title?, workItemId?, checkoutPath?, mayAskCommander?: Record<slot, boolean> } → 201 MissionSummary
                                       task: { kind: 'path', path } | { kind: 'text', text }; text is stored as missions/<id>/task.md and that folder becomes the Task location
                                       checkoutPath is required for a repository Project and refused for the other kinds (field 'checkoutPath')
@@ -86,6 +86,9 @@ POST   /api/missions                  { project, assembly, task, title?, workIte
                                       409 { reason: 'workspace_busy', missionId }   (the Checkout or the folder is in use; a Project without a folder is never busy)
 GET    /api/missions/:id              MissionDetail | 404
 POST   /api/missions/:id/stop         204
+POST   /api/missions/:id/resume       200 MissionSummary | 404 | 409 { reason: 'not_stopped' | 'cannot_resume', message } | 409 { reason: 'workspace_busy', missionId }
+                                      a Stopped Mission goes on at the Slot it stood at, on the configuration it started with; `cannot_resume`: the Workspace,
+                                      the Task location or the Mission folder is gone, or the Mission holds nothing to resume from (`message` says which)
 POST   /api/missions/:id/retry        { note? } → 204 | 409 { reason: 'not_needs_attention' }
 POST   /api/missions/:id/answer       { questionId, answers: Record<question, string> } → 204 | 409 { reason: 'no_such_question' }
 DELETE /api/missions/:id              204 | 404 | 409 { reason: 'not_finished' }
@@ -96,12 +99,14 @@ DELETE /api/missions/:id              204 | 404 | 409 { reason: 'not_finished' }
 ```ts
 interface MissionDetail {
                                     // taskTitle: the `title` given at start (at most 80 characters), or `<project>-<YYYY-MM-DD>` of the start day
-  summary: MissionSummary;          // id, projectName, assemblyName, taskPath, taskTitle, workItemId?, state, currentSlot, workspace: { kind, path, branch }, startedAt, cost (estimated), pr?, note?
+  summary: MissionSummary;          // id, projectName, assemblyName, taskPath, taskTitle, workItemId?, state, currentSlot, workspace: { kind, path, branch }, startedAt, cost (estimated), pr?, note?, usageResetsAt?
+                                    // state: 'running' | 'waiting_for_owner' | 'waiting_for_usage' | 'needs_attention' | 'stopped' | 'completed'; usageResetsAt (ISO) only in 'waiting_for_usage'
                                     // workspace.path: the Checkout or the folder, null for kind none; workspace.branch: the Checkout's branch, null otherwise
   assembly: AssemblyFile;           // the document at start, for the clock
   slots: SlotRecord[];              // Assembly order, then 'core': { name, attempts, loops, lastOutput?, cost, checkResults, resolutions? }
   transcript: TranscriptSection[];  // one section per execution: { execution: { slot, attempt, loopIteration?, loopFrom?, loopGrantedBy? }, entries, dropped }
-  transcriptLost: boolean;          // true for Missions recovered from the ledger after a restart
+  transcriptLost: boolean;          // true for Missions recovered from the ledger after a restart; once resumed, `transcript` holds the sections since the Resume
+  resumable: boolean;               // true for a Stopped Mission that holds what POST .../resume needs
   pendingQuestion?: { id, slot, questions: Question[] };   // one at a time: questions a Pilot asks while one is pending queue up and are shown after the answer
   attention?: { cause, reason, slot, failedChecks };        // cause: 'handover_not_done' | 'attempt_limit' | 'loop_limit' | 'last_exit_condition_failed' | 'ci_timeout' | 'engine_error'
   result?: { report, pr: PullRequestRef | null, exitSlot };
@@ -131,7 +136,7 @@ its `seq`. Without `?mission=`, the stream carries every Mission's events except
 `check.evaluated` and `core.resolved`, including `mission.dismissed`.
 
 Event types: `mission.started`, `mission.state` (`state`, and `cause`, `reason`, `slot`, `failedChecks`
-for `needs_attention`; `slot` for `waiting_for_owner`), `slot.started` (`attempt`, `loopIteration?`,
+for `needs_attention`; `slot` for `waiting_for_owner`; `resetsAt` for `waiting_for_usage`), `mission.resumed` (`mission`: the summary of the resumed Mission, replacing the one the client holds; the Slot it stood at follows with `slot.started` and a `note`), `slot.started` (`attempt`, `loopIteration?`,
 `loopFrom?`, `loopGrantedBy?: 'commander' | 'core'` on a round granted at the Loop limit, `note?`), `slot.done` (`output`, `acceptedAtLimit?: true` when the Loop's Accept Condition stood in for the Done Condition at the limit), `agent.text`, `agent.tool_call`, `agent.tool_result`, `agent.error`, `agent.activity` (`payload: { phase: 'thinking' | 'writing' | 'tool', detail? }`: a sign of life at most once a second while the Pilot thinks, writes or runs a tool; not a transcript entry, never replayed),
 `check.evaluated`, `core.resolved` (`slot`, `resolution: { cause, decision: 'retry' | 'accept', reason, note?, failedChecks }`: the Core decided in the Commander's place; a `retry` is followed by `slot.started` without a `note`, an `accept` by `slot.done`, or, for the cause `handover_not_done`, by the Checks of the Done Condition first), `question.asked`, `question.answered`, `cost.updated`, `mission.completed` (`report`,
 `pr`, `exitSlot`, `slots`, `cost`), `mission.stopped` (`note?: 'interrupted'`), `mission.dismissed`.

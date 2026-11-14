@@ -33,7 +33,10 @@ export type FakeStep =
         handover?: HandoverStatus | null;
       };
     }
-  | { error: string }
+  /** `sessionLost`: the session the agent was to resume does not exist any more. */
+  | { error: string; sessionLost?: true }
+  /** The Engine refuses to go on by the usage limit until `resetsAt` (ISO); ends the turn. */
+  | { usageLimit: { resetsAt: string } }
   | { delay: number }
   /** Holds the agent until the promise resolves (for Stop tests). */
   | { wait: Promise<unknown> };
@@ -180,6 +183,7 @@ class FakeAgentHandle implements AgentHandle {
     const script = this.engine.scriptFor(this.spec);
     const steps = typeof script === 'function' ? script(call) : script;
     try {
+      yield { type: 'session', sessionId: this.sessionIdValue };
       for (const step of steps) {
         if (this.interrupted) break;
         if ('text' in step) {
@@ -263,7 +267,14 @@ class FakeAgentHandle implements AgentHandle {
           };
           return;
         } else if ('error' in step) {
-          yield { type: 'error', message: step.error };
+          yield {
+            type: 'error',
+            message: step.error,
+            ...(step.sessionLost && { sessionLost: true as const }),
+          };
+          return;
+        } else if ('usageLimit' in step) {
+          yield { type: 'usage_limit', resetsAt: step.usageLimit.resetsAt };
           return;
         } else if ('delay' in step) {
           await new Promise<void>((resolve, reject) => {

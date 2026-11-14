@@ -123,15 +123,23 @@ The state of a Mission that cannot continue without the Commander: the Core used
 _Avoid_: Failed, error, blocked
 
 **Stopped**:
-The state of a Mission the Commander stopped. Whatever the Mission produced so far (in the software scenario, the branch and the Pull Request) is left as it is; the Mission is not resumable in the POC.
+The state of a Mission the Commander stopped, or that a restart of the application interrupted (it then carries the note "interrupted"). Whatever the Mission produced so far (in the software scenario, the branch and the Pull Request) is left as it is. A Stopped Mission frees its Workspace and waits for a Resume or a Dismiss.
 _Avoid_: Cancelled, aborted, killed
+
+**Resume**:
+The Commander's action that lets a Stopped Mission go on. The Workspace is reopened and the Slot the Mission stood at runs again as a new Attempt, in the Engine session of the interrupted one where that session still exists, told that it was interrupted and that it first checks what is already there. Slots that were done do not run again; their Slot Outputs, the Loop counts and the Resolution counts are kept. A resumed Mission runs on the configuration it started with, not on the files as they are now. A busy Workspace or a missing folder refuses the Resume.
+_Avoid_: Restart, continue, rerun
+
+**Waiting for usage**:
+The state of a Mission whose Engine refused a call by the usage limit and said when the limit resets. Nothing runs; at the reset the Mission goes on by itself with the same Attempt in the same session, or with the same Core call. The wait costs neither an Attempt nor a Resolution, the Workspace stays busy, and Stop works. A refusal without a reset time is an Engine error.
+_Avoid_: Rate limited, paused, throttled
 
 **Completed**:
 The state of a Mission that left its Assembly through an Exit Point: a Slot flagged as an Exit Point is done and its Exit Condition holds, both checked by the Core against the Slot's Checks. What Completed means is therefore defined entirely by the Slots' Conditions; the Core never declares a Mission Completed on its own. In the primary software scenario: the last Slot is done, meaning no open Pull Request comments and CI passed.
 _Avoid_: Done (a Slot is done, a Mission is Completed), finished, merged
 
 **Dismiss**:
-The Commander's action that removes a Completed or Stopped Mission from the Missions list; apart from restarting the application, it is the only way a Mission disappears.
+The Commander's action that removes a Completed or Stopped Mission from the Missions list. A Stopped Mission stays until it is dismissed, over restarts too; a Completed one that was not dismissed disappears with a restart.
 _Avoid_: Delete, archive, clear, close
 
 **Commander**:

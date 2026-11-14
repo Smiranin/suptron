@@ -56,6 +56,8 @@ export interface CoreAgent {
     slot: ResolvedSlot;
     bundle: ContextBundle;
     feedback?: Feedback;
+    /** The Mission was resumed: an earlier Attempt at this Slot was interrupted before its end. */
+    interrupted?: true;
   }): Promise<string>;
   judge(input: {
     criterion: string;
@@ -136,7 +138,7 @@ Calls:
 /** The instruction at the head of each Core call; the call's input follows it as JSON. */
 export const CORE_CALL_INSTRUCTIONS: Readonly<Record<string, string>> = {
   composeSlotPrompt:
-    'Compose the prompt for this Slot. Include the Slot instructions verbatim, list the paths of the Task documents and of the Knowledge Sources given as paths, quote a Knowledge Source given as text under its title, state the Workspace fragment so the Pilot knows where it works and where results go, quote the Git conventions when they are given (never mention them otherwise), include every Slot Output given, and when feedback is present put it under a heading that names its source (Loop feedback from <Slot>, or the previous Attempt) with the failed Checks and the note, named after its author (the Commander note, or the Core note).',
+    'Compose the prompt for this Slot. Include the Slot instructions verbatim, list the paths of the Task documents and of the Knowledge Sources given as paths, quote a Knowledge Source given as text under its title, state the Workspace fragment so the Pilot knows where it works and where results go, quote the Git conventions when they are given (never mention them otherwise), include every Slot Output given, and when feedback is present put it under a heading that names its source (Loop feedback from <Slot>, or the previous Attempt) with the failed Checks and the note, named after its author (the Commander note, or the Core note). When interrupted is true, open the prompt by saying that an earlier Attempt at this Slot was interrupted before it finished, that what it left in the Workspace and the Task folder is still there, and that the Pilot first checks what is already done and goes on from it instead of starting over.',
   judge:
     'Judge the criterion. When it is about files (a document, the content, the code), read the files it names, or the ones the Slot Output lists as produced, and judge on what they hold: the Slot Output and the change summary tell you where to look, they are not the evidence. When it is about what the Slot Output itself states (the verdict of a review), judge on the Slot Output. A null change summary means the Workspace keeps none. Be strict: holds is true only when the criterion is clearly satisfied; the reason names the file and the place of what fails.',
   explainNeedsAttention:
@@ -155,9 +157,22 @@ export interface EngineCoreAgentOptions {
   /** What the Core can read besides the Task folder: the Workspace. */
   readDirectories: string[];
   guard: GuardContext;
+  /** The Core session of a resumed Mission. */
+  resumeSessionId?: string;
   onCost?: (cost: Cost) => void;
   onEvent?: (event: AgentEvent) => void;
+  /**
+   * The Engine refused a call by the usage limit: resolves when the call may be made again,
+   * rejects when the Mission is stopped meanwhile. Without it the refusal fails the call.
+   */
+  onUsageLimit?: (resetsAt: string) => Promise<void>;
 }
+
+/** How one try of a Core call ended. */
+type CoreTry =
+  | { kind: 'result'; result: Extract<AgentEvent, { type: 'result' }> }
+  | { kind: 'usage_limit'; resetsAt: string }
+  | { kind: 'error'; message: string | null; sessionLost: boolean };
 
 /** One persistent Core session per Mission, every call typed with a JSON schema. */
 export class EngineCoreAgent implements CoreAgent {
@@ -167,12 +182,20 @@ export class EngineCoreAgent implements CoreAgent {
   constructor(
     private readonly engine: Engine,
     private readonly options: EngineCoreAgentOptions,
-  ) {}
+  ) {
+    this.sessionId = options.resumeSessionId;
+  }
+
+  /** The Core session so far, for the ledger; undefined before the first call ended. */
+  get session(): string | undefined {
+    return this.sessionId;
+  }
 
   async composeSlotPrompt(input: {
     slot: ResolvedSlot;
     bundle: ContextBundle;
     feedback?: Feedback;
+    interrupted?: true;
   }): Promise<string> {
     return (await this.call('composeSlotPrompt', input, composeSchema)).prompt;
   }
@@ -216,6 +239,42 @@ export class EngineCoreAgent implements CoreAgent {
   }
 
   private async call<T>(name: string, input: unknown, schema: z.ZodType<T>): Promise<T> {
+    let result: Extract<AgentEvent, { type: 'result' }>;
+    for (;;) {
+      const outcome = await this.tryCall(name, input, schema);
+      if (outcome.kind === 'result') {
+        result = outcome.result;
+        break;
+      }
+      if (outcome.kind === 'usage_limit' && this.options.onUsageLimit) {
+        // The same call again after the reset, in the session as it was before the refusal.
+        await this.options.onUsageLimit(outcome.resetsAt);
+        continue;
+      }
+      if (outcome.kind === 'error' && outcome.sessionLost && this.sessionId !== undefined) {
+        // Every call carries what it needs: a Core without its session only loses its notes.
+        this.sessionId = undefined;
+        continue;
+      }
+      throw new CoreAgentError(
+        outcome.kind === 'usage_limit'
+          ? `The usage limit refused the ${name} call`
+          : (outcome.message ?? `The Core ended the ${name} call without a result`),
+      );
+    }
+    this.sessionId = result.sessionId;
+    this.options.onCost?.(result.cost);
+    const raw = result.structured ?? tryParseJson(result.output);
+    const parsed = schema.safeParse(raw);
+    if (!parsed.success) {
+      throw new CoreAgentError(
+        `The Core returned a malformed ${name} output: ${parsed.error.message}`,
+      );
+    }
+    return parsed.data;
+  }
+
+  private async tryCall<T>(name: string, input: unknown, schema: z.ZodType<T>): Promise<CoreTry> {
     const handle = this.engine.createAgent({
       role: 'core',
       label: 'core',
@@ -230,31 +289,29 @@ export class EngineCoreAgent implements CoreAgent {
     });
     this.current = handle;
     handle.send(formatCorePrompt(name, input));
-    let result: Extract<AgentEvent, { type: 'result' }> | null = null;
-    let error: string | null = null;
+    let outcome: CoreTry = { kind: 'error', message: null, sessionLost: false };
     try {
       for await (const event of handle.events()) {
         this.options.onEvent?.(event);
-        if (event.type === 'result') result = event;
-        else if (event.type === 'error') error = event.message;
-        else if (event.type === 'question') event.dismiss();
+        if (event.type === 'result') outcome = { kind: 'result', result: event };
+        else if (event.type === 'error' && outcome.kind !== 'result') {
+          outcome = {
+            kind: 'error',
+            message: event.message,
+            sessionLost: event.sessionLost === true,
+          };
+        } else if (event.type === 'question') event.dismiss();
+        else if (event.type === 'usage_limit') {
+          // Whatever the Engine says after the refusal is not an answer to the call.
+          outcome = { kind: 'usage_limit', resetsAt: event.resetsAt };
+          break;
+        }
       }
     } finally {
       this.current = null;
       await handle.close();
     }
-    if (!result)
-      throw new CoreAgentError(error ?? `The Core ended the ${name} call without a result`);
-    this.sessionId = result.sessionId;
-    this.options.onCost?.(result.cost);
-    const raw = result.structured ?? tryParseJson(result.output);
-    const parsed = schema.safeParse(raw);
-    if (!parsed.success) {
-      throw new CoreAgentError(
-        `The Core returned a malformed ${name} output: ${parsed.error.message}`,
-      );
-    }
-    return parsed.data;
+    return outcome;
   }
 }
 

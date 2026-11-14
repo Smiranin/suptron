@@ -1,9 +1,9 @@
 import { cn } from '@suptron/ui/lib/utils';
-import { AlertTriangle, CircleStop, MessageCircleQuestion, WifiOff } from 'lucide-react';
-import { CAUSE_LABELS } from '../model/selectors';
+import { AlertTriangle, CircleStop, Hourglass, MessageCircleQuestion, WifiOff } from 'lucide-react';
+import { CAUSE_LABELS, formatResetTime } from '../model/selectors';
 import type { ReadyMissionState } from '../model/types';
 
-/** The banners over the clock: waiting, needs attention, stopped, connection lost (FR-25, FR-28, FR-30, FR-34). */
+/** The banners over the clock: waiting, waiting for usage, needs attention, stopped, connection lost (FR-25, FR-28, FR-30, FR-34). */
 export function MissionBanner({ state }: { state: ReadyMissionState }) {
   const banners: {
     key: string;
@@ -25,6 +25,18 @@ export function MissionBanner({ state }: { state: ReadyMissionState }) {
       tone: 'warning',
       icon: MessageCircleQuestion,
       text: `Waiting for your answer on ${state.pendingQuestion.slot}`,
+    });
+  }
+  if (state.summary.state === 'waiting_for_usage') {
+    const resetsAt = state.summary.usageResetsAt;
+    banners.push({
+      key: 'usage',
+      tone: 'warning',
+      icon: Hourglass,
+      text:
+        resetsAt === undefined
+          ? 'Waiting for usage: the Mission goes on when the limit resets'
+          : `Waiting for usage: the limit resets at ${formatResetTime(resetsAt)}, then the Mission goes on`,
     });
   }
   if (state.summary.state === 'needs_attention' && state.attention) {

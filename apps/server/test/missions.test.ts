@@ -411,4 +411,49 @@ describe('Missions routes', () => {
     await second.app.close();
     release();
   });
+
+  it('resumes a Stopped Mission and refuses a Resume in any other state', async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    s.engine.script('pilot', 'analyst', (call) =>
+      call.index === 0
+        ? [{ text: 'busy' }, { wait: gate }, { result: { output: 'never' } }]
+        : [{ text: 'again' }, { wait: gate }, { result: { output: 'ok' } }],
+    );
+    const id = (
+      await s.app.inject({ method: 'POST', url: '/api/missions', payload: s.startBody() })
+    ).json().id as string;
+    await s.waitFor((es) => es.some((e) => e.type === 'agent.text'));
+    const resume = () => s.app.inject({ method: 'POST', url: `/api/missions/${id}/resume` });
+
+    const early = await resume();
+    expect(early.statusCode).toBe(409);
+    expect(early.json()).toMatchObject({ reason: 'not_stopped' });
+    expect(
+      (await s.app.inject({ method: 'POST', url: '/api/missions/nope/resume' })).statusCode,
+    ).toBe(404);
+
+    await s.app.inject({ method: 'POST', url: `/api/missions/${id}/stop` });
+    const stopped = (
+      await s.app.inject({ method: 'GET', url: `/api/missions/${id}` })
+    ).json() as MissionDetail;
+    expect(stopped).toMatchObject({ summary: { state: 'stopped' }, resumable: true });
+
+    const resumed = await resume();
+    expect(resumed.statusCode).toBe(200);
+    expect(resumed.json()).toMatchObject({ id, state: 'running' });
+    await s.waitFor((es) => es.some((e) => e.type === 'agent.text' && e.payload.text === 'again'));
+    const detail = (
+      await s.app.inject({ method: 'GET', url: `/api/missions/${id}` })
+    ).json() as MissionDetail;
+    expect(detail).toMatchObject({ summary: { state: 'running' }, resumable: false });
+    // The transcript goes on: the section before the Stop and the one of the resumed Attempt.
+    expect(detail.transcript.map((section) => section.execution)).toEqual([
+      { slot: 'analyst', attempt: 1 },
+      { slot: 'analyst', attempt: 2 },
+    ]);
+    expect(detail.transcript[1]!.entries[0]).toMatchObject({ kind: 'note' });
+    await s.app.inject({ method: 'POST', url: `/api/missions/${id}/stop` });
+    release();
+  });
 });

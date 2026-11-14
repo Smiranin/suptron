@@ -105,8 +105,45 @@ describe('sdkMessageToEvents', () => {
       ),
     ).toEqual([]);
     expect(
-      sdkMessageToEvents(message({ type: 'system', subtype: 'init', cwd: '/', tools: [] })),
+      sdkMessageToEvents(message({ type: 'system', subtype: 'status', status: null })),
     ).toEqual([]);
+  });
+
+  it('names the session as soon as the query starts', () => {
+    expect(
+      sdkMessageToEvents(
+        message({ type: 'system', subtype: 'init', cwd: '/', tools: [], session_id: 's-1' }),
+      ),
+    ).toEqual([{ type: 'session', sessionId: 's-1' }]);
+  });
+
+  it('reports a usage limit only for a refusal with a reset time', () => {
+    const limit = (info: Record<string, unknown>) =>
+      sdkMessageToEvents(message({ type: 'rate_limit_event', rate_limit_info: info }));
+    expect(limit({ status: 'rejected', resetsAt: 1794647400, rateLimitType: 'five_hour' })).toEqual(
+      [{ type: 'usage_limit', resetsAt: '2026-11-14T09:10:00.000Z' }],
+    );
+    expect(limit({ status: 'allowed', resetsAt: 1794647400 })).toEqual([]);
+    expect(limit({ status: 'allowed_warning', resetsAt: 1794647400 })).toEqual([]);
+    expect(limit({ status: 'rejected' })).toEqual([]);
+  });
+
+  it('marks the error of a session that does not exist any more', () => {
+    const failed = (errors: string[]) =>
+      sdkMessageToEvents(
+        message({ type: 'result', subtype: 'error_during_execution', errors, session_id: 's' }),
+      );
+    expect(failed(['No conversation found with session ID: 1111'])).toEqual([
+      {
+        type: 'error',
+        message:
+          'Engine error (error_during_execution): No conversation found with session ID: 1111',
+        sessionLost: true,
+      },
+    ]);
+    expect(failed(['Something else'])).toEqual([
+      { type: 'error', message: 'Engine error (error_during_execution): Something else' },
+    ]);
   });
 
   it('maps a successful result with cost summed over modelUsage', () => {

@@ -36,6 +36,44 @@ export interface RunnerDeps {
   ciNoneGraceMs?: number;
   /** Overrides the Workspace's CI wait timeout (tests). */
   ciWaitTimeoutMs?: number;
+  /** Overrides `USAGE_RESET_MARGIN_MS` (tests). */
+  usageResetMarginMs?: number;
+  /** Called when what a Resume needs changed without an event saying so. */
+  onProgress?: () => void;
+}
+
+/** Why the work went back to a Loop target: the looping Slot, the round and who granted it. */
+interface LoopEntry {
+  from: string;
+  iteration: number;
+  grantedBy?: 'commander' | 'core';
+}
+
+/**
+ * Where a Mission stands, as plain data for the ledger: everything the Runner needs besides the
+ * snapshot and the Slot records to go on after a Stop or a restart.
+ */
+export interface RunnerProgress {
+  /** The Slot the Mission stands at; a Resume runs it again. */
+  slot: string;
+  /** What that Slot was given: the findings of a Loop or of its previous Attempt. */
+  feedback?: Feedback;
+  loopEntry?: LoopEntry;
+  attempts: Record<string, number>;
+  loopCounts: Record<string, number>;
+  resolutionsUsed: Record<string, number>;
+  keepResolutions: string[];
+  /** The Engine sessions of the Slots that ended an Attempt. */
+  sessions: Record<string, string>;
+  /** The session of the Attempt under way; a Resume continues it. */
+  openSession?: { slot: string; sessionId: string };
+  slotOutputs: Record<string, string>;
+}
+
+/** What a resumed Runner starts from. */
+export interface RunnerRestore {
+  progress: RunnerProgress;
+  records: SlotRecord[];
 }
 
 export interface MissionMeta {
@@ -76,6 +114,17 @@ interface DecisionContext {
 /** A second Engine error in a row is the Commander's: one more blind Attempt would not help. */
 const ENGINE_ERRORS_BEFORE_COMMANDER = 2;
 
+/** Waited past the stated reset: a call made on the very second is refused once more. */
+export const USAGE_RESET_MARGIN_MS = 60_000;
+
+/** What a Pilot is told when its turn goes on in the same session after the usage limit reset. */
+export const USAGE_CONTINUE_PROMPT =
+  'The usage limit interrupted you and has reset. Go on with the work from where you stopped, and end as your instructions say.';
+
+/** The first transcript line of the Slot a Resume runs again. */
+export const RESUME_NOTE =
+  'The Commander resumed the Mission: the previous Attempt at this Slot was interrupted.';
+
 interface QueuedQuestion extends PendingQuestion {
   respond(answers: Answers): void;
   dismiss(): void;
@@ -83,6 +132,19 @@ interface QueuedQuestion extends PendingQuestion {
 
 type SlotExecution =
   { kind: 'output'; output: string } | { kind: 'interrupted' } | { kind: 'error'; message: string };
+
+/** One turn of a Pilot: the prompt and the session it continues, if any. */
+interface PilotRun {
+  prompt: string;
+  resume: string | undefined;
+  /** True for the turn that goes on after a usage limit instead of starting the Attempt. */
+  continued: boolean;
+}
+
+type PilotOutcome =
+  | SlotExecution
+  | { kind: 'usage_limit'; resetsAt: string; sessionId: string | undefined }
+  | { kind: 'session_lost'; message: string };
 
 class Deferred<T> {
   resolve!: (value: T) => void;
@@ -113,6 +175,8 @@ export class Runner {
 
   private stopRequested = false;
   private control: Deferred<Control> | null = null;
+  /** Resolved by the timer at the reset of the usage limit, or by Stop. */
+  private usageWait: Deferred<void> | null = null;
   private currentHandle: AgentHandle | null = null;
   /**
    * Questions the Pilot asked and the Commander has not answered, oldest first. A Pilot may ask
@@ -130,11 +194,24 @@ export class Runner {
   /** Looping Slots with a granted round under way: their next entry does not renew their Resolutions. */
   private readonly keepResolutions = new Set<string>();
   private engineErrorStreak = 0;
+  /** Attempts per Slot since the Slot was last entered. */
+  private readonly attempts = new Map<string, number>();
+  /** Rounds per looping Slot over the whole Mission, granted ones included. */
+  private readonly loopCounts = new Map<string, number>();
+  /** The Slot the Mission stands at. */
+  private index = 0;
+  private feedback: Feedback | undefined;
+  private loopEntry: LoopEntry | undefined;
+  /** The session of the Attempt under way, or of the one a Stop or a restart interrupted. */
+  private openSession: { slot: string; sessionId: string } | undefined;
+  /** True until the first Slot of a resumed Mission has started. */
+  private resumed = false;
 
   constructor(
     private readonly snapshot: MissionSnapshot,
     private readonly meta: MissionMeta,
     private readonly deps: RunnerDeps,
+    restore?: RunnerRestore,
   ) {
     this.summary = {
       id: meta.id,
@@ -164,6 +241,48 @@ export class Runner {
       loops: 0,
       cost: ZERO_COST,
       checkResults: [],
+    });
+    if (restore) this.restore(restore);
+  }
+
+  /** Takes over where a stopped or interrupted Runner of this Mission stood. */
+  private restore({ progress, records }: RunnerRestore): void {
+    for (const record of records) {
+      if (!this.records.has(record.name)) continue;
+      this.records.set(record.name, structuredClone(record));
+      this.totalCost = addCost(this.totalCost, record.cost);
+    }
+    this.summary.cost = { ...this.totalCost, estimated: true };
+    const index = this.snapshot.assembly.slots.findIndex((s) => s.name === progress.slot);
+    this.index = index === -1 ? 0 : index;
+    this.feedback = progress.feedback;
+    this.loopEntry = progress.loopEntry;
+    for (const [slot, count] of Object.entries(progress.attempts)) this.attempts.set(slot, count);
+    for (const [slot, count] of Object.entries(progress.loopCounts))
+      this.loopCounts.set(slot, count);
+    for (const [slot, count] of Object.entries(progress.resolutionsUsed))
+      this.resolutionsUsed.set(slot, count);
+    for (const slot of progress.keepResolutions) this.keepResolutions.add(slot);
+    for (const [slot, id] of Object.entries(progress.sessions)) this.sessions.set(slot, id);
+    for (const [slot, output] of Object.entries(progress.slotOutputs))
+      this.slotOutputs.set(slot, output);
+    this.openSession = progress.openSession;
+    this.resumed = true;
+  }
+
+  /** Where the Mission stands, for the ledger. */
+  progress(): RunnerProgress {
+    return structuredClone({
+      slot: this.snapshot.assembly.slots[this.index]!.name,
+      ...(this.feedback && { feedback: this.feedback }),
+      ...(this.loopEntry && { loopEntry: this.loopEntry }),
+      attempts: Object.fromEntries(this.attempts),
+      loopCounts: Object.fromEntries(this.loopCounts),
+      resolutionsUsed: Object.fromEntries(this.resolutionsUsed),
+      keepResolutions: [...this.keepResolutions],
+      sessions: Object.fromEntries(this.sessions),
+      ...(this.openSession && { openSession: this.openSession }),
+      slotOutputs: Object.fromEntries(this.slotOutputs),
     });
   }
 
@@ -200,6 +319,7 @@ export class Runner {
     for (const question of this.questions) question.dismiss();
     this.questions = [];
     this.checkAbort?.abort();
+    this.usageWait?.resolve();
     await this.currentHandle?.interrupt();
     await this.deps.core.interrupt();
     this.control?.resolve({ kind: 'stop' });
@@ -257,20 +377,14 @@ export class Runner {
 
   private async execute(): Promise<void> {
     const slots = this.snapshot.assembly.slots;
-    const attempts = new Map<string, number>();
-    const loopCounts = new Map<string, number>();
-    let index = 0;
-    let feedback: Feedback | undefined;
-    let loopEntry:
-      { from: string; iteration: number; grantedBy?: 'commander' | 'core' } | undefined;
-    let note: string | undefined;
+    let note: string | undefined = this.resumed ? RESUME_NOTE : undefined;
 
     /** The same Slot again, told what failed and what the Commander or the Core noted. */
     const retryWith = (
       control: Extract<Control, { kind: 'retry' }>,
       failedChecks: CheckResult[],
     ) => {
-      feedback = {
+      this.feedback = {
         kind: 'attempt',
         failedChecks,
         ...(control.note !== undefined && { note: control.note, noteFrom: control.from }),
@@ -291,31 +405,35 @@ export class Runner {
       failedChecks: CheckResult[],
       grant?: Extract<Control, { kind: 'retry' }>,
     ) => {
-      loopCounts.set(slot.name, iteration);
+      this.loopCounts.set(slot.name, iteration);
       this.records.get(slot.name)!.loops = iteration;
-      feedback = {
+      this.feedback = {
         kind: 'loop',
         fromSlot: slot.name,
         output,
         failedChecks,
         ...(grant?.note !== undefined && { note: grant.note, noteFrom: grant.from }),
       };
-      loopEntry = { from: slot.name, iteration, ...(grant && { grantedBy: grant.from }) };
+      this.loopEntry = { from: slot.name, iteration, ...(grant && { grantedBy: grant.from }) };
       note = grant?.from === 'commander' ? grant.note : undefined;
       // The granting Slot keeps its count of Resolutions, or the Core could grant rounds for ever.
       if (grant) this.keepResolutions.add(slot.name);
-      this.enterSlot(slot.loop.target, attempts);
-      index = slots.findIndex((s) => s.name === slot.loop.target);
+      this.enterSlot(slot.loop.target);
+      this.index = slots.findIndex((s) => s.name === slot.loop.target);
     };
 
     for (;;) {
       this.throwIfStopping();
-      const slot = slots[index]!;
+      const slot = slots[this.index]!;
       const record = this.records.get(slot.name)!;
-      const attempt = (attempts.get(slot.name) ?? 0) + 1;
-      attempts.set(slot.name, attempt);
+      const attempt = (this.attempts.get(slot.name) ?? 0) + 1;
+      this.attempts.set(slot.name, attempt);
       record.attempts += 1;
       this.summary.currentSlot = slot.name;
+      const loopEntry = this.loopEntry;
+      // The Slot a Resume starts with is told that its previous Attempt was interrupted.
+      const interrupted = this.resumed;
+      this.resumed = false;
       this.deps.emit({
         type: 'slot.started',
         missionId: this.meta.id,
@@ -327,7 +445,7 @@ export class Runner {
       });
       note = undefined;
 
-      const execution = await this.executeSlot(slot, feedback);
+      const execution = await this.executeSlot(slot, this.feedback, interrupted);
       this.throwIfStopping();
       await this.refreshWorkspace();
 
@@ -373,12 +491,12 @@ export class Runner {
       // At the Loop limit the Accept Condition may stand in for the Done Condition (plan B).
       const acceptance = done.holds
         ? undefined
-        : await this.acceptAtLoopLimit(slot, output, loopCounts.get(slot.name) ?? 0);
+        : await this.acceptAtLoopLimit(slot, output, this.loopCounts.get(slot.name) ?? 0);
       if (acceptance) record.checkResults = [...done.results, ...acceptance.results];
 
       if (!done.holds && !acceptance?.holds) {
         const failed = [...done.results, ...(acceptance?.results ?? [])].filter((r) => !r.holds);
-        const loopCount = (loopCounts.get(slot.name) ?? 0) + 1;
+        const loopCount = (this.loopCounts.get(slot.name) ?? 0) + 1;
         let limitCause: AcceptableCause | undefined;
         if (slot.loop) {
           if (loopCount > slot.loop.limit) limitCause = 'loop_limit';
@@ -388,7 +506,7 @@ export class Runner {
 
         if (limitCause === undefined) {
           if (hasLoop(slot)) loopBack(slot, loopCount, output, failed);
-          else feedback = { kind: 'attempt', failedChecks: failed };
+          else this.feedback = { kind: 'attempt', failedChecks: failed };
           continue;
         }
 
@@ -416,7 +534,7 @@ export class Runner {
         const exit = await this.evaluate(slot, slot.exitCondition, output);
         this.throwIfStopping();
         if (exit.holds) return this.complete(slot);
-        if (exit.timedOut || index === slots.length - 1) {
+        if (exit.timedOut || this.index === slots.length - 1) {
           const cause: NeedsAttentionCause = exit.timedOut
             ? 'ci_timeout'
             : 'last_exit_condition_failed';
@@ -426,11 +544,11 @@ export class Runner {
           continue;
         }
       }
-      index += 1;
+      this.index += 1;
       // A forward move starts the next Slot afresh (a Loop does the same for its target).
-      this.enterSlot(slots[index]!.name, attempts);
-      feedback = undefined;
-      loopEntry = undefined;
+      this.enterSlot(slots[this.index]!.name);
+      this.feedback = undefined;
+      this.loopEntry = undefined;
     }
   }
 
@@ -438,8 +556,8 @@ export class Runner {
    * A Slot entered by a forward move or a Loop counts its Attempts and its Resolutions from zero;
    * a looping Slot reached again after a round it was granted keeps its Resolutions.
    */
-  private enterSlot(name: string, attempts: Map<string, number>): void {
-    attempts.set(name, 0);
+  private enterSlot(name: string): void {
+    this.attempts.set(name, 0);
     if (!this.keepResolutions.delete(name)) this.resolutionsUsed.delete(name);
   }
 
@@ -469,6 +587,7 @@ export class Runner {
   private async executeSlot(
     slot: ResolvedSlot,
     feedback: Feedback | undefined,
+    interrupted: boolean,
   ): Promise<SlotExecution> {
     const bundle = buildContextBundle(
       slot,
@@ -481,6 +600,7 @@ export class Runner {
         slot,
         bundle,
         ...(feedback && { feedback }),
+        ...(interrupted && { interrupted }),
       });
     } catch (error) {
       if (this.stopRequested) return { kind: 'interrupted' };
@@ -491,7 +611,43 @@ export class Runner {
     }
     if (this.stopRequested) return { kind: 'interrupted' };
 
-    const resume = slot.memoryMode === 'persistent' ? this.sessions.get(slot.name) : undefined;
+    // The sessions the Attempt may continue, best first; the last resort is a new one.
+    const sessions: (string | undefined)[] = [];
+    // After a Resume: the session of the interrupted Attempt, whatever the Memory Mode.
+    if (interrupted && this.openSession?.slot === slot.name) {
+      sessions.push(this.openSession.sessionId);
+    }
+    const kept = slot.memoryMode === 'persistent' ? this.sessions.get(slot.name) : undefined;
+    if (kept !== undefined && !sessions.includes(kept)) sessions.push(kept);
+    sessions.push(undefined);
+
+    let run: PilotRun = { prompt, resume: sessions.shift(), continued: false };
+    for (;;) {
+      const outcome = await this.runPilot(slot, run);
+      if (this.stopRequested) return { kind: 'interrupted' };
+      if (outcome.kind === 'usage_limit') {
+        await this.waitForUsage(outcome.resetsAt);
+        if (outcome.sessionId !== undefined) {
+          // Should the refused session be gone, the Attempt starts over as it was first tried.
+          if (!run.continued) sessions.unshift(run.resume);
+          run = { prompt: USAGE_CONTINUE_PROMPT, resume: outcome.sessionId, continued: true };
+        }
+        continue;
+      }
+      if (outcome.kind === 'session_lost') {
+        if (sessions.length === 0) return { kind: 'error', message: outcome.message };
+        if (this.sessions.get(slot.name) === run.resume) this.sessions.delete(slot.name);
+        run = { prompt, resume: sessions.shift(), continued: false };
+        continue;
+      }
+      // The Attempt ended by itself: nothing is left to continue.
+      this.openSession = undefined;
+      return outcome;
+    }
+  }
+
+  /** One turn of the Slot's Pilot, from the prompt to its result, its error or a usage limit. */
+  private async runPilot(slot: ResolvedSlot, run: PilotRun): Promise<PilotOutcome> {
     const handle = this.deps.engine.createAgent({
       role: 'pilot',
       label: slot.name,
@@ -500,7 +656,7 @@ export class Runner {
       cwd: this.deps.workspace.cwd,
       additionalDirectories: [this.meta.taskPath],
       allowQuestions: slot.mayAskCommander,
-      ...(resume !== undefined && { resumeSessionId: resume }),
+      ...(run.resume !== undefined && { resumeSessionId: run.resume }),
       guard: buildGuard(this.deps.workspace, {
         taskPath: this.meta.taskPath,
         taskDocuments: this.meta.taskDocuments,
@@ -510,8 +666,11 @@ export class Runner {
     this.currentHandle = handle;
     let output: string | null = null;
     let error: string | null = null;
+    let sessionLost = false;
+    let sessionId: string | undefined;
+    let usageResetsAt: string | null = null;
     try {
-      handle.send(prompt);
+      handle.send(run.prompt);
       for await (const event of handle.events()) {
         switch (event.type) {
           case 'text':
@@ -548,11 +707,12 @@ export class Runner {
             break;
           case 'error':
             error = event.message;
+            sessionLost = event.sessionLost === true;
             this.deps.emit({
               type: 'agent.error',
               missionId: this.meta.id,
               slot: slot.name,
-              payload: event,
+              payload: { type: 'error', message: event.message },
             });
             break;
           case 'question':
@@ -570,12 +730,22 @@ export class Runner {
             // A second question while one is pending waits its turn; the Commander sees one at a time.
             if (this.questions.length === 1) this.present(this.questions[0]!);
             break;
+          case 'session':
+            sessionId = event.sessionId;
+            this.openSession = { slot: slot.name, sessionId };
+            this.deps.onProgress?.();
+            break;
+          case 'usage_limit':
+            usageResetsAt = event.resetsAt;
+            break;
           case 'result':
             output = event.output;
             this.sessions.set(slot.name, event.sessionId);
             this.addCost(slot.name, event.cost);
             break;
         }
+        // Whatever the Engine says after the refusal is not the Pilot's work.
+        if (usageResetsAt !== null) break;
       }
     } catch (caught) {
       error = errorMessage(caught);
@@ -586,12 +756,39 @@ export class Runner {
       await handle.close().catch(() => undefined);
     }
     if (this.stopRequested) return { kind: 'interrupted' };
+    if (usageResetsAt !== null) return { kind: 'usage_limit', resetsAt: usageResetsAt, sessionId };
     // An empty result is never a Slot Output: judging it would only burn an Attempt on "nothing to judge".
     if (output !== null && output.trim() === '') {
       return { kind: 'error', message: 'The Pilot ended without any output' };
     }
     if (output !== null) return { kind: 'output', output };
+    if (sessionLost && error !== null) return { kind: 'session_lost', message: error };
     return { kind: 'error', message: error ?? 'The agent ended without a result' };
+  }
+
+  /**
+   * Waiting for usage: the Engine refused a call by the usage limit. Resolves a little after the
+   * reset, so the caller makes the same call again; a Stop meanwhile ends the Mission. The wait
+   * costs neither an Attempt nor a Resolution. The Core's client waits here too.
+   */
+  async waitForUsage(resetsAt: string): Promise<void> {
+    this.throwIfStopping();
+    const margin = this.deps.usageResetMarginMs ?? USAGE_RESET_MARGIN_MS;
+    const delay = Math.max(Date.parse(resetsAt) - Date.now(), 0) + margin;
+    const wait = new Deferred<void>();
+    this.usageWait = wait;
+    this.summary.usageResetsAt = resetsAt;
+    this.setState('waiting_for_usage', { resetsAt });
+    const timer = setTimeout(() => wait.resolve(), delay);
+    try {
+      await wait.promise;
+    } finally {
+      clearTimeout(timer);
+      this.usageWait = null;
+      delete this.summary.usageResetsAt;
+    }
+    this.throwIfStopping();
+    this.setState('running');
   }
 
   private async evaluate(
@@ -832,6 +1029,7 @@ export class Runner {
       reason?: string;
       slot?: string;
       failedChecks?: CheckResult[];
+      resetsAt?: string;
     } = {},
   ): void {
     this.state = state;
@@ -863,7 +1061,14 @@ export class Runner {
 
 export class MissionStateError extends Error {
   constructor(
-    readonly reason: 'not_needs_attention' | 'no_such_question' | 'not_finished' | 'not_found',
+    readonly reason:
+      | 'not_needs_attention'
+      | 'no_such_question'
+      | 'not_finished'
+      | 'not_stopped'
+      /** A Stopped Mission that cannot go on: its message says why. */
+      | 'cannot_resume'
+      | 'not_found',
     message: string,
   ) {
     super(message);

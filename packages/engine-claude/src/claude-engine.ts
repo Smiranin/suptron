@@ -77,7 +77,8 @@ judged on what you produced.`;
 
 /**
  * The system text of an agent: its Rules, then its Instructions, then, for a Pilot, how a Slot
- * ends and, when it may ask the Commander, how to reach them. The Core gets neither.
+ * ends and, when it may ask the Commander, how to reach them. The Core gets neither. (How a
+ * Pilot hands over is the runtime's and arrives as part of the Instructions.)
  */
 export function systemText(spec: SystemTextSpec): string {
   const parts = [spec.systemPrompt.rules.trim(), spec.systemPrompt.instructions.trim()];
@@ -99,8 +100,13 @@ export function toolRefusal(toolName: string, input: Record<string, unknown>): s
   return null;
 }
 
-/** The Core answers in one or two turns; a few more cover structured-output retries. */
-const CORE_MAX_TURNS = 6;
+/** What the Core may use: reading only, in its working directory and its additional directories. */
+export const CORE_TOOLS: readonly string[] = ['Read', 'Glob', 'Grep'];
+/**
+ * Most Core calls answer in one or two turns; a Resolution or a judgment may read a few dozen
+ * files first, one turn each.
+ */
+const CORE_MAX_TURNS = 40;
 const HEALTH_TIMEOUT_MS = 60_000;
 const MODELS_TIMEOUT_MS = 20_000;
 
@@ -243,7 +249,7 @@ class ClaudeAgentHandle implements AgentHandle {
       if (!spec.allowQuestions) options.disallowedTools = [ASK_USER_QUESTION];
     } else {
       options.systemPrompt = text;
-      options.tools = [];
+      options.tools = [...CORE_TOOLS];
       options.disallowedTools = [ASK_USER_QUESTION];
       options.maxTurns = CORE_MAX_TURNS;
       if (spec.outputSchema)

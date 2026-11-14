@@ -150,6 +150,9 @@ export function CheckListEditor({
                         className={param.type === 'string' ? 'font-mono text-sm' : undefined}
                       />
                     )}
+                    {param.hint !== undefined && (
+                      <p className="text-muted-foreground text-xs">{param.hint}</p>
+                    )}
                   </div>
                 );
               })}

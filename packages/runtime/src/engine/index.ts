@@ -33,10 +33,11 @@ export interface AgentSpec {
   /** The Slot name for a Pilot, `core` for the Core; used by fakes and transcripts. */
   label: string;
   model: string;
-  /** 'pilot' appends to the Claude Code preset; 'core' is a custom prompt with no file tools. */
+  /** 'pilot' appends to the Claude Code preset; 'core' is a custom prompt with read-only file tools. */
   systemPrompt: { rules: string; instructions: string };
   /** The Workspace's working directory for 'pilot'; the Task folder for 'core'. */
   cwd: string;
+  /** The Task folder for 'pilot'; the Workspace for 'core'. */
   additionalDirectories: string[];
   /** false removes AskUserQuestion from the agent. */
   allowQuestions: boolean;

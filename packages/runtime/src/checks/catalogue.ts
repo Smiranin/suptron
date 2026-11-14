@@ -7,6 +7,8 @@ export interface CheckParam {
   type: 'string' | 'number' | 'text';
   required: boolean;
   placeholder?: string;
+  /** Shown under the field: what the Commander should know before filling it in. */
+  hint?: string;
 }
 
 export interface CheckDescriptor {
@@ -66,8 +68,16 @@ export const CHECK_CATALOGUE: readonly CheckDescriptor[] = [
     kind: 'llm_judgment',
     label: 'LLM judgment',
     description:
-      "The Core judges the Slot Output, and the Workspace's change summary when it has one, against a written criterion.",
-    params: [{ name: 'criterion', label: 'Criterion', type: 'text', required: true }],
+      'The Core judges the result of the Slot against a written criterion: it reads the files the criterion names, or the Slot Output when the criterion is about what the Pilot reported.',
+    params: [
+      {
+        name: 'criterion',
+        label: 'Criterion',
+        type: 'text',
+        required: true,
+        hint: 'The Core reads the files the criterion names and judges strictly. Every judgment is a Core call: set it where a real check of the result is wanted.',
+      },
+    ],
     requires: [],
     summarize: (check) => (check.kind === 'llm_judgment' ? `judgment: ${check.criterion}` : ''),
   },

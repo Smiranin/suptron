@@ -35,13 +35,14 @@ Execution (what happens when you press Launch):
 | **Checkout**        | The local working copy (clone or worktree) the Mission works in. The system never creates, switches or deletes branches there.                             |
 | **Mission**         | One run of an Assembly on one Task in one Checkout.                                                                                                        |
 | **Pilot**           | The agent that executes a Slot, created from the Slot's Unit for this Mission. A Slot may be flown by several Pilots over a Mission (new Attempts, Loops). |
-| **Core**            | The orchestrating agent in the centre: composes each Pilot's prompt, judges Checks, decides in your place where it may. It never edits code or structure.  |
+| **Core**            | The orchestrating agent in the centre: composes each Pilot's prompt, judges Checks, decides in your place where it may. It reads files, never edits them.  |
 | **Check**           | A deterministic verification: a shell command, CI green, a Pull Request exists, no open review comments, or an LLM judgement on a criterion.               |
 | **Done Condition**  | The Checks a Slot must pass before the Mission moves on; a failure starts a new **Attempt** up to the Slot's limit.                                        |
 | **Loop**            | A Slot sending the Mission back to an earlier Slot with feedback (reviewer to implementer), up to a limit.                                                 |
 | **Exit Point**      | A Slot where the Mission may end, when its Exit Condition holds; the last Slot is always one.                                                              |
 | **Slot Output**     | The final message of a Pilot; later Slots may read it when their context says so.                                                                          |
-| **Resolution**      | The Core deciding in your place where the Mission would wait for you: one more Attempt with its note, or a failed judgement accepted as an open point.     |
+| **Handover**        | How every Slot Output ends: what was produced, what is open, and a Status (`done`, `open`, `failed`). `done` is trusted; otherwise the Core decides.       |
+| **Resolution**      | The Core deciding in your place where the Mission would wait for you: one more Attempt with its note, or the result accepted with its open points.         |
 | **Needs Attention** | The Mission is paused for the Commander: Retry with a note, or Stop. Only what the Core may not or could not resolve gets here.                            |
 | **Engine**          | The coding agent that runs Pilots and the Core. The POC has one: Claude Code, using its local login.                                                       |
 

@@ -8,6 +8,7 @@ import type {
 } from '../core-agent/index.js';
 import type { CheckResult } from '../domain/check.js';
 import { addCost, ZERO_COST, type Cost } from '../domain/cost.js';
+import { readHandoverStatus, withHandover, type HandoverStatus } from '../domain/handover.js';
 import {
   CORE_SLOT_NAME,
   type MissionAttention,
@@ -58,8 +59,19 @@ type Control = { kind: 'stop' } | { kind: 'retry'; note?: string; from: 'command
 /** What `decide` returns: the Commander's answer, or the Core counting the Slot as done. */
 type Decision = Control | { kind: 'accept' };
 
-/** The causes at which a failed Done Condition may be accepted; the others have nothing to accept. */
-type AcceptableCause = Extract<NeedsAttentionCause, 'attempt_limit' | 'loop_limit'>;
+/** The causes at which the Core may accept the result as it is; the others have nothing to accept. */
+type AcceptableCause = Extract<
+  NeedsAttentionCause,
+  'handover_not_done' | 'attempt_limit' | 'loop_limit'
+>;
+
+/** What `decide` knows besides the failed Checks. */
+interface DecisionContext {
+  /** The Engine's error text, or what the Handover said. */
+  detail?: string;
+  /** The Slot Output of the Attempt, when it ended with one. */
+  output?: string;
+}
 
 /** A second Engine error in a row is the Commander's: one more blind Attempt would not help. */
 const ENGINE_ERRORS_BEFORE_COMMANDER = 2;
@@ -88,7 +100,8 @@ class StopRequested extends Error {
 /**
  * The deterministic state machine of one Mission. The Core is consulted for text (prompts,
  * explanations, the report), for `llm_judgment` Checks and, where the Mission would wait for the
- * Commander, for a Resolution; every transition, and what a Resolution may be, is plain code.
+ * Commander (a Handover that is not `done` included), for a Resolution; every transition, and what
+ * a Resolution may be, is plain code.
  */
 export class Runner {
   state: MissionState = 'running';
@@ -287,7 +300,9 @@ export class Runner {
 
       if (execution.kind === 'error') {
         this.engineErrorStreak += 1;
-        const control = await this.decide('engine_error', slot, [], execution.message);
+        const control = await this.decide('engine_error', slot, [], {
+          detail: execution.message,
+        });
         if (control.kind === 'stop') return this.finishStopped();
         retryWith(control, []);
         continue;
@@ -296,12 +311,27 @@ export class Runner {
       this.engineErrorStreak = 0;
 
       const output = execution.output;
+      // A Handover that says `done` is trusted; anything else is the Core's to look at first.
+      const status = readHandoverStatus(output);
+      if (status !== 'done') {
+        const decision = await this.decide('handover_not_done', slot, [], {
+          detail: handoverDetail(status),
+          output,
+        });
+        if (decision.kind === 'stop') return this.finishStopped();
+        if (decision.kind === 'retry') {
+          retryWith(decision, []);
+          continue;
+        }
+        // Accepted with open points: the Done Condition still has to hold.
+      }
+
       const done = await this.evaluate(slot, slot.doneCondition, output);
       this.throwIfStopping();
       record.checkResults = done.results;
 
       if (done.timedOut) {
-        const control = await this.decide('ci_timeout', slot, done.results);
+        const control = await this.decide('ci_timeout', slot, done.results, { output });
         if (control.kind === 'stop') return this.finishStopped();
         retryWith(control, done.results);
         continue;
@@ -337,7 +367,7 @@ export class Runner {
           continue;
         }
 
-        const control = await this.decide(limitCause, slot, failed);
+        const control = await this.decide(limitCause, slot, failed, { output });
         if (control.kind === 'stop') return this.finishStopped();
         if (control.kind === 'retry') {
           retryWith(control, failed);
@@ -363,7 +393,7 @@ export class Runner {
           const cause: NeedsAttentionCause = exit.timedOut
             ? 'ci_timeout'
             : 'last_exit_condition_failed';
-          const control = await this.decide(cause, slot, exit.results);
+          const control = await this.decide(cause, slot, exit.results, { output });
           if (control.kind === 'stop') return this.finishStopped();
           retryWith(control, exit.results);
           continue;
@@ -436,7 +466,7 @@ export class Runner {
       role: 'pilot',
       label: slot.name,
       model: slot.model,
-      systemPrompt: { rules: slot.rules, instructions: slot.instructions },
+      systemPrompt: { rules: slot.rules, instructions: withHandover(slot.instructions) },
       cwd: this.deps.workspace.cwd,
       additionalDirectories: [this.meta.taskPath],
       allowQuestions: slot.mayAskCommander,
@@ -587,41 +617,50 @@ export class Runner {
 
   /**
    * A point the Mission cannot pass by plain code. The Core decides in the Commander's place while
-   * the Slot has Resolutions left; otherwise, and whenever the Core says so, the Commander decides.
-   * Plain code keeps what is never the Core's: accepting a Check that is not a judgment, accepting
-   * an Exit Condition (that would declare the Mission completed), a second Engine error in a row.
+   * the Slot has Resolutions left; when they are used up it has the final word (accept, or the
+   * Commander) wherever an accept is possible. Otherwise, and whenever the Core says so, the
+   * Commander decides. Plain code keeps what is never the Core's: accepting a Check that is not a
+   * judgment, accepting an Exit Condition (that would declare the Mission completed), a second
+   * Engine error in a row.
    */
   private decide(
     cause: AcceptableCause,
     slot: ResolvedSlot,
     failedChecks: CheckResult[],
+    context?: DecisionContext,
   ): Promise<Decision>;
   private decide(
     cause: NeedsAttentionCause,
     slot: ResolvedSlot,
     failedChecks: CheckResult[],
-    detail?: string,
+    context?: DecisionContext,
   ): Promise<Control>;
   private async decide(
     cause: NeedsAttentionCause,
     slot: ResolvedSlot,
     failedChecks: CheckResult[],
-    detail?: string,
+    { detail, output }: DecisionContext = {},
   ): Promise<Decision> {
     const limit = this.snapshot.assembly.core.resolutionLimit;
     const used = this.resolutionsUsed.get(slot.name) ?? 0;
+    const mayRetry = used < limit;
+    const mayAccept =
+      cause === 'handover_not_done' ||
+      ((cause === 'attempt_limit' || cause === 'loop_limit') &&
+        failedChecks.length > 0 &&
+        failedChecks.every((result) => result.check.kind === 'llm_judgment'));
     const coreMayDecide =
-      used < limit &&
+      limit > 0 &&
+      // Without a `retry` the Core is asked only where it has something to accept: the final word.
+      (mayRetry || mayAccept) &&
       !(cause === 'engine_error' && this.engineErrorStreak >= ENGINE_ERRORS_BEFORE_COMMANDER);
     // What the Commander reads besides the Core's words, in the order it happened.
     const details: string[] = [];
     let reason: string | undefined;
+    if (limit > 0 && !mayRetry)
+      details.push(`The Core used its ${limit} Resolutions on this Slot.`);
 
     if (coreMayDecide) {
-      const mayAccept =
-        (cause === 'attempt_limit' || cause === 'loop_limit') &&
-        failedChecks.length > 0 &&
-        failedChecks.every((result) => result.check.kind === 'llm_judgment');
       let decision: AttentionDecision | undefined;
       try {
         decision = await this.deps.core.resolveAttention({
@@ -629,14 +668,19 @@ export class Runner {
           slot,
           failedChecks,
           ...(detail !== undefined && { detail }),
+          ...(output !== undefined && { slotOutput: output }),
           mayAccept,
+          mayRetry,
           resolutionsLeft: limit - used,
         });
       } catch (error) {
         details.push(`The Core could not decide: ${errorMessage(error)}`);
       }
       this.throwIfStopping();
-      if (decision?.decision === 'retry' || (decision?.decision === 'accept' && mayAccept)) {
+      if (
+        (decision?.decision === 'retry' && mayRetry) ||
+        (decision?.decision === 'accept' && mayAccept)
+      ) {
         const note = decision.note?.trim();
         const resolution: Resolution = {
           cause,
@@ -645,7 +689,8 @@ export class Runner {
           ...(decision.decision === 'retry' && note && { note }),
           failedChecks,
         };
-        this.resolutionsUsed.set(slot.name, used + 1);
+        // The final word is not counted: the limit is on Resolutions that may grant an Attempt.
+        if (mayRetry) this.resolutionsUsed.set(slot.name, used + 1);
         const record = this.records.get(slot.name)!;
         record.resolutions = [...(record.resolutions ?? []), resolution];
         this.deps.emit({
@@ -666,9 +711,10 @@ export class Runner {
         if (decision.decision === 'accept') {
           details.push('The Core would accept the Slot as it is; here only the Commander may.');
         }
+        if (decision.decision === 'retry') {
+          details.push('The Core would grant one more Attempt; here only the Commander may.');
+        }
       }
-    } else if (limit > 0 && used >= limit) {
-      details.push(`The Core used its ${limit} Resolutions on this Slot.`);
     }
 
     if (detail !== undefined) details.push(detail);
@@ -793,6 +839,13 @@ export class MissionStateError extends Error {
     super(message);
     this.name = 'MissionStateError';
   }
+}
+
+/** What the Core and the Commander are told about a Handover that is not `done`. */
+function handoverDetail(status: HandoverStatus | null): string {
+  return status === null
+    ? 'The Slot Output ends without a Handover Status line.'
+    : `The Pilot handed over with Status "${status}".`;
 }
 
 function errorMessage(error: unknown): string {

@@ -19,12 +19,18 @@ export function isActiveState(state: MissionState): boolean {
 }
 
 export type NeedsAttentionCause =
-  'attempt_limit' | 'loop_limit' | 'last_exit_condition_failed' | 'ci_timeout' | 'engine_error';
+  /** The Pilot handed over with Status `open` or `failed`, or without a Status line. */
+  | 'handover_not_done'
+  | 'attempt_limit'
+  | 'loop_limit'
+  | 'last_exit_condition_failed'
+  | 'ci_timeout'
+  | 'engine_error';
 
 /**
  * A decision the Core took in the Commander's place at a point that would otherwise be a Needs
- * Attention: one more Attempt with the Core's note, or the Slot counted as done although Checks
- * failed (then `failedChecks` are the open points of the final report).
+ * Attention: one more Attempt with the Core's note, or the result accepted with open points (the
+ * `failedChecks`, and what the Pilot's Handover lists as open).
  */
 export interface Resolution {
   cause: NeedsAttentionCause;

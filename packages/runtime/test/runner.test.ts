@@ -15,6 +15,7 @@ import {
   type ProfileFile,
   type Question,
   type UnitFile,
+  withHandover,
 } from '../src/index.js';
 import {
   FakeEngine,
@@ -22,6 +23,7 @@ import {
   coreCallInput,
   coreCallName,
   folderProfile,
+  handedOver,
   noneProfile,
   primaryProfile,
   tempRepo,
@@ -347,7 +349,11 @@ describe('Runner scenarios', () => {
         feedback: { kind: string; fromSlot: string; output: string };
       }
     ).feedback;
-    expect(feedback).toMatchObject({ kind: 'loop', fromSlot: 'rev', output: 'rev output' });
+    expect(feedback).toMatchObject({
+      kind: 'loop',
+      fromSlot: 'rev',
+      output: handedOver('rev output'),
+    });
     expect(h.registry.get(id)!.slots.find((s) => s.name === 'rev')?.loops).toBe(3);
     await h.registry.stop(id);
   });
@@ -365,10 +371,14 @@ describe('Runner scenarios', () => {
     const id = await h.start();
     await h.waitFor((es) => es.some((e) => e.type === 'mission.completed'));
     const done = h.events.find((e) => e.type === 'slot.done' && e.slot === 'rev');
-    expect(done).toMatchObject({ slot: 'rev', output: 'rev output', acceptedAtLimit: true });
+    expect(done).toMatchObject({
+      slot: 'rev',
+      output: handedOver('rev output'),
+      acceptedAtLimit: true,
+    });
     const record = h.registry.get(id)!.slots.find((s) => s.name === 'rev')!;
     expect(record.loops).toBe(3);
-    expect(record.lastOutput).toBe('rev output');
+    expect(record.lastOutput).toBe(handedOver('rev output'));
     // The Done Condition's failure and the Accept Condition's pass both land in the record.
     expect(record.checkResults.map((r) => r.holds)).toEqual([false, true]);
     expect(h.registry.get(id)?.result?.exitSlot).toBe('rev');
@@ -480,7 +490,7 @@ describe('Runner scenarios', () => {
           };
         }
       ).bundle;
-    expect(bundleOf('b').slotOutputs).toEqual([{ slotName: 'a', output: 'a output' }]);
+    expect(bundleOf('b').slotOutputs).toEqual([{ slotName: 'a', output: handedOver('a output') }]);
     expect(bundleOf('c').slotOutputs).toEqual([]);
     // the folder's files are listed, not the folder itself
     expect(bundleOf('b').taskDocuments).toEqual([join(h.taskDir, 'SPEC.md')]);
@@ -962,8 +972,10 @@ describe('Runner scenarios with Core Resolutions', () => {
   interface ResolveInput {
     cause: string;
     mayAccept: boolean;
+    mayRetry: boolean;
     resolutionsLeft: number;
     detail?: string;
+    slotOutput?: string;
   }
 
   /** Scripts the named Core calls; every other call keeps the default answer. */
@@ -1012,7 +1024,7 @@ describe('Runner scenarios with Core Resolutions', () => {
     expect(attentionCount(h.events)).toBe(0);
     expect(attempts(h.events)).toEqual([1, 2, 3]);
     expect(resolveInputs(h.engine)).toMatchObject([
-      { cause: 'attempt_limit', mayAccept: true, resolutionsLeft: 2 },
+      { cause: 'attempt_limit', mayAccept: true, mayRetry: true, resolutionsLeft: 2 },
     ]);
     // the Core's note reaches the Pilot under the Core's name; the transcript has it with the Resolution
     const third = h.events.filter((e) => e.type === 'slot.started')[2]!;
@@ -1189,6 +1201,51 @@ describe('Runner scenarios with Core Resolutions', () => {
     await h.registry.stop(id);
   });
 
+  it('gives the Core the final word when its Resolutions are used up and a judgment is all that failed', async () => {
+    h = await harness([unit('a', [JUDGED])], [linear([{ name: 'a', unit: 'a' }])], 'none');
+    scriptCore(h.engine, {
+      judge: failing,
+      resolveAttention: (nth) =>
+        nth < 2
+          ? { decision: 'retry', reason: 'Try again.', note: `fix ${nth}` }
+          : { decision: 'accept', reason: 'One entry of seventy stays open.' },
+    });
+    const id = await h.start();
+    await h.waitFor((es) => es.some((e) => e.type === 'mission.completed'));
+    expect(attentionCount(h.events)).toBe(0);
+    expect(attempts(h.events)).toEqual([1, 2, 3, 4]);
+    expect(resolveInputs(h.engine).map((i) => [i.mayRetry, i.resolutionsLeft])).toEqual([
+      [true, 2],
+      [true, 1],
+      [false, 0],
+    ]);
+    expect(h.registry.get(id)?.slots[0]?.resolutions?.map((r) => r.decision)).toEqual([
+      'retry',
+      'retry',
+      'accept',
+    ]);
+  });
+
+  it('refuses a retry at the final word and sends the Mission to the Commander', async () => {
+    const assembly = linear([{ name: 'a', unit: 'a' }]);
+    assembly.core.resolutionLimit = 1;
+    h = await harness([unit('a', [JUDGED])], [assembly], 'none');
+    scriptCore(h.engine, {
+      judge: failing,
+      resolveAttention: () => ({ decision: 'retry', reason: 'One more would do.', note: 'fix' }),
+    });
+    const id = await h.start();
+    await h.waitForState(id, 'needs_attention');
+    expect(attempts(h.events)).toEqual([1, 2, 3]);
+    expect(resolveInputs(h.engine).map((i) => i.mayRetry)).toEqual([true, false]);
+    const reason = h.registry.get(id)!.attention!.reason;
+    expect(reason).toContain('One more would do.');
+    expect(reason).toContain('used its 1 Resolutions');
+    expect(reason).toContain('only the Commander may');
+    expect(h.events.filter((e) => e.type === 'core.resolved')).toHaveLength(1);
+    await h.registry.stop(id);
+  });
+
   it('never asks the Core to decide when the Resolution limit is 0', async () => {
     const assembly = linear([{ name: 'a', unit: 'a' }]);
     assembly.core.resolutionLimit = 0;
@@ -1200,5 +1257,166 @@ describe('Runner scenarios with Core Resolutions', () => {
       'The Mission needs attention: attempt_limit.',
     );
     await h.registry.stop(id);
+  });
+});
+
+describe('Runner scenarios with Handovers', () => {
+  let h: Harness | undefined;
+  afterEach(() => cleanup(h));
+
+  interface ResolveInput {
+    cause: string;
+    mayAccept: boolean;
+    mayRetry: boolean;
+    detail?: string;
+    slotOutput?: string;
+  }
+
+  const resolveCalls = (engine: FakeEngine): FakeCall[] =>
+    engine.callsFor('core', 'core').filter((c) => coreCallName(c.prompt) === 'resolveAttention');
+
+  const resolveInputs = (engine: FakeEngine): ResolveInput[] =>
+    resolveCalls(engine).map((c) => coreCallInput(c.prompt) as ResolveInput);
+
+  /** Answers every resolveAttention call in turn; every other Core call keeps its default. */
+  function scriptResolutions(engine: FakeEngine, answers: object[]) {
+    engine.script('core', 'core', (call) =>
+      coreCallName(call.prompt) === 'resolveAttention'
+        ? [{ result: { structured: answers[resolveCalls(engine).length - 1] ?? answers.at(-1) } }]
+        : (engine.defaultCoreScript as (c: FakeCall) => FakeStep[])(call),
+    );
+  }
+
+  const checksOf = (events: MissionEvent[], slot: string) =>
+    events.filter((e) => e.type === 'check.evaluated' && e.slot === slot);
+
+  it('trusts a Handover that says done: the Core is not asked', async () => {
+    h = await harness([unit('a', [PASS])], [linear([{ name: 'a', unit: 'a' }])]);
+    h.engine.pilot('a', '### Handover\nProduced: a.md\nOpen: nothing\n**Status:** `done`');
+    await h.start();
+    await h.waitFor((es) => es.some((e) => e.type === 'mission.completed'));
+    expect(resolveCalls(h.engine)).toEqual([]);
+    // every Pilot is told how to hand over, after its own Instructions
+    expect(h.engine.callsFor('pilot', 'a')[0]?.spec.systemPrompt.instructions).toBe(
+      withHandover('Instructions of a'),
+    );
+  });
+
+  it('asks the Core about an open Handover and retries the Slot with its note', async () => {
+    h = await harness([unit('a', [PASS])], [linear([{ name: 'a', unit: 'a' }])]);
+    h.engine.script('pilot', 'a', (call) => [
+      {
+        result: {
+          output: 'Open: one entry has no source',
+          handover: call.index === 0 ? 'open' : 'done',
+        },
+      },
+    ]);
+    scriptResolutions(h.engine, [
+      { decision: 'retry', reason: 'A source can be found.', note: 'Find the source or drop it.' },
+    ]);
+    const id = await h.start();
+    await h.waitFor((es) => es.some((e) => e.type === 'mission.completed'));
+    expect(resolveInputs(h.engine)).toMatchObject([
+      {
+        cause: 'handover_not_done',
+        mayAccept: true,
+        mayRetry: true,
+        detail: 'The Pilot handed over with Status "open".',
+        slotOutput: handedOver('Open: one entry has no source', 'open'),
+      },
+    ]);
+    // the open Attempt never reached its Done Condition
+    expect(checksOf(h.events, 'a')).toHaveLength(1);
+    expect(
+      (coreCallInput(composeCalls(h.engine, 'a')[1]!.prompt) as { feedback: object }).feedback,
+    ).toMatchObject({ kind: 'attempt', note: 'Find the source or drop it.', noteFrom: 'core' });
+    expect(h.registry.get(id)?.slots[0]?.resolutions).toMatchObject([
+      { cause: 'handover_not_done', decision: 'retry' },
+    ]);
+  });
+
+  it('accepts an open Handover and still runs the Done Condition', async () => {
+    h = await harness([unit('a', [FAIL])], [linear([{ name: 'a', unit: 'a', attemptLimit: 1 }])]);
+    h.engine.script('pilot', 'a', [{ result: { output: 'Open: a typo', handover: 'open' } }]);
+    scriptResolutions(h.engine, [
+      { decision: 'accept', reason: 'A typo does not matter here.' },
+      { decision: 'commander', reason: 'The command fails.' },
+    ]);
+    const id = await h.start();
+    await h.waitForState(id, 'needs_attention');
+    expect(resolveInputs(h.engine).map((i) => i.cause)).toEqual([
+      'handover_not_done',
+      'attempt_limit',
+    ]);
+    expect(checksOf(h.events, 'a')).toHaveLength(1);
+    expect(h.registry.get(id)?.attention?.cause).toBe('attempt_limit');
+    expect(h.registry.get(id)?.slots[0]?.resolutions).toMatchObject([
+      { cause: 'handover_not_done', decision: 'accept', failedChecks: [] },
+    ]);
+    await h.registry.stop(id);
+  });
+
+  it('sends a failed Handover to the Commander when the Core says so', async () => {
+    h = await harness([unit('a', [PASS])], [linear([{ name: 'a', unit: 'a' }])]);
+    h.engine.script('pilot', 'a', [{ result: { output: 'No access.', handover: 'failed' } }]);
+    scriptResolutions(h.engine, [{ decision: 'commander', reason: 'The Pilot has no access.' }]);
+    const id = await h.start();
+    await h.waitForState(id, 'needs_attention');
+    const attention = h.registry.get(id)!.attention!;
+    expect(attention).toMatchObject({ cause: 'handover_not_done', slot: 'a', failedChecks: [] });
+    expect(attention.reason).toContain('The Pilot has no access.');
+    expect(attention.reason).toContain('Status "failed"');
+    expect(checksOf(h.events, 'a')).toEqual([]);
+    await h.registry.stop(id);
+  });
+
+  it('treats a Slot Output without a Status line as a Handover that is not done', async () => {
+    h = await harness([unit('a', [PASS])], [linear([{ name: 'a', unit: 'a' }])]);
+    h.engine.script('pilot', 'a', [{ result: { output: 'All written.', handover: null } }]);
+    scriptResolutions(h.engine, [{ decision: 'accept', reason: 'The files are there.' }]);
+    await h.start();
+    await h.waitFor((es) => es.some((e) => e.type === 'mission.completed'));
+    expect(resolveInputs(h.engine)).toMatchObject([
+      {
+        cause: 'handover_not_done',
+        detail: 'The Slot Output ends without a Handover Status line.',
+        slotOutput: 'All written.',
+      },
+    ]);
+  });
+
+  it('gives the Core the final word on a Handover that stays open', async () => {
+    h = await harness([unit('a', [PASS])], [linear([{ name: 'a', unit: 'a' }])]);
+    h.engine.script('pilot', 'a', [{ result: { output: 'Open: a gap', handover: 'open' } }]);
+    scriptResolutions(h.engine, [
+      { decision: 'retry', reason: 'Try again.', note: 'close the gap' },
+      { decision: 'retry', reason: 'Try again.', note: 'close the gap' },
+      { decision: 'accept', reason: 'The gap is minor.' },
+    ]);
+    const id = await h.start();
+    await h.waitFor((es) => es.some((e) => e.type === 'mission.completed'));
+    expect(resolveInputs(h.engine).map((i) => i.mayRetry)).toEqual([true, true, false]);
+    expect(h.events.filter((e) => e.type === 'slot.started')).toHaveLength(3);
+    expect(h.registry.get(id)?.slots[0]?.resolutions?.map((r) => r.decision)).toEqual([
+      'retry',
+      'retry',
+      'accept',
+    ]);
+  });
+
+  it('waits for the Commander on an open Handover when the Resolution limit is 0', async () => {
+    const assembly = linear([{ name: 'a', unit: 'a' }]);
+    assembly.core.resolutionLimit = 0;
+    h = await harness([unit('a', [PASS])], [assembly]);
+    h.engine.script('pilot', 'a', (call) => [
+      { result: { output: 'Open: a gap', handover: call.index === 0 ? 'open' : 'done' } },
+    ]);
+    const id = await h.start();
+    await h.waitForState(id, 'needs_attention');
+    expect(resolveCalls(h.engine)).toEqual([]);
+    expect(h.registry.get(id)?.attention?.reason).toContain('Status "open"');
+    h.registry.retry(id, 'close it');
+    await h.waitFor((es) => es.some((e) => e.type === 'mission.completed'));
   });
 });

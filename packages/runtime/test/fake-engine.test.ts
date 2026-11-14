@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { AgentEvent, AgentSpec } from '../src/engine/index.js';
-import { FakeEngine } from '../src/testing/index.js';
+import { FakeEngine, handedOver } from '../src/testing/index.js';
 
 const spec: AgentSpec = {
   role: 'pilot',
@@ -41,7 +41,7 @@ describe('FakeEngine', () => {
       }
     }
     expect(answered).toBe(true);
-    expect(events.at(-1)).toMatchObject({ type: 'result', output: 'done' });
+    expect(events.at(-1)).toMatchObject({ type: 'result', output: handedOver('done') });
     expect(engine.calls[0]?.answers).toEqual([{ 'Which DB?': 'Postgres' }]);
   });
 

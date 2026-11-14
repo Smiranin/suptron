@@ -337,6 +337,7 @@ export class MissionRegistry {
       model: snapshot.assembly.core.model,
       instructions: snapshot.assembly.core.instructions,
       cwd: taskIsFile ? resolve(taskPath, '..') : taskPath,
+      readDirectories: [workspace.cwd],
       guard: buildGuard(workspace, {
         cwd: taskIsFile ? resolve(taskPath, '..') : taskPath,
         taskPath,

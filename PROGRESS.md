@@ -1,86 +1,139 @@
-# Progress: interview content scenario (Dojo)
+# Progress
 
-The to-do of the scenario that produces interview Cards for the Dojo (`/Users/asuprun/Projects/dojo`) with
-Suptron. The Units, the Project
-`dojo-content` and the Assemblies `cards` and `cards-write` live in `~/.suptron` (the only copies). Decisions
-dated 2026-11-05 were taken with the Commander after run 6.
+The plan agreed with the Commander on 2026-11-12, in the order of work: A, B, D, C, F; E along the way. A group
+leaves this file when it is done; the file is deleted after the last one. Done: A (Handover and the Core,
+ADR-0007). The groups below are not implemented yet.
 
-## State
+The Units, the Project `dojo-content` and the Assemblies `cards` and `cards-write` live in `~/.suptron` (the
+only copies). The Commander commits; never commit or push unasked.
 
-- Runs 1 to 6 done. Run 4 (React, 80 Cards) and run 6 (Python, 62 Cards, $17.19) completed; the Cards are on
-  the Dojo branch `content/task`, committed by the Commander, not pushed.
-- The suptron repo holds uncommitted work (batch of 2026-11-03/04, the Engine crash fix with
-  `engine-failure.test.ts`); `mise run check` is green. The Commander commits; never commit or push unasked.
-- Nobody commits in the Dojo but the Commander; the publisher is not part of the flow and is not planned.
+## B. Loop
 
-## To do
+### Rules
+
+- **Inner Loop.** The work goes back at most 3 times by default (the looping Slot runs up to four times);
+  the Core takes no part.
+- **At the Loop limit the Core decides.** `retry` grants one round: the Loop target runs with the Core's
+  note and the last review, then the looping Slot runs once. The Loop count is not reset, so a second
+  failure is the limit again and the Core decides again. The Commander's Retry from Needs Attention takes
+  the same path. Today a `retry` at the limit runs the looping Slot again, which re-reviews unchanged work.
+- **Core decision limit** (`core.resolutionLimit`): default 3 instead of 2; after them the final word.
+- No `loop_no_change` guard and no `loopDecision` call.
 
 ### Runtime
 
-- [ ] **The judge is an administrator accepting a handover, not a reviewer.** An `llm_judgment` judge sees the
-      Slot Output and the Workspace change summary only (`runLlmJudgment` in `checks/runners.ts`; the Core has no
-      tools), and we wrote criteria about document contents. Change: (a) `composeSlotPrompt` always asks the Pilot
-      to end with a handover: `Produced` (files, where), `Done`, `Open`; Units say nothing about it; (b) the judge
-      gets the Task folder's changes of the Attempt (file, created or changed, size; no contents) as a fourth input,
-      and its instruction says "accept the handover: holds when the delivery the criterion names is there; never
-      fail only because file contents are not visible, say so in the reason"; (c) the editor shows at the criterion
-      field what the judge sees; (d) the Core's final report gets an "Open points" part fed by the handovers.
-- [ ] **Resume an interrupted or stopped Mission.** The ledger (`missions/active.json`) keeps the summary, the
-      Assembly snapshot and every SlotRecord (`attempts`, `loops`, `lastOutput`, Check results, cost); the Mission
-      folder and the Workspace stay on disk. Resume builds a runner that starts at the first Slot without a stored
-      output, with the finished Slots' `lastOutput` as Slot Outputs and the Loop counters carried over; the
-      interrupted Slot gets a fresh Attempt (persistent sessions are lost) with feedback naming the interruption.
-      One Resume action for `interrupted` and for stopped by hand. The transcript is not persisted. With it: the
-      Engine's `SessionCostLedger` kept in a file next to `active.json`, so a resumed session is not charged its
-      running total again.
-- [ ] **Two guards before a Loop fires again.** (1) Code: the Loop target's Attempt changed nothing in the
-      Workspace and the Task folder and the looping Slot's Done Condition failed again: Needs Attention
-      `loop_no_change`, no Core call. (2) Core: something changed; a new call `loopDecision` (the review, the
-      target's handover, the round) answers `continue` or `needs_commander` with a reason. Since ADR-0006 the
-      Core is the Commander's deputy: both guards go through the Runner's `decide` (a Resolution first, the
-      Commander only when the Core may not or could not), and `loopDecision` leans towards deciding, not asking.
-      The Retry note of both causes goes to the Loop target; the UI says so. A finding only the Commander can
-      resolve is named by the target under `Open`. Sessions stay: reviewer `fresh`, writer `persistent`.
-- [ ] **Loop limit: fix the words, keep the count.** The limit counts how many times the Loop may send the work
-      back (limit 5: six runs of the looping Slot). Editor field ("Iteration limit" today) and Mission UI say so;
-      the round shows as "Loop 3 of 5". Default stays 3.
-- [ ] **Title field on the start form**, optional; empty means Project name plus date
-      (`dojo-content-2026-11-05`). Slug and Mission name come from it; the first line of a text Task and the
-      folder name stop serving as the title. No transliteration.
+- `runner/runner.ts`: a `retry` at `loop_limit` sends the work to the Loop target with Loop feedback that
+  carries the note; the Resolutions of the looping Slot are not reset when it is entered after such a round.
+- `core-agent/index.ts`: Loop feedback may carry a note and its author.
+- `config/defaults.ts`: `resolutionLimit: 3`.
+
+### Web
+
+- Editor: "Iteration limit" becomes "Loop limit", with a line saying it counts how many times the work may
+  go back.
+- Mission: the round shows as "Loop 2 of 3"; a round granted by the Core is marked as such.
+- The help text of "Core decision limit" follows the new default and the final word.
+
+### Tests
+
+- A round granted by the Core reaches the Loop target; a second failure returns to the Core at once; three
+  rounds, then the final word; the Commander's Retry takes the same path.
 
 ### Configuration (`~/.suptron`)
 
-- [ ] Writer Unit: remove "Commit with a message that says which items were added". Git is never a working
-      Unit's rule; a Slot that must commit says so in its `instructions` in the Assembly.
-- [ ] Planner and researcher Units: rewrite the `llm_judgment` criteria about the delivery (OUTLINE.md handed over
-      and the interview finished; RESEARCH.md handed over), not the contents; drop "Summarize the requirements as
-      your output" from the planner (the handover replaces it).
-- [ ] Assembly `cards`: `core.instructions` loses "judge against the Content requirements"; the reviewer's Loop
-      limit goes from 5 to the default 3.
+- Assemblies `cards` and `cards-write`: remove `limit: 5` from the reviewer's Loop.
 
-### Docs and repo
+### Docs
 
-- [ ] Commit the uncommitted suptron work: the Commander, when they choose; one commit before the code of the
-      items above, so the next changes are their own diffs.
+- ADR-0006 (amended by ADR-0007 or in place), `docs/GLOSSARY.md` (Loop, Resolution), `README.md`.
 
-## Open, not designed yet
+## D. Small UI
 
-- **Tell the Commander when a Mission needs them.** With Resolutions (ADR-0006) a Needs Attention is rare and
-  real; the Commander is away by then and learns of it only on return. A notification (system, push) on
-  `needs_attention`, `waiting_for_owner` and `completed`.
-- **The Core reads before it resolves.** Today a Resolution rests on the Check results and the Slot Output the
-  Core already has. Read access to the Task folder and the Workspace would ground an `accept`; design it with
-  the judge item above, only if runs show blind Resolutions going wrong.
+### Title on the start form
 
-- **Cost and usage limits per Mission.** The Commander runs on a subscription: the real limit is usage, which runs
-  out and resets hours later. Wants planning (know the window, wait for the reset, resume), not a dollar cap
-  alone. Ideas for then: `costCap` in `core` with Needs Attention `cost_cap`; a per-Mission cap on the start form;
-  no interrupt inside an Attempt. Run 5: the planner's interview alone took 495k input tokens.
+- An optional Title field. Empty means the Project name and the date (`dojo-content-2026-11-12`).
+- The Mission's name and slug come from it; the first line of a text Task and the name of the Task folder
+  stop serving as the title. No transliteration.
+- Known and accepted: two Missions of one Project on one day without a Title get the same name; where a
+  Project makes branches from the slug, set the Title by hand.
+- Files: the start form's schema and dialog, the start request, `runner/mission-registry.ts`, tests,
+  `docs/api.md`.
 
-## Decided, no action
+### Limit fields
 
-- Accept Condition stays judged at the Loop limit only; run 6 was an edge case.
-- The 13 Python Cards (FastAPI, Pydantic, pytest) with unversioned documentation sources are accepted as they
-  are; the version is named in each Explanation.
-- OUTLINE.md's "the owner commits" line was a one-off from the interview; the planner is not changed for it.
-- The publisher Slot is dropped from the plan; the Commander commits and reviews the branch by hand.
+- One shared number field that keeps the typed text and applies it on blur; an empty field shows the
+  default as a placeholder instead of filling it in. Today a cleared field snaps back to the default, so
+  `0` cannot be typed (it becomes `20`).
+- It replaces "Core decision limit", "Default Attempt limit", "Default Loop limit" and the Slot's Loop
+  limit.
+- Files: a new component in `apps/web/src/components`, `CoreDirectivesPanel.tsx`, `Inspector.tsx`, the
+  editor tests.
+
+## C. Mission life cycle
+
+### Resume
+
+- **The ledger keeps what a Resume needs:** the resolved snapshot the Mission started with (Units,
+  `mayAskCommander`), what reopens the Workspace, the Engine session ids, the Loop counts and the
+  Resolution counts. Stopped and interrupted Missions stay in it until Dismiss, not until the next restart.
+- **One Resume action** on a Stopped Mission, for stopped by hand and for interrupted.
+- **Where it continues:** the first Slot without an accepted result. Finished Slots do not run again; their
+  Slot Outputs go on as before.
+- **The interrupted Slot** gets a fresh Attempt told that the previous one was interrupted and that it must
+  check what is already there. What it left in the Workspace stays.
+- **Configuration:** the stored snapshot, not the files on disk.
+- **Pilot memory:** the Engine sessions are resumed; when a session cannot be resumed, the Slot starts a new
+  one with the note. First step of the work: a live test that Claude Code resumes a session after a server
+  restart; if it does not, every resumed Slot starts a new session.
+- **Session costs** move from memory to a file next to the ledger, so a resumed session is not charged its
+  running total again.
+- **The Workspace is reopened;** a busy Checkout or a missing folder refuses the Resume with a message.
+- **Accepted loss:** the transcript before the Resume is gone; Slot Outputs and Check results stay.
+
+### Usage limit
+
+- The Engine recognises a refusal by the usage limit (the SDK's `rate_limit_event` with status `rejected`)
+  and reports when the limit resets.
+- The Mission enters a new state "Waiting for usage" that shows the time; at the reset the same Attempt
+  starts again in the same session. The wait costs neither an Attempt nor a Resolution. It covers Core
+  calls too. Stop works during the wait.
+- One rule for every kind of limit (five hours, seven days).
+- No reset time reported: as today, an Engine error.
+- A server restart during the wait leaves the Mission interrupted; the Commander resumes it.
+- Known from the SDK's types only: the event cannot be provoked in a test, so the tests use the fake Engine.
+
+## F. Slots a later Loop passes through
+
+Wanted for an Assembly with a Pull Request: implementer, tester, reviewer, publication, a Slot that checks
+CI and the review comments and loops to the implementer. Not needed while the reviewer is the last Slot.
+
+### Rules
+
+- **A Slot setting "do not run again".** A Slot with it that has an accepted result is skipped when the
+  Mission passes through it again because a later Slot's Loop sent the work back. Its own Loop works as
+  before: the reviewer loops with the implementer until it accepts, and is not returned to after that.
+- The skipped Slot keeps its last Slot Output, which goes on to the Slots that read it. The final report
+  says which Slots were skipped in later rounds, because their Output describes earlier work.
+- Off by default: a tester and a publication must run again after every change.
+- **An outer Loop renews the inner Loop's count.** Two Slots may loop to the same earlier Slot, and a later
+  Loop makes every Slot in between run again, an inner looping Slot included. Today the Loop count of a
+  Slot is kept for the whole Mission, so an inner Loop that used its three rounds is at its limit at once
+  when an outer Loop brings the Mission back to it. It becomes: every round of an outer Loop is new work
+  and the inner Loop counts from zero. The worst case multiplies (outer limit times inner limit), which is
+  why the default limits stay small (3). No test covers nested Loops today.
+
+### Files
+
+- `config/schemas.ts`, `config/snapshot.ts`, `config/serialize.ts`: the Slot setting.
+- `runner/runner.ts`: skip the Slot on a forward pass inside a later Slot's Loop, with an event for the
+  skip; reset the Loop count of the Slots between a Loop's target and its looping Slot when that Loop fires.
+- Web: the setting in the Slot inspector; the skipped Slot shown as skipped in the Mission.
+- Tests: a nested Loop with and without the setting; the skipped Slot's Output still reaches its readers;
+  the inner Loop counts from zero after an outer round.
+- Docs: `docs/GLOSSARY.md`, `docs/api.md`, `README.md`.
+
+## E. Cleanup
+
+- `core.instructions` of `cards` and `cards-write` lose "the Git conventions", "where the Pull Request is"
+  and "judge against the Content requirements".
+- Delete this file after the last group.

@@ -46,6 +46,10 @@ _Avoid_: Step, stage, phase, task, Node (former name)
 The result a Slot leaves behind (text or markdown) that later Slots receive only when their configuration names it. Slots are isolated by default.
 _Avoid_: Step output, artifact, handoff, result, Node Output (former name)
 
+**Handover**:
+The block every Pilot ends its Slot Output with: what it produced, what is done, what is open, and a Status line (`done`, `open` or `failed`). The system tells every Pilot how to write it; no Unit does. Plain code reads the Status: `done` is trusted and the Done Condition runs; anything else, a missing Status line included, is the Core's to decide by a Resolution.
+_Avoid_: Report, summary, handoff, sign-off
+
 **Loop**:
 A rule on a Slot: "if my Done Condition does not hold, go back to Slot X", with an iteration limit (default 3). When the limit is reached the Mission goes to Needs Attention.
 _Avoid_: Cycle, retry (a retry is one Slot repeating, a Loop is several)
@@ -59,7 +63,7 @@ One execution of a single Slot. A Slot may be attempted several times before its
 _Avoid_: Retry, try
 
 **Resolution**:
-A decision the Core takes in the Commander's place at a point where plain code cannot go on (an Attempt or Loop limit, a failed last Exit Condition, a CI timeout, an Engine error): one more Attempt with the Core's own note, or the Slot counted as done with its failed Checks as open points. Each Slot has a limit of Resolutions (Core Directives, default 2, 0 turns them off); a forward move, a Loop into the Slot and the Commander's Retry start the count afresh. Plain code keeps what a Resolution can never be: accepting a Check that is not an `llm_judgment`, accepting an Exit Condition, retrying a second Engine error in a row. Every Resolution is written to the transcript and to the final report.
+A decision the Core takes in the Commander's place at a point where plain code cannot go on (a Handover that is not `done`, an Attempt or Loop limit, a failed last Exit Condition, a CI timeout, an Engine error): one more Attempt with the Core's own note, or the result accepted with its open points. An accepted Handover still has to pass the Done Condition. Each Slot has a limit of Resolutions (Core Directives, default 2, 0 turns them off); a forward move, a Loop into the Slot and the Commander's Retry start the count afresh. When the limit is used up and there is something to accept, the Core has the final word: it accepts or hands the Mission to the Commander, with no further Attempt to grant. Plain code keeps what a Resolution can never be: accepting a Check that is not an `llm_judgment`, accepting an Exit Condition, retrying a second Engine error in a row. Every Resolution is written to the transcript and to the final report.
 _Avoid_: Auto-retry, override, self-healing
 
 **Done Condition**:
@@ -75,11 +79,11 @@ The list of Checks on an Exit Point, evaluated only once the Slot is done: when 
 _Avoid_: Early exit, completion condition, done condition
 
 **Check**:
-One verifiable condition from the system's fixed catalogue (for example: a command exits with 0, CI is green, the Pull Request exists, the Pull Request has no open comments, an LLM judgment against a written criterion), with its parameters. Done Conditions and Exit Conditions are built from Checks; the Commander cannot define new kinds of Check.
+One verifiable condition from the system's fixed catalogue (for example: a command exits with 0, CI is green, the Pull Request exists, the Pull Request has no open comments, an LLM judgment against a written criterion), with its parameters. An LLM judgment is an explicit test of a result: the Core reads the files the criterion names and judges strictly. Done Conditions and Exit Conditions are built from Checks; the Commander cannot define new kinds of Check.
 _Avoid_: Assertion, validation, test (a test is one thing a Check may run)
 
 **Core**:
-The LLM agent that orchestrates a Mission under the Core Directives of its Assembly: it hands each Pilot its context, checks Done Conditions and Exit Conditions with deterministic tools, decides on Attempts and Loops, and stands in for the Commander: where a Mission would wait for them it takes a Resolution, and sends the Mission to Needs Attention only when the decision is not its own to take. It never declares a Mission Completed on its own, never changes the structure of the Assembly and never touches code itself. On the Assembly's clock it is the circle in the centre.
+The LLM agent that orchestrates a Mission under the Core Directives of its Assembly: it hands each Pilot its context, checks Done Conditions and Exit Conditions with deterministic tools, decides on Attempts and Loops, and stands in for the Commander: where a Mission would wait for them it takes a Resolution, and sends the Mission to Needs Attention only when the decision is not its own to take. It trusts a Handover that says `done`; it can read the Task folder and the Workspace, and does so only before a Resolution and in an LLM judgment. It never declares a Mission Completed on its own, never changes the structure of the Assembly and never touches code itself. On the Assembly's clock it is the circle in the centre.
 _Avoid_: Orchestrator, supervisor, manager, brain, Master Agent (former name)
 
 **Core Directives**:

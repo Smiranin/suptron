@@ -1,4 +1,9 @@
-import { CORE_CALL_INSTRUCTIONS, CORE_PREAMBLE, issuesFromZod } from '@suptron/runtime';
+import {
+  CORE_CALL_INSTRUCTIONS,
+  CORE_PREAMBLE,
+  issuesFromZod,
+  withHandover,
+} from '@suptron/runtime';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { ServerContext } from '../context.js';
@@ -28,7 +33,7 @@ export function registerPromptRoutes(app: FastifyInstance, ctx: ServerContext): 
       return {
         system: ctx.engine.systemText({
           role: 'pilot',
-          systemPrompt: { rules, instructions },
+          systemPrompt: { rules, instructions: withHandover(instructions) },
           allowQuestions,
         }),
       };

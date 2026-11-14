@@ -14,6 +14,7 @@ import {
 import type { MissionsListState, ReadyMissionState, SlotVisualState } from './types';
 
 export const CAUSE_LABELS: Record<NeedsAttentionCause, string> = {
+  handover_not_done: 'Handover not done',
   attempt_limit: 'Attempt limit reached',
   loop_limit: 'Loop limit reached',
   last_exit_condition_failed: 'Last Exit Condition failed',

@@ -1,4 +1,5 @@
 import type { Cost } from '../domain/cost.js';
+import { readHandoverStatus, type HandoverStatus } from '../domain/handover.js';
 import type { Answers, Question } from '../domain/transcript.js';
 import type { ActivityPhase } from '../events/mission-event.js';
 import type {
@@ -23,7 +24,15 @@ export type FakeStep =
   | { question: Question[] }
   /** Asks several questions at once, as parallel tool calls do, and waits for every answer. */
   | { questionsAtOnce: Question[][] }
-  | { result: { output?: string; structured?: unknown; cost?: Partial<Cost> } }
+  | {
+      result: {
+        output?: string;
+        structured?: unknown;
+        cost?: Partial<Cost>;
+        /** The Status a Pilot hands over with; null leaves the Status line out. Default `done`. */
+        handover?: HandoverStatus | null;
+      };
+    }
   | { error: string }
   | { delay: number }
   /** Holds the agent until the promise resolves (for Stop tests). */
@@ -44,6 +53,11 @@ export interface FakeCall {
 export type FakeScript = FakeStep[] | ((call: FakeCall) => FakeStep[]);
 
 export const DEFAULT_FAKE_COST: Cost = { usd: 0.01, inputTokens: 100, outputTokens: 50 };
+
+/** A Slot Output as a Pilot of the FakeEngine ends it: with the Status line of a Handover. */
+export function handedOver(output: string, status: HandoverStatus = 'done'): string {
+  return `${output}\n\nStatus: ${status}`;
+}
 
 export function scriptKey(role: AgentSpec['role'], label: string): string {
   return `${role}:${label}`;
@@ -138,6 +152,17 @@ class FakeAgentHandle implements AgentHandle {
 
   async close(): Promise<void> {}
 
+  /**
+   * A Pilot's output gets the Status line a real Pilot is told to write, unless the script wrote
+   * one itself, asked for none, or the output is empty (an empty output is an Engine error).
+   */
+  private output(result: { output?: string; handover?: HandoverStatus | null }): string {
+    const output = result.output ?? '';
+    const status = result.handover === undefined ? 'done' : result.handover;
+    if (this.spec.role !== 'pilot' || status === null || output.trim() === '') return output;
+    return readHandoverStatus(output) === null ? handedOver(output, status) : output;
+  }
+
   async *events(): AsyncIterable<AgentEvent> {
     if (this.prompt === null) throw new Error('FakeEngine: send() must be called before events()');
     const key = scriptKey(this.spec.role, this.spec.label);
@@ -231,7 +256,7 @@ class FakeAgentHandle implements AgentHandle {
         } else if ('result' in step) {
           yield {
             type: 'result',
-            output: step.result.output ?? '',
+            output: this.output(step.result),
             ...(step.result.structured !== undefined && { structured: step.result.structured }),
             cost: { ...DEFAULT_FAKE_COST, ...step.result.cost },
             sessionId: this.sessionIdValue,

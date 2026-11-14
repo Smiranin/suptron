@@ -1,3 +1,4 @@
+import { defaultMissionTitle } from '@suptron/runtime/browser';
 import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it } from 'vitest';
@@ -12,6 +13,7 @@ describe('Start Mission dialog', () => {
       project: 'my-app',
       assembly: 'feature',
       task: { kind: 'path', path: '/tasks/my-task' },
+      title: 'my-task',
       checkoutPath: '/repos/my-app-wt',
     });
     const user = userEvent.setup();
@@ -133,14 +135,19 @@ describe('Start Mission dialog', () => {
       within(dialog).getByLabelText('Task text'),
       '# Add login{enter}{enter}Users sign in with email.',
     );
+    // an empty Title shows what the Mission will be called; a typed one is sent
+    const title = within(dialog).getByLabelText('Title (optional)');
+    expect(title).toHaveAttribute('placeholder', defaultMissionTitle('my-app', new Date()));
+    await user.type(title, '  Login with email ');
     await user.click(within(dialog).getByRole('button', { name: /Start/ }));
     await waitFor(() => expect(home.requestsTo('POST', '/api/missions')).toHaveLength(1));
     expect(home.requestsTo('POST', '/api/missions')[0]!.body).toMatchObject({
       task: { kind: 'text', text: '# Add login\n\nUsers sign in with email.' },
+      title: 'Login with email',
       checkoutPath: '/repos/my-app',
     });
     await waitFor(() => expect(router.state.location.pathname).toBe('/missions/m1'));
-    expect(home.missions.get('m1')!.summary.taskTitle).toBe('Add login');
+    expect(home.missions.get('m1')!.summary.taskTitle).toBe('Login with email');
     expect(JSON.parse(window.localStorage.getItem('suptron.startMission.my-app')!)).toEqual({
       checkoutPath: '/repos/my-app',
       taskPath: '/tasks/my-task',

@@ -1,24 +1,6 @@
 import { mkdir, readdir, rm, writeFile } from 'node:fs/promises';
-import { basename, extname, join } from 'node:path';
+import { join } from 'node:path';
 import { MISSION_TASK_FILE, missionRelDir, missionTaskRelPath } from '../config/paths.js';
-
-const FALLBACK_TITLE = 'task';
-/** Titles feed branch names and list rows, so a long first line is cut. */
-const MAX_TITLE_LENGTH = 80;
-
-/** The first non-empty line of a text Task, without a Markdown heading marker. */
-export function titleFromTaskText(text: string): string {
-  const line = text
-    .split(/\r?\n/)
-    .map((l) => l.replace(/^\s*#+\s*/, '').trim())
-    .find((l) => l !== '');
-  return line ? line.slice(0, MAX_TITLE_LENGTH) : FALLBACK_TITLE;
-}
-
-/** The file name without its extension, or the folder name. */
-export function titleFromTaskPath(path: string, isFile: boolean): string {
-  return (isFile ? basename(path, extname(path)) : basename(path)) || FALLBACK_TITLE;
-}
 
 /** The folder of one Mission, under `SUPTRON_HOME`. */
 export function missionFolder(home: string, id: string): string {

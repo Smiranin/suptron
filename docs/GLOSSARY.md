@@ -51,7 +51,7 @@ The block every Pilot ends its Slot Output with: what it produced, what is done,
 _Avoid_: Report, summary, handoff, sign-off
 
 **Loop**:
-A rule on a Slot: "if my Done Condition does not hold, go back to Slot X", with a Loop limit: how many times the work may go back (default 3, so the looping Slot runs up to four times). At the limit the Core takes a Resolution: its `retry` grants one more round (the target works again with the Core's note and the last findings, then the looping Slot runs once), and when that fails the limit is reached again. The Commander's Retry from Needs Attention grants a round the same way.
+A rule on a Slot: "if my Done Condition does not hold, go back to Slot X", with a Loop limit: how many times the work may go back (its own, or the default of the Core Directives: 3, so the looping Slot runs up to four times). At the limit the Core takes a Resolution: its `retry` grants one more round (the target works again with the Core's note and the last findings, then the looping Slot runs once), and when that fails the limit is reached again. The Commander's Retry from Needs Attention grants a round the same way.
 _Avoid_: Cycle, retry (a retry is one Slot repeating, a Loop is several)
 
 **Memory Mode**:
@@ -111,7 +111,7 @@ The moment a Pilot asks the Commander a question and the Mission waits for the a
 _Avoid_: Approval gate, pause point, manual step, autonomy level
 
 **Mission**:
-One execution of an Assembly for one Task in the Project's Workspace: a Checkout for a repository (under the Project's Git conventions; the system itself never creates or switches branches, a Slot does when its Instructions say so), the folder, or the Mission folder. Every Mission has a Mission folder `missions/<id>/` in `SUPTRON_HOME`, removed on Dismiss. Several Missions may be active at the same time, also on the same Project: in different Checkouts, or any number on a Project without a folder.
+One execution of an Assembly for one Task in the Project's Workspace: a Checkout for a repository (under the Project's Git conventions; the system itself never creates or switches branches, a Slot does when its Instructions say so), the folder, or the Mission folder. Every Mission has a title, given by the Commander at start or made of the Project name and the date, which names the Mission and, through the Git conventions, what it produces. Every Mission has a Mission folder `missions/<id>/` in `SUPTRON_HOME`, removed on Dismiss. Several Missions may be active at the same time, also on the same Project: in different Checkouts, or any number on a Project without a folder.
 _Avoid_: Job, execution, session, Run (former name)
 
 **Checkout**:

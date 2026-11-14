@@ -1,4 +1,4 @@
-import type { AssemblyFile } from '@suptron/runtime/browser';
+import { DEFAULTS, type AssemblyFile } from '@suptron/runtime/browser';
 import {
   angleOf,
   arcPath,
@@ -55,7 +55,10 @@ export function slotAngle(index: number, slotCount: number): number {
 }
 
 /** The pure layout of an Assembly as a clock: positions, arcs, chords and arrows, nothing stored. */
-export function layoutClock(doc: Pick<AssemblyFile, 'slots'>): ClockLayout {
+/** `core` gives the Loop limit of a Loop that states none; without it the system default is drawn. */
+export function layoutClock(
+  doc: Pick<AssemblyFile, 'slots'> & { core?: Pick<AssemblyFile['core'], 'defaultLoopLimit'> },
+): ClockLayout {
   const n = doc.slots.length;
   const radius = clockRadius(n);
   const half = radius + CLOCK_MARGIN;
@@ -87,7 +90,7 @@ export function layoutClock(doc: Pick<AssemblyFile, 'slots'>): ClockLayout {
     loops.push({
       from: slot.name,
       to: slot.loop.target,
-      limit: slot.loop.limit,
+      limit: slot.loop.limit ?? doc.core?.defaultLoopLimit ?? DEFAULTS.core.defaultLoopLimit,
       path: chordPath(center, radius, from.angle, to.angle),
       badgeAt: quadraticPoint(from.position, control, to.position, 0.5),
     });

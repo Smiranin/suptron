@@ -22,7 +22,6 @@ export const DEFAULTS = {
     resolutionLimit: 3,
     instructions: '',
   },
-  loopLimit: 3,
   slot: {
     memoryMode: 'fresh' as const,
     context: {

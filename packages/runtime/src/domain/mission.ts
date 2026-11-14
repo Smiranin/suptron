@@ -60,13 +60,26 @@ export const CORE_SLOT_NAME = 'core';
  */
 export type MissionTask = { kind: 'path'; path: string } | { kind: 'text'; text: string };
 
+/** Titles feed branch names and list rows, so they stay short. */
+export const MISSION_TITLE_MAX_LENGTH = 80;
+
+/**
+ * The title of a Mission started without one: the Project and the Commander's local date
+ * (`dojo-content-2026-11-12`). Two such Missions of one Project on one day share it; where the
+ * title makes a branch name, the Commander gives a title.
+ */
+export function defaultMissionTitle(projectName: string, at: Date): string {
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${projectName}-${at.getFullYear()}-${pad(at.getMonth() + 1)}-${pad(at.getDate())}`;
+}
+
 export interface MissionSummary {
   id: string;
   projectName: string;
   assemblyName: string;
   /** The Task folder or file: the given path, or the Mission folder for a text Task. */
   taskPath: string;
-  /** The display name of the Task: the file or folder name, or the first line of the text. */
+  /** The title given at start, or the Project name and the date; names what the Mission produces. */
   taskTitle: string;
   workItemId?: string;
   state: MissionState;

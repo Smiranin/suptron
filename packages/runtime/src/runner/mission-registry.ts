@@ -6,6 +6,8 @@ import type { AssemblyFile } from '../config/schemas.js';
 import { buildSnapshot, type MissionSnapshot } from '../config/snapshot.js';
 import { EngineCoreAgent } from '../core-agent/index.js';
 import {
+  MISSION_TITLE_MAX_LENGTH,
+  defaultMissionTitle,
   isActiveState,
   type MissionAttention,
   type MissionResult,
@@ -38,14 +40,14 @@ import {
   removeMissionFolder,
   storeTaskText,
   textTaskDocument,
-  titleFromTaskPath,
-  titleFromTaskText,
 } from './task.js';
 
 export interface StartMissionInput {
   project: string;
   assembly: string;
   task: MissionTask;
+  /** Names the Mission and what it produces; empty or absent means the Project name and the date. */
+  title?: string;
   workItemId?: string;
   /** Required for a `repository` Project, refused for the other kinds (SPEC FR-9). */
   checkoutPath?: string;
@@ -53,7 +55,7 @@ export interface StartMissionInput {
 }
 
 export type StartIssueField =
-  'taskPath' | 'taskText' | 'assembly' | 'workItemId' | WorkspaceIssueField;
+  'taskPath' | 'taskText' | 'title' | 'assembly' | 'workItemId' | WorkspaceIssueField;
 
 export class MissionStartError extends Error {
   constructor(readonly issues: { field: StartIssueField; message: string }[]) {
@@ -240,6 +242,13 @@ export class MissionRegistry {
     ) {
       issues.push({ field: 'workItemId', message: 'Use letters, digits, ".", "_" and "-" only' });
     }
+    const title = input.title?.trim() ?? '';
+    if (title.length > MISSION_TITLE_MAX_LENGTH) {
+      issues.push({
+        field: 'title',
+        message: `Use at most ${MISSION_TITLE_MAX_LENGTH} characters`,
+      });
+    }
     let taskIsFile = false;
     if (input.task.kind === 'path') {
       try {
@@ -287,6 +296,7 @@ export class MissionRegistry {
         document,
         snapshot,
         task,
+        title,
         taskPath,
         taskIsFile,
         workItemId,
@@ -305,6 +315,8 @@ export class MissionRegistry {
     document: AssemblyFile;
     snapshot: MissionSnapshot;
     task: MissionTask;
+    /** Trimmed; empty when the Commander gave none. */
+    title: string;
     taskPath: string;
     taskIsFile: boolean;
     workItemId: string | undefined;
@@ -312,8 +324,8 @@ export class MissionRegistry {
   }): Promise<MissionSummary> {
     const { id, profile, document, snapshot, task, taskPath, taskIsFile, workItemId, workspace } =
       args;
-    const taskTitle =
-      task.kind === 'path' ? titleFromTaskPath(taskPath, taskIsFile) : titleFromTaskText(task.text);
+    const startedAt = (this.deps.now ?? (() => new Date()))();
+    const taskTitle = args.title || defaultMissionTitle(profile.name, startedAt);
     const taskDocuments =
       task.kind === 'path'
         ? await listTaskDocuments(taskPath, taskIsFile)
@@ -359,7 +371,7 @@ export class MissionRegistry {
         configHome: this.deps.home,
         gitConventions,
         knowledgeSources: resolveKnowledgeSources(profile.knowledgeSources, workspace.cwd),
-        startedAt: (this.deps.now ?? (() => new Date()))().toISOString(),
+        startedAt: startedAt.toISOString(),
       },
       {
         engine: this.deps.engine,

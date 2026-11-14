@@ -79,7 +79,7 @@ macOS; the path must be inside `SUPTRON_HOME`.
 
 ```
 GET    /api/missions                  MissionSummary[]   (every Mission since start; Completed, Stopped and interrupted stay until Dismiss)
-POST   /api/missions                  { project, assembly, task, workItemId?, checkoutPath?, mayAskCommander?: Record<slot, boolean> } → 201 MissionSummary
+POST   /api/missions                  { project, assembly, task, title?, workItemId?, checkoutPath?, mayAskCommander?: Record<slot, boolean> } → 201 MissionSummary
                                       task: { kind: 'path', path } | { kind: 'text', text }; text is stored as missions/<id>/task.md and that folder becomes the Task location
                                       checkoutPath is required for a repository Project and refused for the other kinds (field 'checkoutPath')
                                       400 { issues: { field: 'taskPath' | 'taskText' | 'checkoutPath' | 'workspace' | 'assembly' | 'workItemId', message }[] }
@@ -95,6 +95,7 @@ DELETE /api/missions/:id              204 | 404 | 409 { reason: 'not_finished' }
 
 ```ts
 interface MissionDetail {
+                                    // taskTitle: the `title` given at start (at most 80 characters), or `<project>-<YYYY-MM-DD>` of the start day
   summary: MissionSummary;          // id, projectName, assemblyName, taskPath, taskTitle, workItemId?, state, currentSlot, workspace: { kind, path, branch }, startedAt, cost (estimated), pr?, note?
                                     // workspace.path: the Checkout or the folder, null for kind none; workspace.branch: the Checkout's branch, null otherwise
   assembly: AssemblyFile;           // the document at start, for the clock

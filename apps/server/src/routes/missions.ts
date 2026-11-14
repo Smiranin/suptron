@@ -19,6 +19,7 @@ const startSchema = z.object({
   project: z.string().min(1),
   assembly: z.string().min(1),
   task: taskSchema,
+  title: z.string().optional(),
   workItemId: z.string().optional(),
   /** Required for a repository Project; the registry decides per Workspace kind. */
   checkoutPath: z.string().min(1).optional(),
@@ -34,7 +35,7 @@ const answerSchema = z.object({
 function fieldOf(path: PropertyKey[]): StartIssueField {
   const head = String(path[0] ?? '');
   if (head === 'task') return path[1] === 'text' ? 'taskText' : 'taskPath';
-  if (head === 'checkoutPath' || head === 'workItemId') return head;
+  if (head === 'checkoutPath' || head === 'workItemId' || head === 'title') return head;
   return 'assembly';
 }
 
@@ -73,9 +74,10 @@ export function registerMissionRoutes(app: FastifyInstance, ctx: ServerContext):
       });
     }
     try {
-      const { workItemId, mayAskCommander, checkoutPath, ...rest } = parsed.data;
+      const { title, workItemId, mayAskCommander, checkoutPath, ...rest } = parsed.data;
       const summary = await ctx.registry.start({
         ...rest,
+        ...(title !== undefined && { title }),
         ...(checkoutPath !== undefined && { checkoutPath }),
         ...(workItemId !== undefined && { workItemId }),
         ...(mayAskCommander !== undefined && { mayAskCommander }),

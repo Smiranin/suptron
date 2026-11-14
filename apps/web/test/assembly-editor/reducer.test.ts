@@ -8,9 +8,7 @@ import {
 import { validate } from '../../src/features/assembly-editor/model/validate';
 import { primaryAssembly, primaryUnits } from '../fixtures/primary';
 
-const ctx = { defaultLoopLimit: 3 };
-const run = (...cmds: Command[]) =>
-  cmds.reduce((doc, cmd) => reduce(doc, cmd, ctx), primaryAssembly());
+const run = (...cmds: Command[]) => cmds.reduce((doc, cmd) => reduce(doc, cmd), primaryAssembly());
 const names = (doc: ReturnType<typeof primaryAssembly>) => doc.slots.map((s) => s.name);
 
 describe('reduce', () => {
@@ -50,7 +48,7 @@ describe('reduce', () => {
     expect(validate(doc, primaryUnits(), null).errors.map((e) => e.code)).toContain(
       'exit_condition_required',
     );
-    expect(reduce(primaryAssembly(), { type: 'moveSlot', name: 'nope', toIndex: 1 }, ctx)).toEqual(
+    expect(reduce(primaryAssembly(), { type: 'moveSlot', name: 'nope', toIndex: 1 })).toEqual(
       primaryAssembly(),
     );
   });
@@ -84,14 +82,16 @@ describe('reduce', () => {
     expect('model' in doc.slots[2]!).toBe(false);
   });
 
-  it('setLoop defaults the limit and null removes it', () => {
-    const doc = run({
+  it('setLoop states a limit only when one is given and null removes the Loop', () => {
+    const doc = run({ type: 'setLoop', name: 'publisher', loop: { target: 'implementer' } });
+    expect(doc.slots[4]?.loop).toEqual({ target: 'implementer' });
+    const limited = run({
       type: 'setLoop',
       name: 'publisher',
-      loop: { target: 'implementer', limit: 0 },
+      loop: { target: 'implementer', limit: 5 },
     });
-    expect(doc.slots[4]?.loop).toEqual({ target: 'implementer', limit: 3 });
-    const removed = reduce(doc, { type: 'setLoop', name: 'publisher', loop: null }, ctx);
+    expect(limited.slots[4]?.loop).toEqual({ target: 'implementer', limit: 5 });
+    const removed = reduce(doc, { type: 'setLoop', name: 'publisher', loop: null });
     expect(removed.slots[4]?.loop).toBeUndefined();
   });
 
@@ -107,15 +107,11 @@ describe('reduce', () => {
       limit: 2,
       acceptCondition: accept,
     });
-    const cleared = reduce(
-      doc,
-      {
-        type: 'setLoop',
-        name: 'publisher',
-        loop: { target: 'implementer', limit: 2, acceptCondition: [] },
-      },
-      ctx,
-    );
+    const cleared = reduce(doc, {
+      type: 'setLoop',
+      name: 'publisher',
+      loop: { target: 'implementer', limit: 2, acceptCondition: [] },
+    });
     expect(cleared.slots[4]?.loop).toEqual({ target: 'implementer', limit: 2 });
   });
 
@@ -141,7 +137,7 @@ describe('reduce', () => {
     ];
     let doc = primaryAssembly();
     for (const cmd of commands) {
-      doc = reduce(doc, cmd, ctx);
+      doc = reduce(doc, cmd);
       const slotNames = names(doc);
       expect(new Set(slotNames).size).toBe(slotNames.length);
       expect(doc.slots.at(-1)?.exitPoint).toBe(true);

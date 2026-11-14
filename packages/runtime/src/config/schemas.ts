@@ -160,7 +160,8 @@ export type SlotContextFile = z.infer<typeof slotContextSchema>;
 
 export const loopRuleSchema = z.object({
   target: z.string().min(1),
-  limit: z.number().int().positive().default(DEFAULTS.loopLimit),
+  /** Absent: the Core Directives' default Loop limit applies. */
+  limit: z.number().int().positive().optional(),
   /**
    * Judged once the limit is exhausted and the Done Condition still fails: when it holds the
    * Slot counts as done (the Mission moves on), otherwise the Loop limit is a Needs Attention as

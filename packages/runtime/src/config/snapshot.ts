@@ -28,7 +28,8 @@ export interface ResolvedSlot {
   attemptLimit: number;
   memoryMode: MemoryMode;
   context: ResolvedContext;
-  loop?: LoopRule;
+  /** The Loop rule with its limit resolved against the Core Directives. */
+  loop?: LoopRule & { limit: number };
   exitPoint: boolean;
   exitCondition: Check[];
 }

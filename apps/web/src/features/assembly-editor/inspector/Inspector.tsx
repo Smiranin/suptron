@@ -29,6 +29,7 @@ import { X } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { CheckListEditor } from '../../../components/check-list-editor';
 import { CollapsibleSection } from '../../../components/collapsible-section';
+import { LimitField } from '../../../components/limit-field';
 import { Markdown } from '../../../components/markdown';
 import { PromptPreviewButton } from '../../../components/prompt-preview-dialog';
 import { MarkdownField } from '../../../components/markdown-field';
@@ -358,7 +359,7 @@ function SlotInspector({
                           ? null
                           : {
                               target: v,
-                              limit: slot.loop?.limit ?? defaultLoopLimit,
+                              limit: slot.loop?.limit,
                               acceptCondition: slot.loop?.acceptCondition ?? [],
                             },
                     })
@@ -391,23 +392,22 @@ function SlotInspector({
                       How many times the work may go back to the target. At the limit the Core
                       decides: one more round with its note, or Needs Attention.
                     </p>
-                    <Input
+                    <LimitField
                       id="loop-limit"
-                      type="number"
                       min={1}
-                      value={slot.loop.limit ?? defaultLoopLimit}
-                      onChange={(e) => {
-                        const n = Math.floor(Number(e.target.value));
+                      value={slot.loop.limit}
+                      defaultValue={defaultLoopLimit}
+                      onChange={(limit) =>
                         dispatch({
                           type: 'setLoop',
                           name: slot.name,
                           loop: {
                             target: slot.loop!.target,
-                            limit: Number.isFinite(n) && n > 0 ? n : defaultLoopLimit,
+                            limit,
                             acceptCondition: slot.loop!.acceptCondition ?? [],
                           },
-                        });
-                      }}
+                        })
+                      }
                     />
                   </div>
                   <div className="flex flex-col gap-1">
@@ -424,7 +424,7 @@ function SlotInspector({
                           name: slot.name,
                           loop: {
                             target: slot.loop!.target,
-                            limit: slot.loop!.limit ?? defaultLoopLimit,
+                            limit: slot.loop!.limit,
                             acceptCondition,
                           },
                         })
@@ -446,19 +446,12 @@ function SlotInspector({
           )}
           <div className="flex flex-col gap-1">
             <Label htmlFor="attempt-limit">Attempt limit</Label>
-            <Input
+            <LimitField
               id="attempt-limit"
-              type="number"
               min={1}
-              placeholder={String(effective.attemptLimit.inherited)}
-              value={slot.attemptLimit ?? ''}
-              onChange={(e) => {
-                const n = Math.floor(Number(e.target.value));
-                patch({
-                  attemptLimit:
-                    e.target.value.trim() === '' || !Number.isFinite(n) || n < 1 ? undefined : n,
-                });
-              }}
+              value={slot.attemptLimit}
+              defaultValue={effective.attemptLimit.inherited}
+              onChange={(attemptLimit) => patch({ attemptLimit })}
             />
             <p className="text-muted-foreground text-xs">
               Default from the Core Directives: {effective.attemptLimit.inherited}.

@@ -2,7 +2,7 @@ import type { MissionDetail, MissionSummary, MissionTask } from '@suptron/runtim
 import { HttpError, NotFoundError, request } from './client';
 
 export type StartIssueField =
-  'taskPath' | 'taskText' | 'checkoutPath' | 'workspace' | 'assembly' | 'workItemId';
+  'taskPath' | 'taskText' | 'title' | 'checkoutPath' | 'workspace' | 'assembly' | 'workItemId';
 
 export class MissionValidationError extends Error {
   constructor(readonly issues: { field: StartIssueField; message: string }[]) {
@@ -23,6 +23,8 @@ export interface StartMissionRequest {
   project: string;
   assembly: string;
   task: MissionTask;
+  /** Absent: the server names the Mission after the Project and the date. */
+  title?: string;
   workItemId?: string;
   /** Only for a repository Project. */
   checkoutPath?: string;

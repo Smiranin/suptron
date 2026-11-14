@@ -2,32 +2,10 @@
 
 The plan agreed with the Commander on 2026-11-12, in the order of work: A, B, D, C, F; E along the way. A group
 leaves this file when it is done; the file is deleted after the last one. Done: A (Handover and the Core) and
-B (Loop), both in ADR-0007. The groups below are not implemented yet.
+B (Loop), both in ADR-0007, and D (Mission title, limit fields). The groups below are not implemented yet.
 
 The Units, the Project `dojo-content` and the Assemblies `cards` and `cards-write` live in `~/.suptron` (the
 only copies). The Commander commits; never commit or push unasked.
-
-## D. Small UI
-
-### Title on the start form
-
-- An optional Title field. Empty means the Project name and the date (`dojo-content-2026-11-12`).
-- The Mission's name and slug come from it; the first line of a text Task and the name of the Task folder
-  stop serving as the title. No transliteration.
-- Known and accepted: two Missions of one Project on one day without a Title get the same name; where a
-  Project makes branches from the slug, set the Title by hand.
-- Files: the start form's schema and dialog, the start request, `runner/mission-registry.ts`, tests,
-  `docs/api.md`.
-
-### Limit fields
-
-- One shared number field that keeps the typed text and applies it on blur; an empty field shows the
-  default as a placeholder instead of filling it in. Today a cleared field snaps back to the default, so
-  `0` cannot be typed (it becomes `20`).
-- It replaces "Core decision limit", "Default Attempt limit", "Default Loop limit" and the Slot's Loop
-  limit.
-- Files: a new component in `apps/web/src/components`, `CoreDirectivesPanel.tsx`, `Inspector.tsx`, the
-  editor tests.
 
 ## C. Mission life cycle
 

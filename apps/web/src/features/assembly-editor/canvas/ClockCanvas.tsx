@@ -75,7 +75,7 @@ export function ClockCanvas(props: ClockCanvasProps) {
   );
   const ring = useRingDrag(layout, container, viewportState, onMove, onCardClick);
   const loop = useLoopDrag(layout, container, viewportState, (from, target) =>
-    dispatch({ type: 'setLoop', name: from, loop: { target, limit: 0 } }),
+    dispatch({ type: 'setLoop', name: from, loop: { target } }),
   );
 
   const summaries = useMemo(

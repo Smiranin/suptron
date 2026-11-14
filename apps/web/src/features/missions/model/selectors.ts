@@ -118,7 +118,8 @@ export function missionDecorations(state: ReadyMissionState): MissionDecorations
     const firedAt = state.loopFiredAt[slot.name];
     loops[slot.name] = {
       iterations: state.slots[slot.name]?.loops ?? 0,
-      limit: slot.loop.limit ?? state.assembly.core.defaultLoopLimit ?? DEFAULTS.loopLimit,
+      limit:
+        slot.loop.limit ?? state.assembly.core.defaultLoopLimit ?? DEFAULTS.core.defaultLoopLimit,
       ...(firedAt !== undefined && { firedAt }),
     };
   }

@@ -2,6 +2,7 @@ import {
   DEFAULTS,
   assemblyFileSchema,
   capabilitiesOf,
+  defaultMissionTitle,
   executionKeyOf,
   profileFileSchema,
   resolveCore,
@@ -227,6 +228,7 @@ export class FakeHome {
     project: string;
     assembly: string;
     task: MissionTask;
+    title?: string;
     workItemId?: string;
     checkoutPath?: string;
     mayAskCommander?: Record<string, boolean>;
@@ -236,13 +238,7 @@ export class FakeHome {
     const id = `m${this.nextMissionId++}`;
     const { task } = body;
     const taskPath = task.kind === 'path' ? task.path : `/home/.suptron/missions/${id}`;
-    const taskTitle =
-      task.kind === 'path'
-        ? task.path.replace(/\/+$/, '').split('/').pop() || task.path
-        : task.text
-            .trim()
-            .split('\n')[0]!
-            .replace(/^#+\s*/, '');
+    const taskTitle = body.title?.trim() || defaultMissionTitle(body.project, new Date());
     const summary: MissionSummary = {
       id,
       projectName: body.project,

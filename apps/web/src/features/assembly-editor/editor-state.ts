@@ -1,5 +1,5 @@
 import type { AssemblyFile } from '@suptron/runtime/browser';
-import { reduce, type Command, type ReduceContext } from './model/reducer';
+import { reduce, type Command } from './model/reducer';
 
 export type Selection = string | 'core' | null;
 export type InspectorTab = 'general' | 'context' | 'done' | 'loop' | 'exit';
@@ -26,14 +26,10 @@ export function initialEditorState(doc: AssemblyFile, etag: string | null): Edit
   return { doc, loadedDoc: doc, etag, selected: null, inspectorOpen: false, tab: 'general' };
 }
 
-export function editorReducer(
-  state: EditorState,
-  action: EditorAction,
-  ctx: ReduceContext,
-): EditorState {
+export function editorReducer(state: EditorState, action: EditorAction): EditorState {
   switch (action.type) {
     case 'command': {
-      const doc = reduce(state.doc, action.cmd, ctx);
+      const doc = reduce(state.doc, action.cmd);
       let selected = state.selected;
       if (action.cmd.type === 'removeSlot' && selected === action.cmd.name) selected = null;
       if (action.cmd.type === 'renameSlot' && selected === action.cmd.name) {

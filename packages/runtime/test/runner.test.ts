@@ -1,6 +1,6 @@
 import { mkdtemp, readdir, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { basename, join } from 'node:path';
+import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   MissionRegistry,
@@ -15,6 +15,7 @@ import {
   type ProfileFile,
   type Question,
   type UnitFile,
+  defaultMissionTitle,
   withHandover,
 } from '../src/index.js';
 import {
@@ -68,6 +69,7 @@ interface Harness {
       toggles?: Record<string, boolean>;
       workItemId?: string;
       task?: MissionTask;
+      title?: string;
     },
   ): Promise<string>;
   waitFor(predicate: (events: MissionEvent[]) => boolean, timeoutMs?: number): Promise<void>;
@@ -142,6 +144,7 @@ async function harness(
         task: overrides.task ?? { kind: 'path', path: taskDir },
         ...(checkoutPath !== undefined && { checkoutPath }),
         ...(overrides.workItemId !== undefined && { workItemId: overrides.workItemId }),
+        ...(overrides.title !== undefined && { title: overrides.title }),
         ...(overrides.toggles && { mayAskCommander: overrides.toggles }),
       });
       return summary.id;
@@ -224,7 +227,8 @@ describe('Runner scenarios', () => {
       slots.reduce((sum, s) => sum + s.cost.usd, 0),
     );
     expect(h.registry.isCheckoutBusy(h.repo.clonePath)).toBeNull();
-    expect(h.registry.get(id)!.summary.taskTitle).toBe(basename(h.taskDir));
+    // without a Title the Mission is named after the Project and the day
+    expect(h.registry.get(id)!.summary.taskTitle).toBe(defaultMissionTitle('my-app', new Date()));
     // git reports the Checkout by its realpath (/private/var on macOS)
     expect(h.registry.get(id)!.summary.workspace).toEqual({
       kind: 'repository',
@@ -238,17 +242,20 @@ describe('Runner scenarios', () => {
     await expect(stat(missionDir)).rejects.toMatchObject({ code: 'ENOENT' });
   });
 
-  it('stores a text Task in the Mission folder, titles it from the first line, removes it on Dismiss', async () => {
+  it('stores a text Task in the Mission folder, takes the Title given at start, removes it on Dismiss', async () => {
     h = await harness([unit('a', [PASS])], [linear([{ name: 'a', unit: 'a' }])]);
     await expect(
       h.start('feature', { task: { kind: 'text', text: '  \n ' } }),
     ).rejects.toMatchObject({ issues: [{ field: 'taskText' }] });
     const text = '\n## Add login\n\nUsers sign in with email. See https://example.test/spec';
-    const id = await h.start('feature', { task: { kind: 'text', text } });
+    await expect(
+      h.start('feature', { task: { kind: 'text', text }, title: 'x'.repeat(81) }),
+    ).rejects.toMatchObject({ issues: [{ field: 'title' }] });
+    const id = await h.start('feature', { task: { kind: 'text', text }, title: '  Sign in ' });
     await h.waitFor((es) => es.some((e) => e.type === 'mission.completed'));
     const summary = h.registry.get(id)!.summary;
     expect(summary.taskPath).toBe(join(h.home, 'missions', id));
-    expect(summary.taskTitle).toBe('Add login');
+    expect(summary.taskTitle).toBe('Sign in');
     expect(await readFile(join(summary.taskPath, 'task.md'), 'utf8')).toBe(`${text}\n`);
     const bundle = coreCallInput(composeCalls(h.engine, 'a')[0]!.prompt) as {
       bundle: { taskDocuments: string[] };

@@ -1,5 +1,4 @@
 import {
-  DEFAULTS,
   uniqueSlotName,
   type AssemblyFile,
   type Check,
@@ -21,12 +20,9 @@ export type Command =
 /** The Loop rule as the editor sets it; an empty Accept Condition is dropped from the file. */
 export interface LoopPatch {
   target: string;
-  limit: number;
+  /** undefined: the Core Directives' default Loop limit applies and the file states none. */
+  limit?: number | undefined;
   acceptCondition?: Check[];
-}
-
-export interface ReduceContext {
-  defaultLoopLimit: number;
 }
 
 /** Drops keys whose value is `undefined`, so a patch can remove a Slot override. */
@@ -84,7 +80,7 @@ function renameReferences(slots: SlotFile[], name: string, newName: string): Slo
 }
 
 /** Loops and context references that point forward after a move are invalid; keep them so validation reports them (the editor never silently deletes data on reorder). */
-export function reduce(doc: AssemblyFile, cmd: Command, ctx: ReduceContext): AssemblyFile {
+export function reduce(doc: AssemblyFile, cmd: Command): AssemblyFile {
   switch (cmd.type) {
     case 'replaceDoc':
       return cmd.doc;
@@ -147,7 +143,7 @@ export function reduce(doc: AssemblyFile, cmd: Command, ctx: ReduceContext): Ass
           ...s,
           loop: {
             target: cmd.loop.target,
-            limit: cmd.loop.limit || ctx.defaultLoopLimit || DEFAULTS.loopLimit,
+            ...(cmd.loop.limit !== undefined && { limit: cmd.loop.limit }),
             ...(acceptCondition.length > 0 && { acceptCondition }),
           },
         };

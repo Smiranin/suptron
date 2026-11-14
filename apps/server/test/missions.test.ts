@@ -1,11 +1,12 @@
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { basename, join } from 'node:path';
+import { join } from 'node:path';
 import {
   briefAssembly,
   briefUnits,
   coreCallName,
   defaultCoreScript,
+  defaultMissionTitle,
   folderProfile,
   noneProfile,
   type MissionDetail,
@@ -97,13 +98,13 @@ describe('Missions routes', () => {
     const first = await s.app.inject({
       method: 'POST',
       url: '/api/missions',
-      payload: s.startBody({ workItemId: 'ABC-1' }),
+      payload: s.startBody({ workItemId: 'ABC-1', title: '  Add login ' }),
     });
     expect(first.statusCode).toBe(201);
     expect(first.json()).toMatchObject({
       state: 'running',
       taskPath: s.taskDir,
-      taskTitle: basename(s.taskDir),
+      taskTitle: 'Add login',
       workItemId: 'ABC-1',
       workspace: { kind: 'repository', branch: 'main' },
       cost: { estimated: true },
@@ -141,7 +142,7 @@ describe('Missions routes', () => {
     expect(none.statusCode).toBe(201);
     expect(none.json()).toMatchObject({
       state: 'running',
-      taskTitle: 'Q',
+      taskTitle: defaultMissionTitle('research', new Date()),
       workspace: { kind: 'none', path: null, branch: null },
     });
     await s.waitFor((es) => es.some((e) => e.type === 'mission.completed'));

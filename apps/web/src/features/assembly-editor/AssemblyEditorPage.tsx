@@ -35,12 +35,7 @@ import { useViewportSize } from '../clock/use-viewport-size';
 import { LaunchButton } from '../missions/start/LaunchButton';
 import { ClockCanvas } from './canvas/ClockCanvas';
 import { usePaletteDrop } from './canvas/usePaletteDrop';
-import {
-  editorReducer,
-  initialEditorState,
-  type EditorAction,
-  type EditorState,
-} from './editor-state';
+import { editorReducer, initialEditorState } from './editor-state';
 import { Inspector } from './inspector/Inspector';
 import { IssuesList } from './IssuesList';
 import { layoutClock, type Viewport } from './model/layout';
@@ -224,12 +219,6 @@ interface AssemblyEditorProps {
   viewport?: Viewport;
 }
 
-function reducer(state: EditorState, action: EditorAction): EditorState {
-  return editorReducer(state, action, {
-    defaultLoopLimit: state.doc.core.defaultLoopLimit ?? DEFAULTS.core.defaultLoopLimit,
-  });
-}
-
 function AssemblyEditor({
   project,
   assembly,
@@ -240,7 +229,7 @@ function AssemblyEditor({
   capabilities,
   viewport: fixedViewport,
 }: AssemblyEditorProps) {
-  const [state, dispatchAction] = useReducer(reducer, undefined, () =>
+  const [state, dispatchAction] = useReducer(editorReducer, undefined, () =>
     initialEditorState(initialDoc, initialEtag),
   );
   const dispatch = useCallback((cmd: Command) => dispatchAction({ type: 'command', cmd }), []);

@@ -2,6 +2,7 @@ import { DEFAULTS, type AssemblyFile } from '@suptron/runtime/browser';
 import { Input } from '@suptron/ui/components/input';
 import { Label } from '@suptron/ui/components/label';
 import { CollapsibleSection } from '../../../components/collapsible-section';
+import { LimitField } from '../../../components/limit-field';
 import { MarkdownField } from '../../../components/markdown-field';
 import { ModelSelect } from '../../../components/model-select';
 import { PromptPreview, PromptPreviewButton } from '../../../components/prompt-preview-dialog';
@@ -16,23 +17,16 @@ export function CoreDirectivesPanel({
   dispatch: (cmd: Command) => void;
 }) {
   const core = doc.core;
-  /** An empty or out-of-range entry clears the field, so its default applies. */
-  const number = (
-    key: 'defaultAttemptLimit' | 'defaultLoopLimit' | 'resolutionLimit',
-    raw: string,
-    min = 1,
-  ) => {
-    const value = Number(raw);
-    dispatch({
-      type: 'patchCore',
-      patch: {
-        [key]:
-          raw.trim() === '' || !Number.isFinite(value) || value < min
-            ? undefined
-            : Math.floor(value),
-      },
-    });
-  };
+  /**
+   * A limit equal to its default is shown as the placeholder, the way the file leaves it out;
+   * an emptied field clears the value, so the default applies.
+   */
+  const limit = (key: 'defaultAttemptLimit' | 'defaultLoopLimit' | 'resolutionLimit') => ({
+    value: core[key] === DEFAULTS.core[key] ? undefined : core[key],
+    defaultValue: DEFAULTS.core[key],
+    onChange: (value: number | undefined) =>
+      dispatch({ type: 'patchCore', patch: { [key]: value } }),
+  });
   return (
     <div className="flex flex-col gap-4" data-testid="core-panel">
       <h2 className="text-lg font-bold">Assembly</h2>
@@ -60,34 +54,16 @@ export function CoreDirectivesPanel({
       <div className="grid grid-cols-2 gap-3">
         <div className="flex flex-col gap-1">
           <Label htmlFor="core-attempts">Default Attempt limit</Label>
-          <Input
-            id="core-attempts"
-            type="number"
-            min={1}
-            value={core.defaultAttemptLimit ?? DEFAULTS.core.defaultAttemptLimit}
-            onChange={(e) => number('defaultAttemptLimit', e.target.value)}
-          />
+          <LimitField id="core-attempts" min={1} {...limit('defaultAttemptLimit')} />
         </div>
         <div className="flex flex-col gap-1">
           <Label htmlFor="core-loops">Default Loop limit</Label>
-          <Input
-            id="core-loops"
-            type="number"
-            min={1}
-            value={core.defaultLoopLimit ?? DEFAULTS.core.defaultLoopLimit}
-            onChange={(e) => number('defaultLoopLimit', e.target.value)}
-          />
+          <LimitField id="core-loops" min={1} {...limit('defaultLoopLimit')} />
         </div>
       </div>
       <div className="flex flex-col gap-1">
         <Label htmlFor="core-resolutions">Core decision limit</Label>
-        <Input
-          id="core-resolutions"
-          type="number"
-          min={0}
-          value={core.resolutionLimit ?? DEFAULTS.core.resolutionLimit}
-          onChange={(e) => number('resolutionLimit', e.target.value, 0)}
-        />
+        <LimitField id="core-resolutions" min={0} {...limit('resolutionLimit')} />
         <p className="text-muted-foreground text-xs">
           How many times per Slot the Core decides in your place: one more Attempt (at a Loop limit,
           one more round) with its own note, or the result accepted with open points. After that it

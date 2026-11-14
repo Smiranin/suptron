@@ -349,7 +349,10 @@ describe('Assembly editor: inspector', () => {
     await user.click(within(inspector).getByRole('combobox', { name: 'Loop target' }));
     await user.click(await screen.findByRole('option', { name: 'implementer' }));
     await waitFor(() => expect(chords()).toContain('publisher>implementer'));
-    expect(within(inspector).getByLabelText('Loop limit')).toHaveValue(3);
+    // no limit of its own: the field is empty and shows the default of the Core Directives
+    const loopLimit = within(inspector).getByLabelText('Loop limit');
+    expect(loopLimit).toHaveValue(null);
+    expect(loopLimit).toHaveAttribute('placeholder', '3');
     await user.click(within(inspector).getByRole('button', { name: 'Remove Loop' }));
     await waitFor(() => expect(chords()).not.toContain('publisher>implementer'));
   });
@@ -447,9 +450,15 @@ describe('Assembly editor: inspector', () => {
     await user.click(screen.getByRole('button', { name: 'Core' }));
     const panel = await screen.findByTestId('core-panel');
     const field = within(panel).getByLabelText('Core decision limit');
-    expect(field).toHaveValue(3);
-    // typed over the selected value: an emptied field shows its default again
-    await user.type(field, '0', { initialSelectionStart: 0, initialSelectionEnd: 1 });
+    // the default is the placeholder, not a value: the file states no limit
+    expect(field).toHaveValue(null);
+    expect(field).toHaveAttribute('placeholder', '3');
+    // nothing is applied while typing, so a refused entry leaves the field as it was
+    await user.type(field, '-1');
+    await user.tab();
+    expect(field).toHaveValue(null);
+    await user.type(field, '0');
+    await user.tab();
     const request = await save(home, user);
     expect((request.body as AssemblyFile).core.resolutionLimit).toBe(0);
   });

@@ -27,7 +27,12 @@ import { Textarea } from '@suptron/ui/components/textarea';
 import { useNavigate } from '@tanstack/react-router';
 import { ChevronDown, Rocket } from 'lucide-react';
 import { useMemo, useState } from 'react';
-import { capabilitiesOf, type MissionTask } from '@suptron/runtime/browser';
+import {
+  MISSION_TITLE_MAX_LENGTH,
+  capabilitiesOf,
+  defaultMissionTitle,
+  type MissionTask,
+} from '@suptron/runtime/browser';
 import {
   MissionValidationError,
   WorkspaceBusyError,
@@ -136,6 +141,9 @@ export function StartMissionDialog({
   const [taskKind, setTaskKind] = useState<MissionTask['kind']>('path');
   const [taskPath, setTaskPath] = useState(prefill?.taskPath ?? '');
   const [taskText, setTaskText] = useState('');
+  const [title, setTitle] = useState('');
+  // The dialog is mounted per opening, so the date in the placeholder is the day it was opened.
+  const [defaultTitle] = useState(() => defaultMissionTitle(project, new Date()));
   const [workItemId, setWorkItemId] = useState('');
   const [overrides, setOverrides] = useState<Record<string, boolean>>({});
   const [taskStatus, setTaskStatus] = useState<PathStatus | null>(null);
@@ -172,6 +180,7 @@ export function StartMissionDialog({
         project,
         assembly,
         task,
+        ...(title.trim() && { title: title.trim() }),
         ...(workItemId.trim() && { workItemId: workItemId.trim() }),
         ...(hasCheckouts && { checkoutPath }),
         mayAskCommander: toggles,
@@ -270,7 +279,7 @@ export function StartMissionDialog({
                 value={taskText}
                 onChange={(e) => setTaskText(e.target.value)}
                 rows={6}
-                placeholder="What has to be done. The first line becomes the Task title."
+                placeholder="What has to be done."
                 aria-invalid={errors.taskText ? true : undefined}
               />
               <p className="text-muted-foreground text-xs">
@@ -284,6 +293,26 @@ export function StartMissionDialog({
               )}
             </TabsContent>
           </Tabs>
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="start-title">Title (optional)</Label>
+            <Input
+              id="start-title"
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              placeholder={defaultTitle}
+              maxLength={MISSION_TITLE_MAX_LENGTH}
+              aria-invalid={errors.title ? true : undefined}
+            />
+            <p className="text-muted-foreground text-xs">
+              Names the Mission and, where the Project builds them from it, the branch and the Pull
+              Request.
+            </p>
+            {errors.title && (
+              <p className="text-destructive text-xs" role="alert">
+                {errors.title}
+              </p>
+            )}
+          </div>
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="start-work-item">Work Item ID (optional)</Label>
             <Input

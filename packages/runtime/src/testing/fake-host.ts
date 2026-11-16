@@ -1,4 +1,4 @@
-import type { CiStatus, PullRequestRef } from '../domain/host.js';
+import type { CiStatus, MergeStatus, PullRequestRef } from '../domain/host.js';
 import type { HealthStatus } from '../engine/index.js';
 import type { CreateDraftPullRequestArgs, FindPullRequestArgs, RepoHost } from '../host/index.js';
 
@@ -11,9 +11,10 @@ export interface FakePullRequest extends PullRequestRef {
   reviewers: string[];
   ci: CiStatus;
   unresolvedThreads: number;
+  merge: MergeStatus;
 }
 
-/** An in-memory RepoHost: tests create PRs, set CI status and thread counts between steps. */
+/** An in-memory RepoHost: tests create PRs, set CI status, thread counts and mergeability between steps. */
 export class FakeHost implements RepoHost {
   readonly pullRequests = new Map<number, FakePullRequest>();
   readonly calls: { method: string; args: unknown }[] = [];
@@ -33,6 +34,7 @@ export class FakeHost implements RepoHost {
       reviewers: [],
       ci: 'none',
       unresolvedThreads: 0,
+      merge: 'mergeable',
       ...overrides,
     };
     this.pullRequests.set(number, pr);
@@ -54,6 +56,12 @@ export class FakeHost implements RepoHost {
     const pr = this.pullRequests.get(number);
     if (!pr) throw new Error(`No PR #${number}`);
     pr.unresolvedThreads = count;
+  }
+
+  setMergeStatus(number: number, merge: MergeStatus): void {
+    const pr = this.pullRequests.get(number);
+    if (!pr) throw new Error(`No PR #${number}`);
+    pr.merge = merge;
   }
 
   async createDraftPullRequest(args: CreateDraftPullRequestArgs): Promise<PullRequestRef> {
@@ -82,6 +90,11 @@ export class FakeHost implements RepoHost {
   async countUnresolvedReviewThreads(ref: PullRequestRef): Promise<number> {
     this.calls.push({ method: 'countUnresolvedReviewThreads', args: ref });
     return this.pullRequests.get(ref.number)?.unresolvedThreads ?? 0;
+  }
+
+  async getMergeStatus(ref: PullRequestRef): Promise<MergeStatus> {
+    this.calls.push({ method: 'getMergeStatus', args: ref });
+    return this.pullRequests.get(ref.number)?.merge ?? 'unknown';
   }
 
   async healthCheck(): Promise<HealthStatus> {

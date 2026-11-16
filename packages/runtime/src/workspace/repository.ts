@@ -1,5 +1,5 @@
 import type { RepositoryWorkspaceFile } from '../config/schemas.js';
-import type { CiStatus, PullRequestRef } from '../domain/host.js';
+import type { CiStatus, MergeStatus, PullRequestRef } from '../domain/host.js';
 import type { GitClient } from '../git/types.js';
 import type { RepoHost } from '../host/index.js';
 import { renderGitConventions, type MissionValues } from '../templates/index.js';
@@ -87,6 +87,8 @@ export class RepositoryWorkspace implements Workspace {
       ciStatus: (pr: PullRequestRef): Promise<CiStatus> => host.getCiStatus(pr, checkoutPath),
       unresolvedThreads: (pr: PullRequestRef): Promise<number> =>
         host.countUnresolvedReviewThreads(pr, checkoutPath),
+      mergeStatus: (pr: PullRequestRef): Promise<MergeStatus> =>
+        host.getMergeStatus(pr, checkoutPath),
     };
   }
 }

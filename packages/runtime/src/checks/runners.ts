@@ -7,6 +7,8 @@ export const DEFAULT_COMMAND_TIMEOUT_MS = 10 * 60 * 1000;
 export const DEFAULT_CI_POLL_INTERVAL_MS = 15_000;
 /** How long `ci_green` tolerates "no checks" before concluding the repository has no CI. */
 export const DEFAULT_CI_NONE_GRACE_MS = 2 * 60 * 1000;
+/** How long `pr_mergeable` waits for the host to compute mergeability after a push. */
+export const DEFAULT_MERGEABLE_WAIT_MS = 2 * 60 * 1000;
 
 export interface CheckContext {
   workspace: Workspace;
@@ -16,6 +18,7 @@ export interface CheckContext {
   ciWaitTimeoutMs?: number;
   ciPollIntervalMs?: number;
   ciNoneGraceMs?: number;
+  mergeableWaitMs?: number;
   commandTimeoutMs?: number;
   signal?: AbortSignal;
   exec?: ExecFn;
@@ -114,6 +117,50 @@ const runPrNoOpenComments: CheckRunner = async (check, ctx) => {
     : { check, holds: false, detail: `${count} unresolved review thread(s) on #${pr.number}` };
 };
 
+/**
+ * The host computes mergeability in the background, so `unknown` right after a push is normal:
+ * the Check polls until the answer is known. A host that never answers is a timeout, not a
+ * conflict, so the Core takes a Resolution instead of sending the work back to be fixed.
+ */
+const runPrMergeable: CheckRunner = async (check, ctx) => {
+  const host = requireHost(ctx);
+  if (!host) return { check, ...NO_HOST };
+  const { branch, pr } = await currentPullRequest(ctx, host);
+  if (!pr) {
+    return {
+      check,
+      holds: false,
+      detail: branch ? `No Pull Request found for branch ${branch}` : 'Detached HEAD',
+    };
+  }
+  const interval = ctx.ciPollIntervalMs ?? DEFAULT_CI_POLL_INTERVAL_MS;
+  const timeoutMs = ctx.mergeableWaitMs ?? DEFAULT_MERGEABLE_WAIT_MS;
+  const started = Date.now();
+  for (;;) {
+    if (ctx.signal?.aborted) return { check, holds: false, detail: 'interrupted' };
+    const status = await host.mergeStatus(pr);
+    if (status === 'mergeable') {
+      return { check, holds: true, detail: `#${pr.number} merges without conflicts` };
+    }
+    if (status === 'conflicting') {
+      return {
+        check,
+        holds: false,
+        detail: `#${pr.number} has conflicts with its base branch`,
+      };
+    }
+    if (Date.now() - started >= timeoutMs) {
+      return {
+        check,
+        holds: false,
+        timedOut: true,
+        detail: `Mergeability of #${pr.number} still unknown after ${Math.round(timeoutMs / 1000)} seconds`,
+      };
+    }
+    await sleep(interval, ctx.signal);
+  }
+};
+
 const runCiGreen: CheckRunner = async (check, ctx) => {
   const host = requireHost(ctx);
   if (!host) return { check, ...NO_HOST };
@@ -165,6 +212,7 @@ export const CHECK_RUNNERS: Record<Check['kind'], CheckRunner> = {
   command: runCommand,
   pr_exists: runPrExists,
   pr_no_open_comments: runPrNoOpenComments,
+  pr_mergeable: runPrMergeable,
   ci_green: runCiGreen,
   llm_judgment: runLlmJudgment,
 };

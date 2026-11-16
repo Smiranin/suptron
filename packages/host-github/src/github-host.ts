@@ -9,6 +9,7 @@ import {
   type ExecResult,
   type FindPullRequestArgs,
   type HealthStatus,
+  type MergeStatus,
   type PullRequestRef,
   type RepoHost,
 } from '@suptron/runtime';
@@ -61,6 +62,18 @@ export function reduceChecks(rows: readonly CheckRow[]): CiStatus {
   if (rows.some((r) => r.bucket === 'fail' || r.bucket === 'cancel')) return 'failure';
   if (rows.some((r) => r.bucket === 'pending')) return 'pending';
   return 'success';
+}
+
+/** Maps GitHub's `mergeable` (MERGEABLE, CONFLICTING, UNKNOWN) to a MergeStatus. */
+export function toMergeStatus(mergeable: string | undefined): MergeStatus {
+  switch (mergeable) {
+    case 'MERGEABLE':
+      return 'mergeable';
+    case 'CONFLICTING':
+      return 'conflicting';
+    default:
+      return 'unknown';
+  }
 }
 
 /** RepoHost on the GitHub CLI, so the Commander's existing `gh` authentication is used. */
@@ -140,6 +153,16 @@ export class GitHubHost implements RepoHost {
       throw new Error(`gh pr checks returned unexpected output: ${stdout.slice(0, 200)}`);
     }
     return reduceChecks(rows);
+  }
+
+  async getMergeStatus(pr: PullRequestRef, checkoutPath: string): Promise<MergeStatus> {
+    const result = await this.exec(
+      ['pr', 'view', String(pr.number), '--json', 'mergeable'],
+      checkoutPath,
+    );
+    if (result.code !== 0) throw new Error(`gh pr view failed: ${describeFailure(result)}`);
+    const { mergeable } = JSON.parse(result.stdout) as { mergeable?: string };
+    return toMergeStatus(mergeable);
   }
 
   async countUnresolvedReviewThreads(pr: PullRequestRef, checkoutPath: string): Promise<number> {

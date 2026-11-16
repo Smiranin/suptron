@@ -252,7 +252,7 @@ function evaluateGit(args: string[], ctx: CommandContext): Verdict {
   }
 }
 
-const GH_PR_DENIED = new Set(['ready', 'merge', 'close', 'lock', 'unlock']);
+const GH_PR_DENIED = new Set(['merge', 'close', 'lock', 'unlock']);
 const GH_REPO_DENIED = new Set([
   'edit',
   'delete',
@@ -271,7 +271,8 @@ const GH_GROUPS_DENIED = new Set([
   'ssh-key',
   'gpg-key',
 ]);
-const GH_RUN_DENIED = new Set(['rerun', 'cancel', 'delete']);
+// A rerun repeats a job as it is: it changes no CI setting, so a flaky job may be run again.
+const GH_RUN_DENIED = new Set(['cancel', 'delete']);
 const GH_API_DENIED_PATHS = [
   /\/merge(s)?(\/|$|\?)/,
   /\/branches\/[^/]+\/protection/,
@@ -282,7 +283,6 @@ const GH_API_DENIED_PATHS = [
 ];
 const GH_GRAPHQL_DENIED = [
   'mergePullRequest',
-  'markPullRequestReadyForReview',
   'deleteRef',
   'updateRef',
   'enablePullRequestAutoMerge',

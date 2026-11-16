@@ -10,6 +10,7 @@ repository from the working copy.
 | `findPullRequest`              | `gh pr view <branch> --json number,url`                                                      |
 | `getCiStatus`                  | `gh pr checks <number> --json name,state,bucket`                                             |
 | `countUnresolvedReviewThreads` | `gh api graphql` on `pullRequest.reviewThreads`, paginated                                   |
+| `getMergeStatus`               | `gh pr view <number> --json mergeable`                                                       |
 | `healthCheck`                  | `gh auth status`                                                                             |
 
 Unit tests use a captured `exec` and never call GitHub.
@@ -28,4 +29,7 @@ Use a scratch repository you own; nothing here deletes anything, but it does ope
    on one with workflows, and `success` or `failure` once they finish.
 5. Leave one review comment unresolved: `countUnresolvedReviewThreads` returns `1`; resolve it:
    `0`.
-6. Close the draft PR by hand afterwards; the system never does.
+6. `getMergeStatus` returns `mergeable` for a PR without conflicts and `conflicting` after a
+   conflicting change lands on the base branch; right after a push it may be `unknown` for a
+   few seconds.
+7. Close the draft PR by hand afterwards; the system never does.

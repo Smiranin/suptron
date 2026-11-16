@@ -24,6 +24,7 @@ export const checkSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('ci_green') }),
   z.object({ kind: z.literal('pr_exists') }),
   z.object({ kind: z.literal('pr_no_open_comments') }),
+  z.object({ kind: z.literal('pr_mergeable') }),
   z.object({
     kind: z.literal('llm_judgment'),
     criterion: z.string().min(1, 'A criterion is required'),

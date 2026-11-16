@@ -67,7 +67,7 @@ A decision the Core takes in the Commander's place at a point where plain code c
 _Avoid_: Auto-retry, override, self-healing
 
 **Done Condition**:
-The list of Checks that must all hold for a Slot to count as done, so that the Core may move past it. Deterministic where possible (tests pass, CI green, no open comments); an LLM judgment only when configured.
+The list of Checks that must all hold for a Slot to count as done, so that the Core may move past it. Deterministic where possible (tests pass, CI green, no open comments, no conflicts); an LLM judgment only when configured. The Checks run in order and stop at the first that fails, so a quick Check placed before a long one (CI green) spares the wait, and the same Check may stand twice: before the wait and after it.
 _Avoid_: Acceptance criteria, gate, exit condition (that is the condition to leave the Assembly)
 
 **Exit Point**:
@@ -79,7 +79,7 @@ The list of Checks on an Exit Point, evaluated only once the Slot is done: when 
 _Avoid_: Early exit, completion condition, done condition
 
 **Check**:
-One verifiable condition from the system's fixed catalogue (for example: a command exits with 0, CI is green, the Pull Request exists, the Pull Request has no open comments, an LLM judgment against a written criterion), with its parameters. An LLM judgment is an explicit test of a result: the Core reads the files the criterion names and judges strictly. Done Conditions and Exit Conditions are built from Checks; the Commander cannot define new kinds of Check.
+One verifiable condition from the system's fixed catalogue (for example: a command exits with 0, CI is green, the Pull Request exists, the Pull Request merges without conflicts, the Pull Request has no open comments, an LLM judgment against a written criterion), with its parameters. An LLM judgment is an explicit test of a result: the Core reads the files the criterion names and judges strictly. Done Conditions and Exit Conditions are built from Checks; the Commander cannot define new kinds of Check.
 _Avoid_: Assertion, validation, test (a test is one thing a Check may run)
 
 **Core**:
@@ -147,7 +147,7 @@ The single user of the system: the person who starts Missions, answers Human Che
 _Avoid_: User, developer, operator, Owner (former name)
 
 **Laws**:
-The set of actions the system never performs regardless of configuration: writing outside the Workspace and the Task location, touching the configuration home, pushing to or merging into the protected branch (where the Workspace knows one), force-pushing, deleting or renaming any branch, deploying, changing repository, CI or secret settings, marking a Pull Request ready for review. Like the laws of robotics, they are built into the system and no configuration can change them.
+The set of actions the system never performs regardless of configuration: writing outside the Workspace and the Task location, touching the configuration home, pushing to or merging into the protected branch (where the Workspace knows one), force-pushing, deleting or renaming any branch, deploying, changing repository, CI or secret settings (running a CI job again is not a change of settings). Like the laws of robotics, they are built into the system and no configuration can change them.
 _Avoid_: Guardrails, safety rules, Never-list (former name)
 
 **Engine**:

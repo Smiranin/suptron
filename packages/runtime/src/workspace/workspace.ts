@@ -1,5 +1,5 @@
 import type { ProfileFile } from '../config/schemas.js';
-import type { CiStatus, PullRequestRef } from '../domain/host.js';
+import type { CiStatus, MergeStatus, PullRequestRef } from '../domain/host.js';
 import type { GuardContext } from '../engine/index.js';
 import type { GitClient } from '../git/types.js';
 import type { RepoHost } from '../host/index.js';
@@ -15,6 +15,7 @@ export interface HostFacet {
   findPullRequest(): Promise<PullRequestRef | null>;
   ciStatus(pr: PullRequestRef): Promise<CiStatus>;
   unresolvedThreads(pr: PullRequestRef): Promise<number>;
+  mergeStatus(pr: PullRequestRef): Promise<MergeStatus>;
 }
 
 /** The git side of a `repository` Workspace. */

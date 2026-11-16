@@ -522,7 +522,7 @@ describe('Assembly editor: capabilities of the Project', () => {
     await user.click(within(inspector).getByRole('tab', { name: 'Done' }));
     await user.click(within(inspector).getByRole('switch', { name: 'Override Done Condition' }));
     await user.click(within(inspector).getByRole('combobox', { name: 'Check kind' }));
-    expect(await screen.findAllByRole('option')).toHaveLength(5);
+    expect(await screen.findAllByRole('option')).toHaveLength(6);
   });
 });
 

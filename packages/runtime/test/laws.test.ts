@@ -74,7 +74,7 @@ const commandTable: [command: string, context: CommandContext, allowed: boolean]
   ['echo "git push --force"', ctx, true],
   ['git push origin feature/x | tee log.txt', ctx, true],
   // gh
-  ['gh pr ready 12', ctx, false],
+  ['gh pr ready 12', ctx, true],
   ['gh pr merge 12 --squash', ctx, false],
   ['gh pr close 12', ctx, false],
   ['gh pr close 12 --delete-branch', ctx, false],
@@ -88,7 +88,8 @@ const commandTable: [command: string, context: CommandContext, allowed: boolean]
   ['gh secret set X', ctx, false],
   ['gh variable list', ctx, false],
   ['gh workflow run ci.yml', ctx, false],
-  ['gh run rerun 1', ctx, false],
+  ['gh run rerun 1 --failed', ctx, true],
+  ['gh run rerun --job 2', ctx, true],
   ['gh run cancel 1', ctx, false],
   ['gh run view 1', ctx, true],
   ['gh release create v1', ctx, false],
@@ -111,7 +112,7 @@ const commandTable: [command: string, context: CommandContext, allowed: boolean]
   [
     'gh api graphql -f query="mutation { markPullRequestReadyForReview(input: {}) { clientMutationId } }"',
     ctx,
-    false,
+    true,
   ],
   ['gh api graphql -f query="mutation { deleteRef(input: {}) { clientMutationId } }"', ctx, false],
   [

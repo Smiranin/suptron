@@ -704,6 +704,58 @@ describe('Runner scenarios', () => {
     expect(h.registry.get(id)?.result?.pr).toEqual({ number: pr.number, url: pr.url });
   });
 
+  it('sends a conflicting Pull Request back to the Loop target with pr_mergeable', async () => {
+    h = await harness(
+      [
+        unit('impl', [PASS]),
+        unit('pub', [
+          { kind: 'pr_exists' },
+          { kind: 'pr_mergeable' },
+          { kind: 'ci_green' },
+          { kind: 'pr_mergeable' },
+        ]),
+      ],
+      [
+        linear([
+          { name: 'impl', unit: 'impl' },
+          { name: 'pub', unit: 'pub', loop: { target: 'impl', limit: 3 } },
+        ]),
+      ],
+    );
+    const pr = h.host.seedPullRequest('feature/merge', { ci: 'success', merge: 'conflicting' });
+    h.engine.script('pilot', 'impl', (call) => {
+      if (call.index === 0) {
+        return [
+          {
+            shell:
+              'git checkout -q -b feature/merge && echo x > x.txt && git add x.txt && git commit -q -m x',
+          },
+          { result: { output: 'implemented' } },
+        ];
+      }
+      h!.host.setMergeStatus(pr.number, 'mergeable');
+      return [{ result: { output: 'merged the base branch' } }];
+    });
+    const id = await h.start();
+    await h.waitFor((es) => es.some((e) => e.type === 'mission.completed'));
+    const mergeable = h.events.filter(
+      (e) => e.type === 'check.evaluated' && e.check.kind === 'pr_mergeable',
+    );
+    expect(mergeable.map((e) => e.type === 'check.evaluated' && e.holds)).toEqual([
+      false,
+      true,
+      true,
+    ]);
+    const started = h.events.filter((e) => e.type === 'slot.started');
+    expect(started.map((e) => (e.type === 'slot.started' ? e.slot : ''))).toEqual([
+      'impl',
+      'pub',
+      'impl',
+      'pub',
+    ]);
+    expect(h.registry.get(id)?.summary.state).toBe('completed');
+  });
+
   it('shows questions asked at once one at a time and loses none of them', async () => {
     h = await harness(
       [unit('a', [PASS], { mayAskCommander: true })],

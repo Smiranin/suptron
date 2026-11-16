@@ -1,7 +1,7 @@
-import type { CiStatus, PullRequestRef } from '../domain/host.js';
+import type { CiStatus, MergeStatus, PullRequestRef } from '../domain/host.js';
 import type { HealthStatus } from '../engine/index.js';
 
-export type { CiStatus, PullRequestRef } from '../domain/host.js';
+export type { CiStatus, MergeStatus, PullRequestRef } from '../domain/host.js';
 
 export interface CreateDraftPullRequestArgs {
   checkoutPath: string;
@@ -23,5 +23,6 @@ export interface RepoHost {
   findPullRequest(args: FindPullRequestArgs): Promise<PullRequestRef | null>;
   getCiStatus(pr: PullRequestRef, checkoutPath: string): Promise<CiStatus>;
   countUnresolvedReviewThreads(pr: PullRequestRef, checkoutPath: string): Promise<number>;
+  getMergeStatus(pr: PullRequestRef, checkoutPath: string): Promise<MergeStatus>;
   healthCheck(): Promise<HealthStatus>;
 }

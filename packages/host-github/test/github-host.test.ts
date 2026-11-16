@@ -6,6 +6,7 @@ import {
   parsePullRequestUrl,
   reduceChecks,
   REVIEW_THREADS_QUERY,
+  toMergeStatus,
 } from '../src/index.js';
 
 type Canned =
@@ -164,6 +165,36 @@ describe('getCiStatus', () => {
 
   it('reduceChecks treats cancelled as failure', () => {
     expect(reduceChecks([{ bucket: 'cancel' }])).toBe('failure');
+  });
+});
+
+describe('getMergeStatus', () => {
+  it('uses the exact argv', async () => {
+    const { run, calls } = fakeExec([{ stdout: '{"mergeable":"MERGEABLE"}' }]);
+    await new GitHubHost(run).getMergeStatus(pr, '/w');
+    expect(calls[0]).toEqual({
+      program: 'gh',
+      args: ['pr', 'view', '12', '--json', 'mergeable'],
+      cwd: '/w',
+    });
+  });
+
+  it.each([
+    ['MERGEABLE', 'mergeable'],
+    ['CONFLICTING', 'conflicting'],
+    ['UNKNOWN', 'unknown'],
+  ])('maps %s to %s', async (mergeable, expected) => {
+    const { run } = fakeExec([{ stdout: JSON.stringify({ mergeable }) }]);
+    expect(await new GitHubHost(run).getMergeStatus(pr, '/w')).toBe(expected);
+  });
+
+  it('treats a missing field as unknown', () => {
+    expect(toMergeStatus(undefined)).toBe('unknown');
+  });
+
+  it('throws when gh fails', async () => {
+    const { run } = fakeExec([{ code: 1, stderr: 'HTTP 502' }]);
+    await expect(new GitHubHost(run).getMergeStatus(pr, '/w')).rejects.toThrow(/502/);
   });
 });
 

@@ -65,6 +65,15 @@ export const CHECK_CATALOGUE: readonly CheckDescriptor[] = [
     summarize: () => 'no open PR comments',
   },
   {
+    kind: 'pr_mergeable',
+    label: 'PR mergeable',
+    description:
+      'The Pull Request merges into its base branch without conflicts. A conflict can appear at any time, so the Check may stand both before and after a long wait such as CI green.',
+    params: [],
+    requires: ['host'],
+    summarize: () => 'PR mergeable',
+  },
+  {
     kind: 'llm_judgment',
     label: 'LLM judgment',
     description:

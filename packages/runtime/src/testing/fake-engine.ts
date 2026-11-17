@@ -5,6 +5,7 @@ import type { ActivityPhase } from '../events/mission-event.js';
 import type {
   AgentEvent,
   AgentHandle,
+  AgentMarker,
   AgentSpec,
   Engine,
   HealthStatus,
@@ -39,7 +40,20 @@ export type FakeStep =
   | { usageLimit: { resetsAt: string } }
   | { delay: number }
   /** Holds the agent until the promise resolves (for Stop tests). */
-  | { wait: Promise<unknown> };
+  | { wait: Promise<unknown> }
+  /**
+   * Calls a named agent as an Engine's `Agent` tool does: the call, the called agent's own steps
+   * (text, tool calls and shell commands, marked as its own), then its return unless `returns` is
+   * null (a call that never came back).
+   */
+  | { subAgent: FakeSubAgent };
+
+export interface FakeSubAgent {
+  name: string;
+  steps?: Extract<FakeStep, { text: string } | { toolCall: unknown } | { shell: string }>[];
+  returns?: string | null;
+  isError?: boolean;
+}
 
 export interface FakeCall {
   key: string;
@@ -166,6 +180,58 @@ class FakeAgentHandle implements AgentHandle {
     return readHandoverStatus(output) === null ? handedOver(output, status) : output;
   }
 
+  /**
+   * Plays a step of work (a text, a tool call or a shell command), marked as a called agent's
+   * when `agent` is given. False when a failed shell command ended the turn.
+   */
+  private async *work(
+    step: Extract<FakeStep, { text: string } | { toolCall: unknown } | { shell: string }>,
+    agent?: AgentMarker,
+  ): AsyncGenerator<AgentEvent, boolean> {
+    const marker = agent && { agent };
+    if ('text' in step) {
+      yield { type: 'text', text: step.text, ...marker };
+    } else if ('toolCall' in step) {
+      const id = `tool-${this.engine.nextId()}`;
+      yield {
+        type: 'tool_call',
+        id,
+        name: step.toolCall.name,
+        input: step.toolCall.input,
+        ...marker,
+      };
+      yield {
+        type: 'tool_result',
+        toolCallId: id,
+        output: step.result?.output ?? '',
+        isError: step.result?.isError ?? false,
+        ...marker,
+      };
+    } else {
+      const id = `tool-${this.engine.nextId()}`;
+      yield { type: 'tool_call', id, name: 'Bash', input: { command: step.shell }, ...marker };
+      const result = await exec('sh', ['-c', step.shell], {
+        cwd: this.spec.cwd,
+        signal: this.abort.signal,
+      });
+      yield {
+        type: 'tool_result',
+        toolCallId: id,
+        output: (result.stdout + result.stderr).trim(),
+        isError: result.code !== 0,
+        ...marker,
+      };
+      if (result.code !== 0) {
+        yield {
+          type: 'error',
+          message: `FakeEngine shell step failed: ${step.shell}\n${result.stderr}`,
+        };
+        return false;
+      }
+    }
+    return true;
+  }
+
   async *events(): AsyncIterable<AgentEvent> {
     if (this.prompt === null) throw new Error('FakeEngine: send() must be called before events()');
     const key = scriptKey(this.spec.role, this.spec.label);
@@ -186,38 +252,21 @@ class FakeAgentHandle implements AgentHandle {
       yield { type: 'session', sessionId: this.sessionIdValue };
       for (const step of steps) {
         if (this.interrupted) break;
-        if ('text' in step) {
-          yield { type: 'text', text: step.text };
+        if ('text' in step || 'toolCall' in step || 'shell' in step) {
+          if (!(yield* this.work(step))) return;
         } else if ('activity' in step) {
           yield { type: 'activity', ...step.activity };
-        } else if ('toolCall' in step) {
-          const id = `tool-${this.engine.nextId()}`;
-          yield { type: 'tool_call', id, name: step.toolCall.name, input: step.toolCall.input };
-          yield {
-            type: 'tool_result',
-            toolCallId: id,
-            output: step.result?.output ?? '',
-            isError: step.result?.isError ?? false,
-          };
-        } else if ('shell' in step) {
-          const id = `tool-${this.engine.nextId()}`;
-          yield { type: 'tool_call', id, name: 'Bash', input: { command: step.shell } };
-          const result = await exec('sh', ['-c', step.shell], {
-            cwd: this.spec.cwd,
-            signal: this.abort.signal,
-          });
-          yield {
-            type: 'tool_result',
-            toolCallId: id,
-            output: (result.stdout + result.stderr).trim(),
-            isError: result.code !== 0,
-          };
-          if (result.code !== 0) {
-            yield {
-              type: 'error',
-              message: `FakeEngine shell step failed: ${step.shell}\n${result.stderr}`,
-            };
-            return;
+        } else if ('subAgent' in step) {
+          const { name, steps = [], returns = 'done', isError = false } = step.subAgent;
+          const callId = `tool-${this.engine.nextId()}`;
+          yield { type: 'tool_call', id: callId, name: 'Agent', input: { subagent_type: name } };
+          yield { type: 'sub_agent_called', callId, name };
+          for (const inner of steps) {
+            if (!(yield* this.work(inner, { name, callId }))) return;
+          }
+          if (returns !== null) {
+            yield { type: 'tool_result', toolCallId: callId, output: returns, isError };
+            yield { type: 'sub_agent_returned', callId, name, isError };
           }
         } else if ('question' in step) {
           const pending = new Deferred<void>();

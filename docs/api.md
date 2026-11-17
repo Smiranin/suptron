@@ -20,10 +20,13 @@ Types named below (`UnitFile`, `ProfileFile`, `AssemblyFile`, `Issue`, `MissionS
 - **Refusals by use** → `409 { reason: 'in_use', usedBy: [{ project, assembly }] }` or
   `409 { reason: 'active_missions', count }`.
 - **Not found** → `404 { reason: 'not_found', message }`.
-- **Profile format** (`ProfileFile`): `{ name, workspace, knowledgeSources, engine }`. `workspace` is one of
+- **Profile format** (`ProfileFile`): `{ name, workspace, knowledgeSources, outerFolders, engine }`. `workspace` is one of
   `{ kind: 'none' }`, `{ kind: 'folder', path }` or `{ kind: 'repository', path, remote?, protectedBranch?, host?: 'github' | 'none', git: { branchNameTemplate, pullRequestTemplate?, labels?, reviewers? }, ciWaitTimeoutMinutes? }`;
   a field of another kind is a validation error. A Knowledge Source is `{ path, title? }` (relative to the
   Workspace root, or absolute; a relative path is invalid for kind `none`) or `{ text, title? }`.
+  `outerFolders` is a list of absolute paths every Pilot of the Project's Missions may write to; a path that is
+  relative, is the configuration home, lies inside it or contains it is an `Issue` with code
+  `invalid_outer_folder` and path `outerFolders.N` (400 on `POST /api/projects` and the Profile `PUT`).
   Assemblies are validated against the Project's Workspace: a Check or context source it cannot provide is an
   `Issue` with code `check_unavailable` or `context_source_unavailable` (Amended 2026-10-26 by
   features/workspaces/SPEC.md).
@@ -82,15 +85,21 @@ GET    /api/missions                  MissionSummary[]   (every Mission since st
 POST   /api/missions                  { project, assembly, task, title?, workItemId?, checkoutPath?, mayAskCommander?: Record<slot, boolean> } → 201 MissionSummary
                                       task: { kind: 'path', path } | { kind: 'text', text }; text is stored as missions/<id>/task.md and that folder becomes the Task location
                                       checkoutPath is required for a repository Project and refused for the other kinds (field 'checkoutPath')
-                                      400 { issues: { field: 'taskPath' | 'taskText' | 'checkoutPath' | 'workspace' | 'assembly' | 'workItemId', message }[] }
+                                      400 { issues: { field: 'taskPath' | 'taskText' | 'checkoutPath' | 'workspace' | 'assembly' | 'workItemId' | 'outerFolders', message }[] }
+                                      ('outerFolders': an Outer Folder of the Profile does not exist; the system does not create it)
                                       409 { reason: 'workspace_busy', missionId }   (the Checkout or the folder is in use; a Project without a folder is never busy)
 GET    /api/missions/:id              MissionDetail | 404
 POST   /api/missions/:id/stop         204
 POST   /api/missions/:id/resume       200 MissionSummary | 404 | 409 { reason: 'not_stopped' | 'cannot_resume', message } | 409 { reason: 'workspace_busy', missionId }
                                       a Stopped Mission goes on at the Slot it stood at, on the configuration it started with; `cannot_resume`: the Workspace,
-                                      the Task location or the Mission folder is gone, or the Mission holds nothing to resume from (`message` says which)
+                                      the Task location, an Outer Folder or the Mission folder is gone, or the Mission holds nothing to resume from (`message` says which)
 POST   /api/missions/:id/retry        { note? } → 204 | 409 { reason: 'not_needs_attention' }
 POST   /api/missions/:id/answer       { questionId, answers: Record<question, string> } → 204 | 409 { reason: 'no_such_question' }
+POST   /api/missions/:id/side-slots/:name/stop   204 | 404 (Mission or Side Slot) | 409 { reason: 'side_slot_not_running', message }
+                                      the Side Slot counts as failed with the note "Stopped by the Commander"; the next one of its chain starts
+POST   /api/missions/:id/side-slots/:name/run    204 | 404 (Mission or Side Slot) | 409 { reason: 'side_slot_not_runnable', message } | 409 { reason: 'workspace_busy', missionId }
+                                      a failed or interrupted Side Slot of a Mission that is not Stopped runs once more at the end of its Slot's chain;
+                                      a Completed Mission is Running again for the time of the run (and holds its Workspace), then Completed again
 DELETE /api/missions/:id              204 | 404 | 409 { reason: 'not_finished' }
 ```
 
@@ -103,20 +112,25 @@ interface MissionDetail {
                                     // state: 'running' | 'waiting_for_owner' | 'waiting_for_usage' | 'needs_attention' | 'stopped' | 'completed'; usageResetsAt (ISO) only in 'waiting_for_usage'
                                     // workspace.path: the Checkout or the folder, null for kind none; workspace.branch: the Checkout's branch, null otherwise
   assembly: AssemblyFile;           // the document at start, for the clock
-  slots: SlotRecord[];              // Assembly order, then 'core': { name, attempts, loops, skipped?, lastOutput?, cost, checkResults, resolutions? }
+  slots: SlotRecord[];              // Assembly order, then 'core': { name, attempts, loops, skipped?, lastOutput?, cost, checkResults, resolutions?, subPilots? }
                                     // loops: the rounds of the Slot's own Loop since a later Slot's Loop last sent the work back before it; skipped: how often the Slot was passed by
-  transcript: TranscriptSection[];  // one section per execution: { execution: { slot, attempt, loopIteration?, loopFrom?, loopGrantedBy? }, entries, dropped }
+                                    // subPilots: per Sub-pilot of the Slot, its calls and its error-free returns in the last Attempt: { unit, calls, returns }[]
+  sideSlots: SideSlotRecord[];      // the Side Slots started so far, Assembly order: { name, parent, unit, status: 'waiting' | 'running' | 'done' | 'failed' | 'interrupted', starts, note?, cost }
+  transcript: TranscriptSection[];  // one section per execution: { execution: { slot, attempt, loopIteration?, loopFrom?, loopGrantedBy? }, sideSlotOf?, entries, dropped }
+                                    // a Side Slot's run has a section of its own: `execution.slot` is its name, `sideSlotOf` its Slot
   transcriptLost: boolean;          // true for Missions recovered from the ledger after a restart; once resumed, `transcript` holds the sections since the Resume
   resumable: boolean;               // true for a Stopped Mission that holds what POST .../resume needs
   pendingQuestion?: { id, slot, questions: Question[] };   // one at a time: questions a Pilot asks while one is pending queue up and are shown after the answer
   attention?: { cause, reason, slot, failedChecks };        // cause: 'handover_not_done' | 'attempt_limit' | 'loop_limit' | 'last_exit_condition_failed' | 'ci_timeout' | 'engine_error'
-  result?: { report, pr: PullRequestRef | null, exitSlot };
+  result?: { report, pr: PullRequestRef | null, exitSlot };  // present from `mission.reported` on, while Side Slots may still run
   seq: number;                      // the last event applied; pass it as ?after= to the event stream
 }
 ```
 
 Transcript entries are `text`, `tool_call` (with its `result` merged in), `check`, `question`, `answer`,
-`note` (the Commander's Retry note, first entry of the Attempt that received it) and `error`. The current
+`note` (the Commander's Retry note, first entry of the Attempt that received it) and `error`. A `text` or
+`tool_call` made inside an agent the Pilot called carries `agent: { name, callId }`. An entry goes into the
+latest section of the Slot or Side Slot its event names. The current
 section is kept in full; every earlier section is trimmed to its last 200 entries, `dropped` counting what
 was removed.
 
@@ -134,12 +148,16 @@ With `?mission=`, buffered events with `seq > after` are replayed first (`Last-E
 way), then live events follow. When `after` is older than the buffer, the first message is
 `event: resync` with `data: {}` and the client should refetch `GET /api/missions/:id` and resubscribe with
 its `seq`. Without `?mission=`, the stream carries every Mission's events except `agent.*`,
-`check.evaluated` and `core.resolved`, including `mission.dismissed`.
+`check.evaluated`, `core.resolved` and `side_slots.left_out`, including `mission.dismissed`.
 
 Event types: `mission.started`, `mission.state` (`state`, and `cause`, `reason`, `slot`, `failedChecks`
 for `needs_attention`; `slot` for `waiting_for_owner`; `resetsAt` for `waiting_for_usage`), `mission.resumed` (`mission`: the summary of the resumed Mission, replacing the one the client holds; the Slot it stood at follows with `slot.started` and a `note`), `slot.started` (`attempt`, `loopIteration?`,
 `loopFrom?`, `loopGrantedBy?: 'commander' | 'core'` on a round granted at the Loop limit, `note?`), `slot.skipped` (`slot`, `loopFrom`: a done Slot with `skipWhenDone` was passed by in the round of the Loop of `loopFrom`; it opens no transcript section), `slot.done` (`output`, `acceptedAtLimit?: true` when the Loop's Accept Condition stood in for the Done Condition at the limit), `agent.text`, `agent.tool_call`, `agent.tool_result`, `agent.error`, `agent.activity` (`payload: { phase: 'thinking' | 'writing' | 'tool', detail? }`: a sign of life at most once a second while the Pilot thinks, writes or runs a tool; not a transcript entry, never replayed),
-`check.evaluated`, `core.resolved` (`slot`, `resolution: { cause, decision: 'retry' | 'accept', reason, note?, failedChecks }`: the Core decided in the Commander's place; a `retry` is followed by `slot.started` without a `note`, an `accept` by `slot.done`, or, for the cause `handover_not_done`, by the Checks of the Done Condition first), `question.asked`, `question.answered`, `cost.updated`, `mission.completed` (`report`,
+`agent.sub_pilot_called` (`slot`, `attempt`, `subPilot`, `callId`), `agent.sub_pilot_returned` (`slot`, `attempt`, `subPilot`, `callId`, `isError`): the Pilot called one of its Sub-pilots and it returned (a call of one of the Engine's general agents is not reported; `agent.text`, `agent.tool_call` and `agent.tool_result` made inside any called agent carry `payload.agent: { name, callId }`),
+`check.evaluated` (a required Sub-pilot is the Check `{ kind: 'sub_pilot_returned', unit }`, first in the Done Condition), `core.resolved` (`slot`, `resolution: { cause, decision: 'retry' | 'accept', reason, note?, failedChecks }`: the Core decided in the Commander's place; a `retry` is followed by `slot.started` without a `note`, an `accept` by `slot.done`, or, for the cause `handover_not_done`, by the Checks of the Done Condition first), `question.asked`, `question.answered`, `cost.updated` (`slot` may name a Side Slot), `side_slot.waiting` (`slot`: the Side Slot, `parent`: its Slot),
+`side_slot.started` (`slot`, `parent`, `attempt`: the number of its run; its Pilot's `agent.*` events carry its name as `slot`), `side_slot.ended` (`slot`, `parent`, `attempt`,
+`status: 'done' | 'failed' | 'interrupted'`, `note?`), `side_slots.left_out` (`slot`: a Slot done again while its Side Slots from an earlier time still ran),
+`mission.reported` (`result: { report, pr, exitSlot }`: the Exit Condition held; the Mission stays Running until its Side Slots have ended), `mission.completed` (`report`,
 `pr`, `exitSlot`, `slots`, `cost`), `mission.stopped` (`note?: 'interrupted'`), `mission.dismissed`.
 
 ## A Mission, end to end

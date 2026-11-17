@@ -12,6 +12,7 @@ import {
   type ProfileFile,
   type UnitFile,
 } from './schemas.js';
+import { validateOuterFolders } from './outer-folders.js';
 import { parseUnitMarkdown } from './unit-markdown.js';
 import { capabilitiesOf, type Capability } from '../workspace/kinds.js';
 import { validateAssembly, type ValidationUnit } from './validate-assembly.js';
@@ -206,6 +207,12 @@ export async function loadProject(
   try {
     text = await readFile(profilePath, 'utf8');
     ({ profile, issues } = parseProfileText(name, text));
+    // Only here is the configuration home known, which an Outer Folder must stay clear of.
+    const outerIssues = profile ? validateOuterFolders(profile.outerFolders, home) : [];
+    if (outerIssues.length > 0) {
+      profile = null;
+      issues = outerIssues;
+    }
   } catch {
     issues = [{ code: 'missing_profile', message: `${PROFILE_FILE} is missing` }];
   }

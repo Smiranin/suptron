@@ -331,6 +331,44 @@ describe('mission page reducer', () => {
     expect(next.seq).toBe(13);
   });
 
+  it('files the entries of a Slot that is not the last one in its own section', () => {
+    const state = initMissionPage(runningDetail());
+    const earlier = state.sections.length - 1;
+    const next = ready(
+      play(
+        state,
+        [
+          { type: 'slot.started', slot: 'reviewer', attempt: 1 },
+          {
+            type: 'agent.tool_call',
+            slot: 'implementer',
+            payload: {
+              type: 'tool_call',
+              id: 'late',
+              name: 'Bash',
+              input: {},
+              agent: { name: 'unit-tests', callId: 'c' },
+            },
+          },
+          { type: 'agent.text', slot: 'reviewer', payload: { type: 'text', text: 'reviewing' } },
+          {
+            type: 'agent.tool_result',
+            slot: 'implementer',
+            payload: { type: 'tool_result', toolCallId: 'late', output: 'ok', isError: false },
+          },
+        ],
+        12,
+      ),
+    );
+    expect(next.sections[earlier]!.execution.slot).toBe('implementer');
+    expect(next.sections[earlier]!.entries.at(-1)).toMatchObject({
+      toolCallId: 'late',
+      agent: { name: 'unit-tests' },
+      result: { output: 'ok' },
+    });
+    expect(next.sections.at(-1)!.entries).toMatchObject([{ kind: 'text', text: 'reviewing' }]);
+  });
+
   it('init after a reconnect replaces sections without duplicates and keeps a pinned selection', () => {
     let state = reduceMissionPage(initMissionPage(runningDetail()), {
       type: 'selectSlot',

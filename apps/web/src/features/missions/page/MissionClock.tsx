@@ -3,7 +3,13 @@ import { AlertTriangle, MessageCircleQuestion } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { CostLabel } from '../../../components/cost-label';
 import { STATE_LABELS } from '../../../components/state-badge';
-import { ClockView, layoutClock, useViewportSize, type Viewport } from '../../clock';
+import {
+  ClockView,
+  layoutClock,
+  useViewportSize,
+  type AttachedPlate,
+  type Viewport,
+} from '../../clock';
 import { loopBadge, missionDecorations, type MissionDecorations } from '../model/selectors';
 import type { ReadyMissionState } from '../model/types';
 
@@ -102,10 +108,23 @@ function useRecentlyFired(loops: MissionDecorations['loops']): Set<string> {
   );
 }
 
+/**
+ * A Side Slot's status as its record says (absent until it was started); a Sub-pilot's from the
+ * Slot's last Attempt: done once it returned, running while it was called and has not.
+ */
+function plateStatus(state: ReadyMissionState, plate: AttachedPlate): string | undefined {
+  if (plate.kind === 'sideSlot') return state.sideSlots.find((s) => s.name === plate.name)?.status;
+  const activity = state.slots[plate.slot]?.subPilots?.find((s) => s.unit === plate.name);
+  if (!activity || activity.calls === 0) return undefined;
+  return activity.returns > 0 ? 'done' : 'running';
+}
+
 export interface MissionClockProps {
   state: ReadyMissionState;
   onSelectSlot(name: string): void;
   onSelectMission(): void;
+  onSelectSideSlot(name: string): void;
+  onSelectSubPilot(slot: string, unit: string): void;
   /** Tests pass a fixed viewport; the page measures with ResizeObserver. */
   viewport?: Viewport;
 }
@@ -115,6 +134,8 @@ export function MissionClock({
   state,
   onSelectSlot,
   onSelectMission,
+  onSelectSideSlot,
+  onSelectSubPilot,
   viewport: fixed,
 }: MissionClockProps) {
   const layout = useMemo(() => layoutClock(state.assembly), [state.assembly]);
@@ -125,7 +146,9 @@ export function MissionClock({
     () => new Map(state.assembly.slots.map((s) => [s.name, s.unit])),
     [state.assembly],
   );
-  const selected = state.panel.selection.kind === 'slot' ? state.panel.selection.name : 'core';
+  const selection = state.panel.selection;
+  const selected =
+    selection.kind === 'slot' ? selection.name : selection.kind === 'mission' ? 'core' : null;
   return (
     <div
       ref={ref}
@@ -165,6 +188,20 @@ export function MissionClock({
         )}
         onSlotClick={(name) => onSelectSlot(name)}
         onCoreClick={onSelectMission}
+        plate={(plate) => ({
+          status: plateStatus(state, plate),
+          selected:
+            plate.kind === 'sideSlot'
+              ? selection.kind === 'sideSlot' && selection.name === plate.name
+              : selection.kind === 'subPilot' &&
+                selection.slot === plate.slot &&
+                selection.unit === plate.name,
+        })}
+        onPlateClick={(plate) =>
+          plate.kind === 'sideSlot'
+            ? onSelectSideSlot(plate.name)
+            : onSelectSubPilot(plate.slot, plate.name)
+        }
         animateCards={false}
       />
     </div>

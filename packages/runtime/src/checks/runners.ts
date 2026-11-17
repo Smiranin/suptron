@@ -14,6 +14,8 @@ export interface CheckContext {
   workspace: Workspace;
   core: CoreAgent;
   slotOutput: string;
+  /** The Sub-pilots that were called and returned in the Attempt being judged. */
+  subPilotsReturned: ReadonlySet<string>;
   /** Overrides the Workspace's CI wait timeout (tests). */
   ciWaitTimeoutMs?: number;
   ciPollIntervalMs?: number;
@@ -208,6 +210,17 @@ const runLlmJudgment: CheckRunner = async (check, ctx) => {
   return { check, holds: verdict.holds, detail: verdict.reason };
 };
 
+const runSubPilotReturned: CheckRunner = async (check, ctx) => {
+  if (check.kind !== 'sub_pilot_returned') throw new Error('wrong runner');
+  return ctx.subPilotsReturned.has(check.unit)
+    ? { check, holds: true, detail: `The Sub-pilot "${check.unit}" was called and returned` }
+    : {
+        check,
+        holds: false,
+        detail: `The required Sub-pilot "${check.unit}" was not called, or did not return, in this Attempt`,
+      };
+};
+
 export const CHECK_RUNNERS: Record<Check['kind'], CheckRunner> = {
   command: runCommand,
   pr_exists: runPrExists,
@@ -215,6 +228,7 @@ export const CHECK_RUNNERS: Record<Check['kind'], CheckRunner> = {
   pr_mergeable: runPrMergeable,
   ci_green: runCiGreen,
   llm_judgment: runLlmJudgment,
+  sub_pilot_returned: runSubPilotReturned,
 };
 
 export function runCheck(check: Check, ctx: CheckContext): Promise<CheckResult> {

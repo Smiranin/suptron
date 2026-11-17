@@ -1,6 +1,7 @@
 import {
   DEFAULTS,
   profileFileSchema,
+  type Issue,
   type ProfileFile,
   type WorkspaceFile,
   type WorkspaceKind,
@@ -32,6 +33,7 @@ export interface ProfileFormValues {
     ciWaitTimeoutMinutes?: number;
   };
   knowledgeSources: { path?: string; text?: string; title?: string }[];
+  outerFolders: string[];
   engine: 'claude-code';
 }
 
@@ -69,6 +71,7 @@ export function emptyProfile(kind: WorkspaceKind = 'repository', name = ''): Pro
     title: name,
     workspace: emptyWorkspace(kind),
     knowledgeSources: [],
+    outerFolders: [],
     engine: 'claude-code',
   };
 }
@@ -76,6 +79,23 @@ export function emptyProfile(kind: WorkspaceKind = 'repository', name = ''): Pro
 /** A Profile as the form edits it: a file written before titles existed shows its name as title. */
 export function profileForForm(profile: ProfileFile): ProfileFile {
   return { ...profile, title: profile.title ?? profile.name };
+}
+
+const OUTER_FOLDER_PATH = /^outerFolders\.(\d+)$/;
+
+/**
+ * Puts the server's refusals of Outer Folders on their rows, since only the server knows the
+ * configuration home they must stay clear of. True when at least one Issue found its row.
+ */
+export function showOuterFolderIssues(form: ProfileFormHandle, issues: readonly Issue[]): boolean {
+  let shown = false;
+  for (const issue of issues) {
+    const index = OUTER_FOLDER_PATH.exec(issue.path ?? '')?.[1];
+    if (index === undefined) continue;
+    form.setError(`outerFolders.${Number(index)}`, { type: 'server', message: issue.message });
+    shown = true;
+  }
+  return shown;
 }
 
 export function useProfileForm(defaultValues: ProfileFile): ProfileFormHandle {

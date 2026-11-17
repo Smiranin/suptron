@@ -2,9 +2,11 @@ import { Button } from '@suptron/ui/components/button';
 import { cn } from '@suptron/ui/lib/utils';
 import { Maximize2 } from 'lucide-react';
 import type { HTMLAttributes, ReactNode } from 'react';
-import type { ClockLayout, SlotPosition, Viewport } from './layout';
+import type { AttachedPlate, ClockLayout, SlotPosition, Viewport } from './layout';
 import {
   ArrowMarkers,
+  AttachedConnectors,
+  AttachedPlateShell,
   CardShell,
   CoreCircle,
   ExitArrow,
@@ -34,6 +36,9 @@ export interface ClockViewProps {
   onSlotClick?(name: string, event: React.MouseEvent<HTMLDivElement>): void;
   onSlotDoubleClick?(name: string): void;
   onCoreClick?(): void;
+  /** The status and selection of a Sub-pilot or Side Slot plate. */
+  plate?(plate: AttachedPlate): { status?: string | undefined; selected?: boolean };
+  onPlateClick?(plate: AttachedPlate): void;
   onLoopHover?(from: string | null): void;
   selected?: string | 'core' | null;
   /** When the parent needs the viewport state (drags convert pointer positions with `toClock`). */
@@ -76,6 +81,7 @@ export function ClockView(props: ClockViewProps) {
           data-clock-background=""
         >
           <ArrowMarkers />
+          <AttachedConnectors layout={layout} />
           <Ring layout={layout} />
           <ForwardArrows layout={layout} />
           {layout.loops.map((loop) => (
@@ -120,6 +126,19 @@ export function ClockView(props: ClockViewProps) {
             {props.card(slot)}
           </CardShell>
         ))}
+        {layout.attached.map((plate) => {
+          const look = props.plate?.(plate) ?? {};
+          const onPlateClick = props.onPlateClick;
+          return (
+            <AttachedPlateShell
+              key={`${plate.slot}/${plate.kind}/${plate.name}`}
+              plate={plate}
+              status={look.status}
+              selected={look.selected}
+              onClick={onPlateClick && (() => onPlateClick(plate))}
+            />
+          );
+        })}
         {props.htmlOverlays}
       </div>
       {layout.slots.length === 0 && props.emptyHint && (

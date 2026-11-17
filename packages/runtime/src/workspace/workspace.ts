@@ -90,6 +90,7 @@ export interface GuardLocations {
   taskPath: string;
   taskDocuments: readonly string[];
   configHome: string;
+  outerFolders: readonly string[];
 }
 
 /** The Laws' view of a Workspace: its working directory, write roots and protected branch. */
@@ -101,5 +102,6 @@ export function buildGuard(workspace: Workspace, locations: GuardLocations): Gua
     taskPath: locations.taskPath,
     taskDocuments: [...locations.taskDocuments],
     configHome: locations.configHome,
+    outerFolders: [...locations.outerFolders],
   };
 }

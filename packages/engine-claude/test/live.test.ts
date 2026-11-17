@@ -30,6 +30,7 @@ describe.skipIf(process.env.SUPTRON_LIVE !== '1')('ClaudeEngine (live)', () => {
         taskPath: join(dir, 'task'),
         taskDocuments: [],
         configHome: join(dir, 'home'),
+        outerFolders: [],
       },
     });
     handle.send(
@@ -67,6 +68,7 @@ describe.skipIf(process.env.SUPTRON_LIVE !== '1')('ClaudeEngine (live)', () => {
         taskPath: join(dir, 'task'),
         taskDocuments: [],
         configHome: join(dir, 'home'),
+        outerFolders: [],
       },
     });
     handle.send(
@@ -104,6 +106,7 @@ describe.skipIf(process.env.SUPTRON_LIVE !== '1')('ClaudeEngine (live)', () => {
         taskPath: join(dir, 'task'),
         taskDocuments: [],
         configHome: join(dir, 'home'),
+        outerFolders: [],
       },
     });
     handle.send(
@@ -137,6 +140,7 @@ describe.skipIf(process.env.SUPTRON_LIVE !== '1')('ClaudeEngine (live)', () => {
         taskPath: join(dir, 'task'),
         taskDocuments: [],
         configHome: home,
+        outerFolders: [],
       },
     });
     handle.send(
@@ -168,6 +172,7 @@ describe.skipIf(process.env.SUPTRON_LIVE !== '1')('ClaudeEngine (live)', () => {
         taskPath: join(dir, 'task'),
         taskDocuments: [],
         configHome: join(dir, 'home'),
+        outerFolders: [],
       },
     };
     const run = async (resumeSessionId: string | undefined, prompt: string) => {
@@ -197,4 +202,57 @@ describe.skipIf(process.env.SUPTRON_LIVE !== '1')('ClaudeEngine (live)', () => {
     expect(await engine.healthCheck()).toEqual({ ok: true });
     expect((await engine.listModels()).length).toBeGreaterThan(0);
   }, 120_000);
+
+  it('runs a Sub-pilot that the Laws hold and that can neither call an agent nor ask', async () => {
+    const engine = new ClaudeEngine();
+    const outside = await mkdtemp(join(tmpdir(), 'suptron-live-outside-'));
+    const handle = engine.createAgent({
+      role: 'pilot',
+      label: 'caller',
+      model: 'sonnet',
+      systemPrompt: { rules: 'Be brief.', instructions: 'Do exactly what the user asks.' },
+      cwd: dir,
+      additionalDirectories: [],
+      allowQuestions: false,
+      guard: {
+        cwd: dir,
+        writeRoots: [dir],
+        protectedBranch: 'main',
+        taskPath: join(dir, 'task'),
+        taskDocuments: [],
+        configHome: join(dir, 'home'),
+        outerFolders: [],
+      },
+      subAgents: [
+        {
+          name: 'scribe',
+          description: 'Writes files it is told to write',
+          model: 'sonnet',
+          systemPrompt: {
+            rules: 'Be brief.',
+            instructions:
+              'Do exactly what you are asked. Try every step even when an earlier one fails, and report each outcome.',
+          },
+          required: true,
+        },
+      ],
+    });
+    handle.send(
+      `Call the scribe Sub-pilot once and wait for it. Ask it to: write sub.txt containing "sub" in ${dir}; write ${join(outside, 'escape.txt')}; and call any agent with the Agent tool. Then reply with one sentence.`,
+    );
+    const events: AgentEvent[] = [];
+    for await (const event of handle.events()) events.push(event);
+    await rm(outside, { recursive: true, force: true }).catch(() => undefined);
+    expect(events.some((e) => e.type === 'sub_agent_called' && e.name === 'scribe')).toBe(true);
+    expect(events.some((e) => e.type === 'sub_agent_returned' && e.name === 'scribe')).toBe(true);
+    expect(await readFile(join(dir, 'sub.txt'), 'utf8')).toContain('sub');
+    const marked = events.filter((e) => 'agent' in e && e.agent?.name === 'scribe');
+    expect(marked.length).toBeGreaterThan(0);
+    // The scribe's own Agent calls never start an agent: only the Pilot's call is seen.
+    expect(events.filter((e) => e.type === 'sub_agent_called')).toHaveLength(1);
+    const deniedOutside = marked.some(
+      (e) => e.type === 'tool_result' && e.isError && /Laws|allowed only/.test(e.output),
+    );
+    expect(deniedOutside).toBe(true);
+  }, 300_000);
 });

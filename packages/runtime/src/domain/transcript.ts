@@ -40,6 +40,15 @@ export function sameExecution(a: ExecutionKey, b: ExecutionKey): boolean {
   return executionId(a) === executionId(b);
 }
 
+/**
+ * Marks work done inside an agent a Pilot called: the name it was called by (a Sub-pilot's Unit,
+ * or one of the Engine's general agents) and the id of the call it answers.
+ */
+export interface AgentMarker {
+  name: string;
+  callId: string;
+}
+
 export interface QuestionOption {
   label: string;
   description: string;
@@ -57,13 +66,14 @@ export interface Question {
 export type Answers = Record<string, string>;
 
 export type TranscriptEntry = { id: string; at: string } & (
-  | { kind: 'text'; text: string }
+  | { kind: 'text'; text: string; agent?: AgentMarker }
   | {
       kind: 'tool_call';
       toolCallId: string;
       name: string;
       input: unknown;
       result?: { output: string; isError: boolean };
+      agent?: AgentMarker;
     }
   | { kind: 'check'; check: Check; holds: boolean; detail: string }
   | { kind: 'question'; questionId: string; questions: Question[] }
@@ -74,6 +84,7 @@ export type TranscriptEntry = { id: string; at: string } & (
 
 export interface TranscriptSection {
   execution: ExecutionKey;
+  sideSlotOf?: string;
   entries: TranscriptEntry[];
   dropped: number;
 }

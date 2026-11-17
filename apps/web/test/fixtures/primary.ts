@@ -74,13 +74,20 @@ export function primaryProfile(repositoryPath = '/repos/my-app', name = 'my-app'
       ciWaitTimeoutMinutes: 30,
     },
     knowledgeSources: [{ path: 'README.md' }],
+    outerFolders: [],
     engine: 'claude-code',
   };
 }
 
 /** A folder Project (kind `folder`): notes in `/notes`, no git. */
 export function notesProfile(path = '/notes', name = 'notes'): ProfileFile {
-  return { name, workspace: { kind: 'folder', path }, knowledgeSources: [], engine: 'claude-code' };
+  return {
+    name,
+    workspace: { kind: 'folder', path },
+    knowledgeSources: [],
+    outerFolders: [],
+    engine: 'claude-code',
+  };
 }
 
 /** A Project without a folder (kind `none`), with a text Knowledge Source. */
@@ -89,6 +96,7 @@ export function researchProfile(name = 'research'): ProfileFile {
     name,
     workspace: { kind: 'none' },
     knowledgeSources: [{ title: 'House style', text: 'Cite every claim with a dated source.' }],
+    outerFolders: [],
     engine: 'claude-code',
   };
 }

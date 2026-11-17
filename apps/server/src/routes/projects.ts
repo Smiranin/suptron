@@ -13,10 +13,12 @@ import {
   serializeProfile,
   titleSchema,
   validateAssembly,
+  validateOuterFolders,
   type Capability,
   type LoadedAssembly,
   type LoadedConfig,
   type LoadedProject,
+  type ProfileFile,
   type UnitFile,
 } from '@suptron/runtime';
 import type { FastifyInstance } from 'fastify';
@@ -54,6 +56,9 @@ export function registerProjectRoutes(app: FastifyInstance, ctx: ServerContext):
     activeMissions: ctx.usage.project(p.name),
   });
   const parseProfile = (name: string) => (text: string) => parseProfileText(name, text).profile;
+  /** The Profile's Issues the schema cannot see: those that need the configuration home. */
+  const homeIssues = (profile: ProfileFile) =>
+    validateOuterFolders(profile.outerFolders, ctx.config.home);
 
   app.get('/api/projects', async () => {
     const config = await ctx.config.load();
@@ -64,6 +69,8 @@ export function registerProjectRoutes(app: FastifyInstance, ctx: ServerContext):
     const body = createProjectSchema.safeParse(request.body);
     if (!body.success) return badRequest(reply, issuesFromZod(body.error));
     const profile = body.data.profile;
+    const outerIssues = homeIssues(profile);
+    if (outerIssues.length > 0) return badRequest(reply, outerIssues);
     const config = await ctx.config.load();
     if (config.projects.some((p) => p.name === profile.name))
       return fail(reply, 409, { reason: 'name_taken' });
@@ -89,6 +96,8 @@ export function registerProjectRoutes(app: FastifyInstance, ctx: ServerContext):
       const parsed = profileFileSchema.safeParse(request.body);
       if (!parsed.success) return badRequest(reply, issuesFromZod(parsed.error));
       const profile = parsed.data;
+      const outerIssues = homeIssues(profile);
+      if (outerIssues.length > 0) return badRequest(reply, outerIssues);
       const oldName = request.params.project;
       const text = serializeProfile(profile);
       if (profile.name !== oldName) {

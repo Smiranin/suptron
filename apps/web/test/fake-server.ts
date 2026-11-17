@@ -16,6 +16,7 @@ import {
   type MissionSummary,
   type MissionTask,
   type ProfileFile,
+  type SideSlotRecord,
   type SlotRecord,
   type UnitFile,
   type WorkspaceSummary,
@@ -127,6 +128,23 @@ export class FakeHome {
 
   profilePath(project: string): string {
     return `${this.home}/projects/${project}/profile.yaml`;
+  }
+
+  /** The server's home rule for Outer Folders: none may be the home, lie in it or contain it. */
+  outerFolderIssues(profile: ProfileFile): { code: string; message: string; path: string }[] {
+    const within = (target: string, root: string) =>
+      target === root || target.startsWith(`${root}/`);
+    return profile.outerFolders.flatMap((folder, index) =>
+      within(folder, this.home) || within(this.home, folder)
+        ? [
+            {
+              code: 'invalid_outer_folder',
+              message: `outerFolders.${index}: An Outer Folder may not open the configuration home`,
+              path: `outerFolders.${index}`,
+            },
+          ]
+        : [],
+    );
   }
 
   assemblyPath(project: string, assembly: string): string {
@@ -272,6 +290,7 @@ export class FakeHome {
       summary,
       assembly: doc,
       slots,
+      sideSlots: [],
       transcript: [],
       transcriptLost: false,
       resumable: false,
@@ -320,6 +339,20 @@ export class FakeHome {
       if (event.type === 'mission.resumed') {
         detail.summary = structuredClone(event.mission);
         detail.resumable = false;
+      }
+      if (event.type === 'side_slot.started' || event.type === 'side_slot.ended') {
+        const status = event.type === 'side_slot.started' ? 'running' : event.status;
+        const known = detail.sideSlots.find((s) => s.name === event.slot);
+        const record: SideSlotRecord = {
+          name: event.slot,
+          parent: event.parent,
+          unit: known?.unit ?? event.slot,
+          status,
+          starts: event.attempt,
+          cost: known?.cost ?? { usd: 0, inputTokens: 0, outputTokens: 0 },
+          ...(event.type === 'side_slot.ended' && event.note !== undefined && { note: event.note }),
+        };
+        detail.sideSlots = [...detail.sideSlots.filter((s) => s.name !== event.slot), record];
       }
       if (event.type === 'mission.stopped') {
         detail.resumable = true;
@@ -388,7 +421,8 @@ export class FakeHome {
     doc.slots.forEach((slot, index) => {
       const unit = this.units.get(slot.unit);
       result[slot.name] = unit
-        ? resolveSlot(slot, unit, core, index === doc.slots.length - 1).mayAskCommander
+        ? resolveSlot(slot, unit, core, index === doc.slots.length - 1, [...this.units.values()])
+            .mayAskCommander
         : (slot.mayAskCommander ?? DEFAULTS.unit.mayAskCommander);
     });
     return result;
@@ -545,6 +579,8 @@ export function handlersFor(home: FakeHome): HttpHandler[] {
           },
           400,
         );
+      const outerIssues = home.outerFolderIssues(parsed.data);
+      if (outerIssues.length > 0) return json({ issues: outerIssues }, 400);
       if (home.projects.has(parsed.data.name)) return json({ reason: 'name_taken' }, 409);
       home.projects.set(parsed.data.name, {
         profile: parsed.data,
@@ -572,6 +608,8 @@ export function handlersFor(home: FakeHome): HttpHandler[] {
           },
           400,
         );
+      const outerIssues = home.outerFolderIssues(parsed.data);
+      if (outerIssues.length > 0) return json({ issues: outerIssues }, 400);
       const oldName = String(params.project);
       const p = home.projects.get(oldName);
       if (parsed.data.name !== oldName) {
@@ -788,6 +826,25 @@ export function handlersFor(home: FakeHome): HttpHandler[] {
           state: 'stopped',
         });
         home.emit({ type: 'mission.stopped', missionId: id, seq: home.nextSeq(id) });
+      }
+      return new HttpResponse(null, { status: 204 });
+    }),
+    http.post('/api/missions/:id/side-slots/:name/:action', async ({ params, request }) => {
+      await record(request);
+      const id = String(params.id);
+      const name = String(params.name);
+      const m = home.missions.get(id);
+      const side = m?.sideSlots.find((s) => s.name === name);
+      if (!m || !side) return json({ reason: 'not_found' }, 404);
+      if (params.action === 'stop') {
+        if (side.status !== 'running') {
+          return json({ reason: 'side_slot_not_running', message: 'Not running' }, 409);
+        }
+        return new HttpResponse(null, { status: 204 });
+      }
+      const runnable = side.status === 'failed' || side.status === 'interrupted';
+      if (!runnable || m.summary.state === 'stopped') {
+        return json({ reason: 'side_slot_not_runnable', message: 'Cannot run again' }, 409);
       }
       return new HttpResponse(null, { status: 204 });
     }),

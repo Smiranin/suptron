@@ -1,4 +1,4 @@
-import { DEFAULTS, type AssemblyFile } from '@suptron/runtime/browser';
+import { DEFAULTS, sideSlotName, type AssemblyFile } from '@suptron/runtime/browser';
 import {
   angleOf,
   arcPath,
@@ -23,6 +23,17 @@ export interface SlotPosition {
   position: Point;
 }
 
+export type AttachedKind = 'subPilot' | 'sideSlot';
+
+/** A Sub-pilot or a Side Slot drawn as a small plate outside its Slot's card. */
+export interface AttachedPlate {
+  slot: string;
+  kind: AttachedKind;
+  name: string;
+  index: number;
+  position: Point;
+}
+
 export interface ClockLayout {
   center: Point;
   radius: number;
@@ -34,6 +45,10 @@ export interface ClockLayout {
   loops: { from: string; to: string; limit: number; path: string; badgeAt: Point }[];
   exits: { slot: string; label: string; path: string; labelAt: Point }[];
   plusPositions: { index: number; position: Point; angle: number }[];
+  /** Empty when no Slot carries Sub-pilots or Side Slots. */
+  attached: AttachedPlate[];
+  /** Per Slot and kind, the middle of its plates, for the line that ties them to the card. */
+  attachedColumns: { slot: string; kind: AttachedKind; position: Point }[];
   fit(viewport: Viewport): { scale: number; translate: Point };
 }
 
@@ -45,6 +60,20 @@ export const RADIUS_PER_SLOT = 48;
 export const MAX_FIT_SCALE = 1.25;
 export const MIN_SCALE = 0.25;
 export const MAX_SCALE = 3;
+export const PLATE_WIDTH = 112;
+export const PLATE_HEIGHT = 22;
+const PLATE_GAP = 4;
+/** Between a card or an Exit label and the plates beyond it. */
+const PLATE_OFFSET = 12;
+/** Keeps plates off the Slot's radial axis, where the Exit arrow runs. */
+const PLATE_AXIS_CLEARANCE = 10;
+/** Room left around the outermost plate inside the clock's box. */
+const PLATE_MARGIN = 24;
+/** The box an Exit label is drawn in (see ExitArrow). */
+export const EXIT_LABEL_WIDTH = 160;
+export const EXIT_LABEL_HEIGHT = 24;
+/** Ahead of the label: from the card's edge to the label's middle, the arrow's length aside. */
+const EXIT_LABEL_GAP = 14;
 
 export function clockRadius(slotCount: number): number {
   return Math.max(MIN_RADIUS, RADIUS_PER_SLOT * (slotCount + 1));
@@ -61,7 +90,17 @@ export function layoutClock(
 ): ClockLayout {
   const n = doc.slots.length;
   const radius = clockRadius(n);
-  const half = radius + CLOCK_MARGIN;
+  // Plates may reach beyond the usual margin; the box grows to hold them.
+  const reach = attachedLayout(doc, { x: 0, y: 0 }, radius).plates.reduce(
+    (max, plate) =>
+      Math.max(
+        max,
+        Math.abs(plate.position.x) + PLATE_WIDTH / 2 + PLATE_MARGIN,
+        Math.abs(plate.position.y) + PLATE_HEIGHT / 2 + PLATE_MARGIN,
+      ),
+    0,
+  );
+  const half = Math.max(radius + CLOCK_MARGIN, reach);
   const center: Point = { x: half, y: half };
   const box = { width: half * 2, height: half * 2 };
   const slots: SlotPosition[] = doc.slots.map((slot, index) => {
@@ -118,6 +157,8 @@ export function layoutClock(
     plusPositions.push({ index, angle, position: polarToCartesian(center, radius, angle) });
   }
 
+  const attached = attachedLayout(doc, center, radius);
+
   return {
     center,
     radius,
@@ -128,8 +169,74 @@ export function layoutClock(
     loops,
     exits,
     plusPositions,
+    attached: attached.plates,
+    attachedColumns: attached.columns,
     fit: (viewport) => fitBox(box, viewport),
   };
+}
+
+/** How far a box of this half size reaches along a unit direction. */
+function extentAlong(halfWidth: number, halfHeight: number, direction: Point): number {
+  return halfWidth * Math.abs(direction.x) + halfHeight * Math.abs(direction.y);
+}
+
+/**
+ * The plates of every Slot: a column per kind, outward from the card (beyond the Exit label of an
+ * Exit Point), Side Slots on the side the ring runs on to and Sub-pilots on the side it comes
+ * from, so the Slot's radial axis stays free for the Exit arrow.
+ */
+function attachedLayout(
+  doc: Pick<AssemblyFile, 'slots'>,
+  center: Point,
+  radius: number,
+): { plates: AttachedPlate[]; columns: ClockLayout['attachedColumns'] } {
+  const n = doc.slots.length;
+  const plates: AttachedPlate[] = [];
+  const columns: ClockLayout['attachedColumns'] = [];
+  doc.slots.forEach((slot, index) => {
+    const lists: [AttachedKind, number, string[]][] = [
+      ['subPilot', -1, (slot.subPilots ?? []).map((sub) => sub.unit)],
+      ['sideSlot', 1, (slot.sideSlots ?? []).map(sideSlotName)],
+    ];
+    if (lists.every(([, , names]) => names.length === 0)) return;
+    const angle = slotAngle(index, n);
+    const position = polarToCartesian(center, radius, angle);
+    const outward = polarToCartesian({ x: 0, y: 0 }, 1, angle);
+    const across = { x: -outward.y, y: outward.x };
+    const isExit = slot.exitPoint === true || index === n - 1;
+    const exitLength = radius / 4;
+    const clear = isExit
+      ? CARD_HEIGHT / 2 +
+        exitLength +
+        EXIT_LABEL_GAP +
+        extentAlong(EXIT_LABEL_WIDTH / 2, EXIT_LABEL_HEIGHT / 2, outward)
+      : extentAlong(CARD_WIDTH / 2, CARD_HEIGHT / 2, outward);
+    for (const [kind, side, names] of lists) {
+      if (names.length === 0) continue;
+      const halfHeight = (names.length * PLATE_HEIGHT + (names.length - 1) * PLATE_GAP) / 2;
+      const along = clear + PLATE_OFFSET + extentAlong(PLATE_WIDTH / 2, halfHeight, outward);
+      const aside =
+        side * (PLATE_AXIS_CLEARANCE + extentAlong(PLATE_WIDTH / 2, halfHeight, across));
+      const middle = {
+        x: position.x + outward.x * along + across.x * aside,
+        y: position.y + outward.y * along + across.y * aside,
+      };
+      columns.push({ slot: slot.name, kind, position: middle });
+      names.forEach((name, i) => {
+        plates.push({
+          slot: slot.name,
+          kind,
+          name,
+          index: i,
+          position: {
+            x: middle.x,
+            y: middle.y - halfHeight + i * (PLATE_HEIGHT + PLATE_GAP) + PLATE_HEIGHT / 2,
+          },
+        });
+      });
+    }
+  });
+  return { plates, columns };
 }
 
 export function fitBox(

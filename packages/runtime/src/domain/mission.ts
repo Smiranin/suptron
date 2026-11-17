@@ -101,6 +101,13 @@ export interface MissionSummary {
   usageResetsAt?: string;
 }
 
+/** What the Pilot did with one Sub-pilot in the Slot's last Attempt; `returns` counts error-free ones. */
+export interface SubPilotActivity {
+  unit: string;
+  calls: number;
+  returns: number;
+}
+
 export interface SlotRecord {
   name: string;
   attempts: number;
@@ -116,6 +123,45 @@ export interface SlotRecord {
   checkResults: CheckResult[];
   /** In the order taken; absent when the Core took none on this Slot. */
   resolutions?: Resolution[];
+  /** The Sub-pilots of the last Attempt, in the Slot's order; absent when the Slot has none. */
+  subPilots?: SubPilotActivity[];
+}
+
+/** `waiting`: in its Slot's chain, its turn has not come; `interrupted`: by a Stop or a restart. */
+export type SideSlotStatus = 'waiting' | 'running' | 'done' | 'failed' | 'interrupted';
+
+/**
+ * A Side Slot that joined its Slot's chain at least once: where it stands, how often it ran, what
+ * it cost, and as its note what its Pilot handed over or why it failed or was interrupted (absent
+ * while it waits or runs).
+ */
+export interface SideSlotRecord {
+  name: string;
+  parent: string;
+  unit: string;
+  status: SideSlotStatus;
+  starts: number;
+  note?: string;
+  cost: Cost;
+}
+
+/** The transcript line of a Slot done again while its Side Slots from an earlier time still ran. */
+export const SIDE_SLOTS_LEFT_OUT_NOTE =
+  'The Side Slots of this Slot were not started again: those of an earlier time still run.';
+
+const SIDE_SLOT_ENDINGS: Record<'done' | 'failed' | 'interrupted', string> = {
+  done: 'The Side Slot is done.',
+  failed: 'The Side Slot failed.',
+  interrupted: 'The Side Slot was interrupted.',
+};
+
+/** The transcript line that ends a Side Slot's run; the server's store and the web reducer both write it. */
+export function sideSlotEndedNote(
+  status: 'done' | 'failed' | 'interrupted',
+  note?: string,
+): string {
+  const head = SIDE_SLOT_ENDINGS[status];
+  return status === 'done' || note === undefined ? head : `${head} ${note}`;
 }
 
 export interface PendingQuestion {
@@ -144,6 +190,8 @@ export interface MissionDetail {
   assembly: AssemblyFile;
   /** Assembly order, then the `core` pseudo-Slot. */
   slots: SlotRecord[];
+  /** The Side Slots started so far, in Assembly order. */
+  sideSlots: SideSlotRecord[];
   transcript: TranscriptSection[];
   /** True for Missions recovered from the ledger after a restart, resumed or not. */
   transcriptLost: boolean;

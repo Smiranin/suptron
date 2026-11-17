@@ -1,8 +1,9 @@
 import type { AssemblyFile } from '@suptron/runtime/browser';
+import type { AttachedFocus } from './inspector/AttachedPanel';
 import { reduce, type Command } from './model/reducer';
 
 export type Selection = string | 'core' | null;
-export type InspectorTab = 'general' | 'context' | 'done' | 'loop' | 'exit';
+export type InspectorTab = 'general' | 'context' | 'done' | 'loop' | 'exit' | 'attached';
 
 export interface EditorState {
   doc: AssemblyFile;
@@ -11,11 +12,14 @@ export interface EditorState {
   selected: Selection;
   inspectorOpen: boolean;
   tab: InspectorTab;
+  /** The row of the Attached tab a click on a plate brought into view. */
+  attachedFocus?: AttachedFocus;
 }
 
 export type EditorAction =
   | { type: 'command'; cmd: Command }
   | { type: 'select'; selected: Selection }
+  | { type: 'selectAttached'; slot: string; focus: AttachedFocus }
   | { type: 'openInspector'; tab?: InspectorTab }
   | { type: 'closeInspector' }
   | { type: 'setTab'; tab: InspectorTab }
@@ -46,9 +50,21 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
       }
       return { ...state, doc, selected };
     }
-    case 'select':
+    case 'select': {
       // Selecting opens the inspector (FR-31); a double-click additionally forces the General tab (FR-29).
-      return { ...state, selected: action.selected, inspectorOpen: action.selected !== null };
+      const { attachedFocus: _dropped, ...rest } = state;
+      void _dropped;
+      return { ...rest, selected: action.selected, inspectorOpen: action.selected !== null };
+    }
+    case 'selectAttached':
+      // A plate selects its Slot and opens the Attached tab at its row.
+      return {
+        ...state,
+        selected: action.slot,
+        inspectorOpen: true,
+        tab: 'attached',
+        attachedFocus: action.focus,
+      };
     case 'openInspector':
       return { ...state, inspectorOpen: true, tab: action.tab ?? state.tab };
     case 'closeInspector':

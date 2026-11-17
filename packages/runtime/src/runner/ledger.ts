@@ -4,7 +4,7 @@ import { dirname, join } from 'node:path';
 import { ledgerRelPath } from '../config/paths.js';
 import type { AssemblyFile } from '../config/schemas.js';
 import type { MissionSnapshot } from '../config/snapshot.js';
-import type { MissionSummary, SlotRecord } from '../domain/mission.js';
+import type { MissionSummary, SideSlotRecord, SlotRecord } from '../domain/mission.js';
 import type { MissionMeta, RunnerProgress } from './runner.js';
 
 /**
@@ -30,6 +30,8 @@ export interface LedgerEntry {
   summary: MissionSummary;
   assembly: AssemblyFile;
   slots: SlotRecord[];
+  /** Absent in entries written before Side Slots existed. */
+  sideSlots?: SideSlotRecord[];
   /** Absent in entries written before Missions could be resumed. */
   resume?: ResumeState;
 }

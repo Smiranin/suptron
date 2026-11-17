@@ -15,13 +15,19 @@ function ExecutionSection({
   current,
   onToggle,
   state,
+  agent,
 }: {
   section: TranscriptSection;
   open: boolean;
   current: boolean;
   onToggle: () => void;
   state: ReadyMissionState;
+  agent?: string | undefined;
 }) {
+  const entries =
+    agent === undefined
+      ? section.entries
+      : section.entries.filter((e) => 'agent' in e && e.agent?.name === agent);
   const title = sectionTitle(section.execution);
   return (
     <section
@@ -58,10 +64,10 @@ function ExecutionSection({
               {section.dropped} earlier entries were dropped
             </p>
           )}
-          {section.entries.map((entry) => (
+          {entries.map((entry) => (
             <Entry key={entry.id} entry={entry} />
           ))}
-          {section.entries.length === 0 && section.dropped === 0 && !current && (
+          {entries.length === 0 && section.dropped === 0 && !current && (
             <p className="text-muted-foreground m-0 px-3 py-2 text-xs italic">Nothing yet.</p>
           )}
           {current && <LiveRow state={state} />}
@@ -71,15 +77,20 @@ function ExecutionSection({
   );
 }
 
-/** One Slot's transcript: sections per execution, the current one open, earlier ones collapsed (FR-20 to FR-23). */
+/**
+ * One Slot's or Side Slot's transcript: sections per execution, the current one open, earlier
+ * ones collapsed (FR-20 to FR-23). With `agent`, only what that called agent did is shown.
+ */
 export function TranscriptView({
   state,
   slot,
   dispatch,
+  agent,
 }: {
   state: ReadyMissionState;
   slot: string;
   dispatch: Dispatch<MissionPageAction>;
+  agent?: string;
 }) {
   const sections = sectionsOf(state, slot);
   const lastEntryId = sections.at(-1)?.entries.at(-1)?.id ?? null;
@@ -104,14 +115,17 @@ export function TranscriptView({
         {sections.map((section) => {
           const id = executionId(section.execution);
           const current = isCurrentSection(state, section);
+          // A Side Slot runs beside the current Slot: its latest run is open by default.
+          const latestSide = section.sideSlotOf !== undefined && section === sections.at(-1);
           return (
             <ExecutionSection
               key={id}
               section={section}
               current={current}
-              open={current || state.panel.expanded.has(id)}
+              open={current || latestSide || state.panel.expanded.has(id)}
               onToggle={() => dispatch({ type: 'toggleSection', executionId: id })}
               state={state}
+              agent={agent}
             />
           );
         })}

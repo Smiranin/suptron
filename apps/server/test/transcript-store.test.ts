@@ -96,6 +96,37 @@ describe('TranscriptStore', () => {
     });
   });
 
+  it('files the entries of two Slots that work at once in their own sections, with markers', () => {
+    const store = new TranscriptStore();
+    store.apply(ev('slot.started', { slot: 'a', attempt: 1 }));
+    store.apply(ev('slot.started', { slot: 'b', attempt: 1 }));
+    const marker = { name: 'unit-tests', callId: 'c1' };
+    store.apply(
+      ev('agent.tool_call', {
+        slot: 'a',
+        payload: { type: 'tool_call', id: 't1', name: 'Bash', input: {}, agent: marker },
+      }),
+    );
+    store.apply(ev('agent.text', { slot: 'b', payload: { type: 'text', text: 'from b' } }));
+    store.apply(
+      ev('agent.tool_result', {
+        slot: 'a',
+        payload: { type: 'tool_result', toolCallId: 't1', output: 'ok', isError: false },
+      }),
+    );
+    store.apply(ev('agent.text', { slot: 'a', payload: { type: 'text', text: 'from a' } }));
+    store.apply(ev('agent.error', { slot: 'core', payload: { type: 'error', message: 'x' } }));
+    const [a, b] = store.sections(m);
+    expect(a!.entries).toMatchObject([
+      { kind: 'tool_call', toolCallId: 't1', agent: marker, result: { output: 'ok' } },
+      { kind: 'text', text: 'from a' },
+    ]);
+    expect(b!.entries).toMatchObject([
+      { kind: 'text', text: 'from b' },
+      { kind: 'error', message: 'x' },
+    ]);
+  });
+
   it('trims earlier sections to the last 200 entries and counts the dropped ones', () => {
     const store = new TranscriptStore();
     store.apply(ev('slot.started', { slot: 'a', attempt: 1 }));

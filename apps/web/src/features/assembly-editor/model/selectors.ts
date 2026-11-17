@@ -72,7 +72,9 @@ export function effectiveSlot(doc: AssemblyFile, slot: SlotFile, units: UnitInde
     mayAskCommander,
     memoryMode: pick(slot.memoryMode, undefined, defaultMemoryMode(mayAskCommander.value)),
     attemptLimit: pick(slot.attemptLimit, undefined, core.defaultAttemptLimit),
-    resolved: unit ? resolveSlot(slot, unit, core, index === doc.slots.length - 1) : null,
+    resolved: unit
+      ? resolveSlot(slot, unit, core, index === doc.slots.length - 1, [...units.values()])
+      : null,
   };
 }
 

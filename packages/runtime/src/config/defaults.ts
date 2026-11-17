@@ -52,6 +52,7 @@ export const DEFAULTS = {
       ciWaitTimeoutMinutes: 30,
     },
     knowledgeSources: [] as const,
+    outerFolders: [] as const,
     engine: 'claude-code' as const,
   },
 } as const;

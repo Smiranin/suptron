@@ -12,7 +12,13 @@ import { polarToCartesian } from '../../../lib/geometry';
 import { ClockView } from '../../clock/ClockView';
 import type { ClockViewportState } from '../../clock/use-clock-viewport';
 import { summarizeCondition } from '@suptron/runtime/browser';
-import { CARD_HEIGHT, CARD_WIDTH, type ClockLayout, type Viewport } from '../model/layout';
+import {
+  CARD_HEIGHT,
+  CARD_WIDTH,
+  type AttachedPlate,
+  type ClockLayout,
+  type Viewport,
+} from '../model/layout';
 import type { Command } from '../model/reducer';
 import { cardSummary, type UnitIndex } from '../model/selectors';
 import type { EditorIssues } from '../model/validate';
@@ -31,6 +37,10 @@ export interface ClockCanvasProps {
   selected: string | 'core' | null;
   dispatch: (cmd: Command) => void;
   onSelect: (selected: string | 'core' | null) => void;
+  /** A click on a Sub-pilot or Side Slot plate. */
+  onPlateClick: (plate: AttachedPlate) => void;
+  /** The plate whose row the Inspector shows, highlighted on the clock. */
+  focusedPlate: AttachedPlate | null;
   onOpenInspector: () => void;
   onPlus: (index: number) => void;
   /** The canvas element and the viewport state, owned by the page so the palette drop can use them too. */
@@ -166,6 +176,14 @@ export function ClockCanvas(props: ClockCanvasProps) {
           onOpenInspector();
         }}
         onCoreClick={() => onSelect('core')}
+        onPlateClick={props.onPlateClick}
+        plate={(plate) => ({
+          selected:
+            props.focusedPlate !== null &&
+            props.focusedPlate.slot === plate.slot &&
+            props.focusedPlate.kind === plate.kind &&
+            props.focusedPlate.index === plate.index,
+        })}
         onLoopHover={setHoveredLoop}
         loops={loops}
         exits={exits}

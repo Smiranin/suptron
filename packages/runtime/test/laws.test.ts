@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { validateOuterFolders } from '../src/config/index.js';
 import { evaluateCommand, evaluatePath, type CommandContext } from '../src/laws/index.js';
 
 const ctx: CommandContext = {
@@ -8,6 +9,7 @@ const ctx: CommandContext = {
   taskPath: '/work/tasks/t1',
   taskDocuments: ['/work/tasks/t1/SPEC.md'],
   configHome: '/home/me/.suptron',
+  outerFolders: [],
   currentBranch: 'feature/x',
 };
 const onMain: CommandContext = { ...ctx, currentBranch: 'main' };
@@ -258,6 +260,51 @@ describe('evaluatePath with a text Task stored in the configuration home', () =>
     ['/home/me/.suptron/hangar/analyst.md', 'read', false],
   ] as [string, 'read' | 'write' | 'create', boolean][])('%s (%s) → %s', (path, mode, allowed) => {
     expect(evaluatePath(path, mode, textTask).allowed).toBe(allowed);
+  });
+});
+
+describe('evaluatePath with Outer Folders', () => {
+  const outer: CommandContext = { ...ctx, outerFolders: ['/work/notes', '/home/me/logs'] };
+  it.each([
+    ['/work/notes/glossary.md', 'create', true],
+    ['/work/notes/deep/glossary.md', 'write', true],
+    ['/home/me/logs/achievements.md', 'write', true],
+    ['/work/notes-other/x.md', 'create', false],
+    ['/work/elsewhere/x.md', 'create', false],
+    ['/home/me/.suptron/hangar/analyst.md', 'write', false],
+  ] as [string, 'read' | 'write' | 'create', boolean][])('%s (%s) → %s', (path, mode, allowed) => {
+    expect(evaluatePath(path, mode, outer).allowed).toBe(allowed);
+  });
+
+  it.each([
+    ['equal to the configuration home', '/home/me/.suptron'],
+    ['inside the configuration home', '/home/me/.suptron/missions'],
+    ['containing the configuration home', '/home/me'],
+  ])('never opens the configuration home with a folder %s', (_, folder) => {
+    const listed: CommandContext = { ...ctx, outerFolders: [folder] };
+    for (const mode of ['read', 'write', 'create'] as const) {
+      expect(evaluatePath('/home/me/.suptron/missions/active.json', mode, listed).allowed).toBe(
+        false,
+      );
+    }
+  });
+
+  it('names the Outer Folders where a write is refused', () => {
+    const verdict = evaluatePath('/tmp/x', 'create', outer);
+    expect(verdict.reason).toContain('/work/notes, /home/me/logs');
+  });
+});
+
+describe('validateOuterFolders', () => {
+  it.each([
+    ['/work/notes', []],
+    ['notes', ['outerFolders.0']],
+    ['/home/me/.suptron', ['outerFolders.0']],
+    ['/home/me/.suptron/notes', ['outerFolders.0']],
+    ['/home/me', ['outerFolders.0']],
+    ['/home/me/.suptron-notes', []],
+  ] as [string, string[]][])('%s → %j', (folder, paths) => {
+    expect(validateOuterFolders([folder], '/home/me/.suptron').map((i) => i.path)).toEqual(paths);
   });
 });
 

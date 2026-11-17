@@ -29,9 +29,9 @@ export function resolveKnowledgeSources(
   });
 }
 
-/** Builds the paths, texts and Slot Outputs a Slot receives, from its `context` settings. */
+/** Builds the paths, texts and Slot Outputs a Slot or a Side Slot receives, from its `context` settings. */
 export function buildContextBundle(
-  slot: ResolvedSlot,
+  slot: Pick<ResolvedSlot, 'context'>,
   locations: MissionLocations,
   slotOutputs: ReadonlyMap<string, string>,
 ): ContextBundle {

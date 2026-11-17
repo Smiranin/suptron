@@ -1,6 +1,7 @@
 export * from './defaults.js';
 export * from './etag.js';
 export * from './load.js';
+export * from './outer-folders.js';
 export * from './paths.js';
 export * from './schemas.js';
 export * from './serialize.js';

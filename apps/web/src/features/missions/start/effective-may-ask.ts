@@ -16,7 +16,7 @@ export function effectiveMayAsk(
   assembly.slots.forEach((slot, index) => {
     const unit = byName.get(slot.unit);
     result[slot.name] = unit
-      ? resolveSlot(slot, unit, core, index === assembly.slots.length - 1).mayAskCommander
+      ? resolveSlot(slot, unit, core, index === assembly.slots.length - 1, units).mayAskCommander
       : (slot.mayAskCommander ?? false);
   });
   return result;

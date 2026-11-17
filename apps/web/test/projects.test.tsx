@@ -85,6 +85,7 @@ describe('Projects overview', () => {
           ciWaitTimeoutMinutes: 30,
         },
         knowledgeSources: [],
+        outerFolders: [],
         engine: 'claude-code',
       },
     });
@@ -118,6 +119,7 @@ describe('Projects overview', () => {
         title: 'Trips',
         workspace: { kind: 'none' },
         knowledgeSources: [{ text: 'Prefer direct flights.', title: 'Airlines' }],
+        outerFolders: [],
         engine: 'claude-code',
       },
     });
@@ -238,6 +240,39 @@ describe('Project page', () => {
       { path: 'README.md' },
       { path: 'docs/adr' },
     ]);
+  });
+
+  it('edits Outer Folders: a relative path is refused, the server refusal shows on its row, a valid one is saved', async () => {
+    const home = useFakeHome();
+    home.existingPaths.set('/work/notes', 'dir');
+    home.existingPaths.set('/home/me/.suptron/notes', 'dir');
+    const user = userEvent.setup();
+    renderApp('/projects/my-app', home.live);
+    await user.click(await screen.findByRole('button', { name: /Add Outer Folder/ }));
+    const field = screen.getByLabelText('Outer Folder 1');
+    await user.type(field, 'notes');
+    await user.click(screen.getByTestId('save-button'));
+    expect(await screen.findByText('An Outer Folder must be an absolute path')).toBeInTheDocument();
+    expect(home.requestsTo('PUT', '/api/projects/my-app/profile')).toHaveLength(0);
+
+    await user.clear(field);
+    await user.type(field, '/home/me/.suptron/notes');
+    await waitFor(() =>
+      expect(screen.getAllByTestId('path-status').at(-1)).toHaveTextContent('Found folder'),
+    );
+    await user.click(screen.getByTestId('save-button'));
+    const row = screen.getAllByTestId('outer-folder-row')[0]!;
+    expect(await within(row).findByText(/may not open the configuration home/)).toBeInTheDocument();
+
+    await user.clear(field);
+    await user.type(field, '/work/notes');
+    await waitFor(() =>
+      expect(screen.getAllByTestId('path-status').at(-1)).toHaveTextContent('Found folder'),
+    );
+    await user.click(screen.getByTestId('save-button'));
+    await waitFor(() =>
+      expect(home.projects.get('my-app')!.profile.outerFolders).toEqual(['/work/notes']),
+    );
   });
 
   it('changes the kind of an existing Project after a confirmation and warns about Assemblies that became invalid', async () => {

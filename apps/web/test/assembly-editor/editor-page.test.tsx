@@ -397,6 +397,83 @@ describe('Assembly editor: inspector', () => {
     );
   });
 
+  it('adds a required Sub-pilot and a Side Slot in the Attached tab and saves them', async () => {
+    const { user, home } = await openEditor();
+    const inspector = await select('tester');
+    await user.click(within(inspector).getByRole('tab', { name: 'Attached' }));
+    await user.click(within(inspector).getByRole('button', { name: /Add Sub-pilot/ }));
+    await user.click(
+      within(await screen.findByTestId('unit-picker')).getByRole('button', { name: /^reviewer/ }),
+    );
+    await user.click(
+      within(inspector).getByRole('switch', { name: 'Required: reviewer of tester' }),
+    );
+    await user.click(within(inspector).getByRole('button', { name: /Add Side Slot/ }));
+    await user.click(
+      within(await screen.findByTestId('unit-picker')).getByRole('button', { name: /^analyst/ }),
+    );
+    // the Unit's name is taken by a Slot: the Side Slot gets one of its own
+    const side = within(inspector).getByRole('group', { name: 'Side Slot analyst-2' });
+    await user.click(
+      within(side).getByRole('checkbox', { name: 'Read the Slot Output of tester (analyst-2)' }),
+    );
+    const request = await save(home, user);
+    expect((request.body as AssemblyFile).slots[3]).toMatchObject({
+      name: 'tester',
+      subPilots: [{ unit: 'reviewer', required: true }],
+      sideSlots: [{ name: 'analyst-2', unit: 'analyst', context: { slotOutputs: ['tester'] } }],
+    });
+  });
+
+  it('draws plates outside the ring and opens the row of a clicked plate', async () => {
+    const doc = primaryAssembly();
+    doc.slots[3] = {
+      ...doc.slots[3]!,
+      subPilots: [{ unit: 'reviewer' }],
+      sideSlots: [
+        { name: 'docs', unit: 'analyst' },
+        { name: 'demo', unit: 'analyst' },
+      ],
+    };
+    const home = FakeHome.primary();
+    home.projects.get('my-app')!.assemblies.set('feature', { doc });
+    const { user } = await openEditor(ROUTE, home);
+    const plates = screen.getAllByTestId('attached-plate');
+    expect(plates.map((p) => [p.dataset.slot, p.dataset.kind, p.dataset.name])).toEqual([
+      ['tester', 'subPilot', 'reviewer'],
+      ['tester', 'sideSlot', 'docs'],
+      ['tester', 'sideSlot', 'demo'],
+    ]);
+    await user.click(screen.getByRole('button', { name: 'Side Slot demo of tester' }));
+    const inspector = await screen.findByTestId('inspector');
+    expect(within(inspector).getByRole('tab', { name: 'Attached' })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    );
+    expect(within(inspector).getByRole('group', { name: 'Side Slot demo' })).toHaveAttribute(
+      'data-focused',
+      'true',
+    );
+    expect(screen.getByRole('button', { name: 'Side Slot demo of tester' })).toHaveAttribute(
+      'data-selected',
+      'true',
+    );
+  });
+
+  it('shows a Side Slot name taken by a Slot as an Issue of its Slot', async () => {
+    const doc = primaryAssembly();
+    doc.slots[3] = { ...doc.slots[3]!, sideSlots: [{ name: 'analyst', unit: 'reviewer' }] };
+    const home = FakeHome.primary();
+    home.projects.get('my-app')!.assemblies.set('feature', { doc });
+    await openEditor(ROUTE, home);
+    expect(screen.getByTestId('issue-error')).toHaveTextContent(/Side Slot name "analyst"/);
+    expect(screen.getByTestId('issue-error').dataset.slot).toBe('tester');
+    const inspector = await select('tester');
+    expect(within(inspector).getByTestId('inspector-issues')).toHaveTextContent(
+      /Side Slot name "analyst"/,
+    );
+  });
+
   it('opens the Inspector at 480px and widens it by dragging its left edge', async () => {
     window.localStorage.removeItem('suptron.inspectorWidth');
     await openEditor();

@@ -1,7 +1,15 @@
 import { cn } from '@suptron/ui/lib/utils';
 import type { HTMLAttributes, ReactNode } from 'react';
 import { polarToCartesian, type Point } from '../../lib/geometry';
-import { CARD_HEIGHT, CARD_WIDTH, type ClockLayout } from './layout';
+import {
+  CARD_HEIGHT,
+  CARD_WIDTH,
+  PLATE_HEIGHT,
+  PLATE_WIDTH,
+  type AttachedKind,
+  type AttachedPlate,
+  type ClockLayout,
+} from './layout';
 
 export function Ring({ layout }: { layout: ClockLayout }) {
   return (
@@ -250,5 +258,103 @@ export function CardShell({
     >
       {children}
     </div>
+  );
+}
+
+/** The look of a plate: a Sub-pilot is a pill with a dashed border, a Side Slot a solid tab. */
+const PLATE_LOOK: Record<AttachedKind, string> = {
+  subPilot: 'rounded-full border-dashed bg-background',
+  sideSlot: 'rounded-sm border-l-4 border-l-primary/70 bg-card',
+};
+
+const PLATE_LABEL: Record<AttachedKind, string> = {
+  subPilot: 'Sub-pilot',
+  sideSlot: 'Side Slot',
+};
+
+/** One Sub-pilot or Side Slot outside its Slot's card; `status` colours it on the Mission page. */
+export function AttachedPlateShell({
+  plate,
+  status,
+  selected,
+  onClick,
+}: {
+  plate: AttachedPlate;
+  status?: string | undefined;
+  selected?: boolean | undefined;
+  onClick?: (() => void) | undefined;
+}) {
+  return (
+    <button
+      type="button"
+      data-testid="attached-plate"
+      data-slot={plate.slot}
+      data-kind={plate.kind}
+      data-name={plate.name}
+      data-status={status}
+      data-selected={selected ? 'true' : undefined}
+      aria-label={`${PLATE_LABEL[plate.kind]} ${plate.name} of ${plate.slot}`}
+      title={`${PLATE_LABEL[plate.kind]} ${plate.name}${status ? `: ${status}` : ''}`}
+      onClick={(event) => {
+        event.stopPropagation();
+        onClick?.();
+      }}
+      style={{
+        position: 'absolute',
+        left: plate.position.x - PLATE_WIDTH / 2,
+        top: plate.position.y - PLATE_HEIGHT / 2,
+        width: PLATE_WIDTH,
+        height: PLATE_HEIGHT,
+      }}
+      className={cn(
+        'text-foreground flex items-center gap-1.5 border px-2 text-left text-[11px] shadow-xs select-none',
+        PLATE_LOOK[plate.kind],
+        selected ? 'border-primary ring-primary/30 ring-2' : 'border-border',
+      )}
+    >
+      {status && <span className={cn('size-2 shrink-0 rounded-full', plateStatusColor(status))} />}
+      <span className="min-w-0 truncate font-mono">{plate.name}</span>
+    </button>
+  );
+}
+
+/** The colour of a plate's status dot. */
+function plateStatusColor(status: string): string {
+  switch (status) {
+    case 'running':
+      return 'bg-primary animate-pulse';
+    case 'done':
+      return 'bg-success';
+    case 'failed':
+      return 'bg-destructive';
+    case 'waiting':
+    case 'interrupted':
+      return 'bg-warning';
+    default:
+      return 'bg-muted-foreground';
+  }
+}
+
+/** A thin line from a Slot's card to each column of its plates. */
+export function AttachedConnectors({ layout }: { layout: ClockLayout }) {
+  return (
+    <g data-testid="attached-connectors">
+      {layout.attachedColumns.map((column) => {
+        const slot = layout.slots.find((s) => s.name === column.slot);
+        if (!slot) return null;
+        return (
+          <line
+            key={`${column.slot}-${column.kind}`}
+            x1={slot.position.x}
+            y1={slot.position.y}
+            x2={column.position.x}
+            y2={column.position.y}
+            className="stroke-border"
+            strokeWidth={1.5}
+            strokeDasharray={column.kind === 'subPilot' ? '3 3' : undefined}
+          />
+        );
+      })}
+    </g>
   );
 }

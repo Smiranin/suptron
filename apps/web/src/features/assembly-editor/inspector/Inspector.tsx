@@ -1,8 +1,6 @@
 import {
-  CONTEXT_SOURCE_REQUIREMENTS,
   DEFAULTS,
   defaultMemoryMode,
-  missingCapabilities,
   resolveCore,
   resolveSlot,
   summarizeCondition,
@@ -13,7 +11,6 @@ import {
   type UnitFile,
 } from '@suptron/runtime/browser';
 import { Button } from '@suptron/ui/components/button';
-import { Checkbox } from '@suptron/ui/components/checkbox';
 import { Input } from '@suptron/ui/components/input';
 import { Label } from '@suptron/ui/components/label';
 import {
@@ -28,11 +25,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@suptron/ui/components
 import { X } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { CheckListEditor } from '../../../components/check-list-editor';
-import { CollapsibleSection } from '../../../components/collapsible-section';
 import { LimitField } from '../../../components/limit-field';
-import { Markdown } from '../../../components/markdown';
 import { PromptPreviewButton } from '../../../components/prompt-preview-dialog';
-import { MarkdownField } from '../../../components/markdown-field';
 import { ModelSelect } from '../../../components/model-select';
 import { NameField, nameError } from '../../../components/name-field';
 import { clampWidth, useWidthDrag } from '../../../lib/use-width-drag';
@@ -40,8 +34,11 @@ import type { InspectorTab } from '../editor-state';
 import type { Command } from '../model/reducer';
 import { earlierSlots, effectiveSlot, isLastSlot, type UnitIndex } from '../model/selectors';
 import type { EditorIssues } from '../model/validate';
+import { AttachedPanel, type AttachedFocus } from './AttachedPanel';
+import { ContextFields } from './ContextFields';
 import { CoreDirectivesPanel } from './CoreDirectivesPanel';
 import { OverrideField } from './OverrideField';
+import { UnitTextAddition } from './UnitTextAddition';
 
 export interface InspectorProps {
   doc: AssemblyFile;
@@ -54,6 +51,7 @@ export interface InspectorProps {
   onTab(tab: InspectorTab): void;
   dispatch(cmd: Command): void;
   onClose(): void;
+  attachedFocus?: AttachedFocus | undefined;
 }
 
 const WIDTH_STORAGE_KEY = 'suptron.inspectorWidth';
@@ -131,13 +129,6 @@ export function Inspector(props: InspectorProps) {
   );
 }
 
-const CONTEXT_SWITCHES = ['taskDocuments', 'knowledgeSources', 'gitConventions'] as const;
-const CONTEXT_LABELS: Record<(typeof CONTEXT_SWITCHES)[number], string> = {
-  taskDocuments: 'Task documents',
-  knowledgeSources: 'Knowledge Sources',
-  gitConventions: 'Git conventions',
-};
-
 function SlotInspector({
   doc,
   units,
@@ -147,6 +138,7 @@ function SlotInspector({
   tab,
   onTab,
   dispatch,
+  attachedFocus,
 }: InspectorProps & { slot: SlotFile }) {
   const effective = effectiveSlot(doc, slot, units);
   const unit = units.get(slot.unit);
@@ -156,12 +148,6 @@ function SlotInspector({
   const patch = (p: Partial<Omit<SlotFile, 'name' | 'unit'>>) =>
     dispatch({ type: 'patchSlot', name: slot.name, patch: p });
   const defaultLoopLimit = doc.core.defaultLoopLimit ?? DEFAULTS.core.defaultLoopLimit;
-  // A source the Workspace cannot feed is not offered (SPEC FR-7); a file that still names it is invalid.
-  const contextSwitches = CONTEXT_SWITCHES.filter(
-    (key) =>
-      capabilities === null ||
-      missingCapabilities(CONTEXT_SOURCE_REQUIREMENTS[key], capabilities).length === 0,
-  );
 
   return (
     <div className="flex flex-col gap-4">
@@ -180,6 +166,7 @@ function SlotInspector({
           <TabsTrigger value="done">Done</TabsTrigger>
           <TabsTrigger value="loop">Loop</TabsTrigger>
           <TabsTrigger value="exit">Exit</TabsTrigger>
+          <TabsTrigger value="attached">Attached</TabsTrigger>
         </TabsList>
 
         <TabsContent value="general" className="flex flex-col gap-4 pt-2">
@@ -266,59 +253,17 @@ function SlotInspector({
             value={slot.instructions}
             onChange={(instructions) => patch({ instructions })}
           />
-          {unit && <SlotPromptButton doc={doc} slot={slot} unit={unit} last={last} />}
+          {unit && <SlotPromptButton doc={doc} slot={slot} unit={unit} units={units} last={last} />}
         </TabsContent>
 
         <TabsContent value="context" className="flex flex-col gap-3 pt-2">
-          {contextSwitches.map((key) => {
-            const value = slot.context?.[key] ?? DEFAULTS.slot.context[key];
-            return (
-              <label key={key} className="flex items-center justify-between gap-2 text-sm">
-                {CONTEXT_LABELS[key]}
-                <Switch
-                  checked={value}
-                  aria-label={CONTEXT_LABELS[key]}
-                  onCheckedChange={(v) =>
-                    patch({
-                      context: cleanContext({
-                        ...slot.context,
-                        [key]: v === DEFAULTS.slot.context[key] ? undefined : v,
-                      }),
-                    })
-                  }
-                />
-              </label>
-            );
-          })}
-          <div className="flex flex-col gap-2 pt-2">
-            <Label>Slot Outputs of earlier Slots</Label>
-            {earlier.length === 0 && (
-              <p className="text-muted-foreground text-xs">No earlier Slots.</p>
-            )}
-            {earlier.map((e) => {
-              const checked = slot.context?.slotOutputs?.includes(e.name) ?? false;
-              return (
-                <label key={e.name} className="flex items-center gap-2 text-sm">
-                  <Checkbox
-                    checked={checked}
-                    aria-label={`Read the Slot Output of ${e.name}`}
-                    onCheckedChange={(v) => {
-                      const current = slot.context?.slotOutputs ?? [];
-                      const next =
-                        v === true ? [...current, e.name] : current.filter((n) => n !== e.name);
-                      patch({
-                        context: cleanContext({
-                          ...slot.context,
-                          slotOutputs: next.length > 0 ? next : undefined,
-                        }),
-                      });
-                    }}
-                  />
-                  {e.name}
-                </label>
-              );
-            })}
-          </div>
+          <ContextFields
+            context={slot.context}
+            onChange={(context) => patch({ context })}
+            capabilities={capabilities}
+            readable={earlier.map((e) => e.name)}
+            readableLabel="Slot Outputs of earlier Slots"
+          />
         </TabsContent>
 
         <TabsContent value="done" className="pt-2">
@@ -504,15 +449,20 @@ function SlotInspector({
             />
           </div>
         </TabsContent>
+
+        <TabsContent value="attached" className="pt-2">
+          <AttachedPanel
+            doc={doc}
+            slot={slot}
+            units={units}
+            capabilities={capabilities}
+            dispatch={dispatch}
+            focus={attachedFocus}
+          />
+        </TabsContent>
       </Tabs>
     </div>
   );
-}
-
-function cleanContext(context: NonNullable<SlotFile['context']>): SlotFile['context'] {
-  const out: Record<string, unknown> = {};
-  for (const [k, v] of Object.entries(context)) if (v !== undefined) out[k] = v;
-  return Object.keys(out).length > 0 ? (out as SlotFile['context']) : undefined;
 }
 
 /** Edits the Slot name locally and renames on blur or Enter, so references are rewritten once (keyed by the Slot name). */
@@ -552,65 +502,21 @@ function SlotNameField({
   );
 }
 
-/**
- * What a Slot adds to its Unit's Rules or Instructions, under the Unit's own text, which is shown
- * read-only so the addition is written knowing what it extends.
- */
-function UnitTextAddition({
-  id,
-  kind,
-  hint,
-  unitText,
-  value,
-  onChange,
-}: {
-  id: string;
-  kind: 'Rules' | 'Instructions';
-  hint: string;
-  /** Undefined when the Unit is missing from the Hangar. */
-  unitText: string | undefined;
-  value: string | undefined;
-  /** Undefined removes the addition from the file. */
-  onChange(value: string | undefined): void;
-}) {
-  return (
-    <div className="flex flex-col gap-1" data-testid={`${id}-section`}>
-      {unitText !== undefined && (
-        <CollapsibleSection title={`${kind} from the Unit`}>
-          {unitText.trim() === '' ? (
-            <p className="text-muted-foreground text-xs">The Unit has none.</p>
-          ) : (
-            <Markdown
-              text={unitText}
-              className="bg-muted text-muted-foreground max-h-64 overflow-y-auto rounded-md p-2 text-xs"
-            />
-          )}
-        </CollapsibleSection>
-      )}
-      <Label htmlFor={id}>Additional {kind}</Label>
-      <p className="text-muted-foreground text-xs">{hint}</p>
-      <MarkdownField
-        id={id}
-        value={value ?? ''}
-        onChange={(e) => onChange(e.target.value === '' ? undefined : e.target.value)}
-      />
-    </div>
-  );
-}
-
 /** The Pilot's system text as a Mission would build it, unsaved edits included. */
 function SlotPromptButton({
   doc,
   slot,
   unit,
+  units,
   last,
 }: {
   doc: AssemblyFile;
   slot: SlotFile;
   unit: UnitFile;
+  units: UnitIndex;
   last: boolean;
 }) {
-  const resolved = resolveSlot(slot, unit, resolveCore(doc.core), last);
+  const resolved = resolveSlot(slot, unit, resolveCore(doc.core), last, [...units.values()]);
   return (
     <div>
       <PromptPreviewButton

@@ -8,6 +8,7 @@ import type { MissionPageAction, PanelTab, ReadyMissionState } from '../model/ty
 import { AttentionTab } from './AttentionTab';
 import { MissionLevelView } from './MissionLevelView';
 import { QuestionTab } from './QuestionTab';
+import { SideSlotView } from './SideSlotView';
 import { TranscriptView } from './TranscriptView';
 
 const STORAGE_KEY = 'suptron.sidePanel';
@@ -64,7 +65,13 @@ export function SidePanel({ state, dispatch, onStop }: SidePanelProps) {
   });
 
   const { panel, pendingQuestion, attention } = state;
-  const mainLabel = panel.selection.kind === 'slot' ? panel.selection.name : 'Mission';
+  const selection = panel.selection;
+  const mainLabel =
+    selection.kind === 'mission'
+      ? 'Mission'
+      : selection.kind === 'subPilot'
+        ? `${selection.slot} · ${selection.unit}`
+        : selection.name;
   const showQuestion = pendingQuestion !== undefined && state.summary.state === 'waiting_for_owner';
   const showAttention = attention !== undefined && state.summary.state === 'needs_attention';
   const tab: PanelTab =
@@ -156,8 +163,17 @@ export function SidePanel({ state, dispatch, onStop }: SidePanelProps) {
               tab !== 'main' && 'hidden',
             )}
           >
-            {panel.selection.kind === 'slot' ? (
-              <TranscriptView state={state} slot={panel.selection.name} dispatch={dispatch} />
+            {selection.kind === 'slot' ? (
+              <TranscriptView state={state} slot={selection.name} dispatch={dispatch} />
+            ) : selection.kind === 'sideSlot' ? (
+              <SideSlotView state={state} name={selection.name} dispatch={dispatch} />
+            ) : selection.kind === 'subPilot' ? (
+              <TranscriptView
+                state={state}
+                slot={selection.slot}
+                agent={selection.unit}
+                dispatch={dispatch}
+              />
             ) : (
               <MissionLevelView state={state} />
             )}

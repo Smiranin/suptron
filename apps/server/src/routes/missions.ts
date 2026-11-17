@@ -54,6 +54,7 @@ export function missionDetail(ctx: ServerContext, id: string): MissionDetail | u
     summary: record.summary,
     assembly: record.assembly,
     slots: record.slots,
+    sideSlots: record.sideSlots,
     // A recovered Mission has no sections until it is resumed; then only the new ones.
     transcript: ctx.transcripts.sections(id),
     transcriptLost: record.transcriptLost,
@@ -118,6 +119,33 @@ export function registerMissionRoutes(app: FastifyInstance, ctx: ServerContext):
       return stateError(reply, error);
     }
   });
+
+  app.post<{ Params: { id: string; name: string } }>(
+    '/api/missions/:id/side-slots/:name/stop',
+    async (request, reply) => {
+      try {
+        await ctx.registry.stopSideSlot(request.params.id, request.params.name);
+        return reply.status(204).send();
+      } catch (error) {
+        return stateError(reply, error);
+      }
+    },
+  );
+
+  app.post<{ Params: { id: string; name: string } }>(
+    '/api/missions/:id/side-slots/:name/run',
+    async (request, reply) => {
+      try {
+        ctx.registry.runSideSlot(request.params.id, request.params.name);
+        return reply.status(204).send();
+      } catch (error) {
+        if (error instanceof WorkspaceBusyError) {
+          return fail(reply, 409, { reason: 'workspace_busy', missionId: error.missionId });
+        }
+        return stateError(reply, error);
+      }
+    },
+  );
 
   app.post<{ Params: { id: string } }>('/api/missions/:id/retry', async (request, reply) => {
     const body = retrySchema.safeParse(request.body ?? {});

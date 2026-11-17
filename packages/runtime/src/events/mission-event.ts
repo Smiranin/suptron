@@ -2,22 +2,31 @@ import type { Check, CheckResult } from '../domain/check.js';
 import type { Cost } from '../domain/cost.js';
 import type { PullRequestRef } from '../domain/host.js';
 import type {
+  MissionResult,
   MissionState,
   MissionSummary,
   NeedsAttentionCause,
   Resolution,
+  SideSlotStatus,
   SlotRecord,
 } from '../domain/mission.js';
-import type { Answers, Question } from '../domain/transcript.js';
+import type { AgentMarker, Answers, Question } from '../domain/transcript.js';
 
 /** What the agent is doing between two transcript entries; `detail` names the tool when `phase` is 'tool'. */
 export type ActivityPhase = 'thinking' | 'writing' | 'tool';
 
+/** `agent` marks work done inside an agent the Pilot called. */
 export type AgentPayload =
-  | { type: 'text'; text: string }
+  | { type: 'text'; text: string; agent?: AgentMarker }
   | { type: 'activity'; phase: ActivityPhase; detail?: string }
-  | { type: 'tool_call'; id: string; name: string; input: unknown }
-  | { type: 'tool_result'; toolCallId: string; output: string; isError: boolean }
+  | { type: 'tool_call'; id: string; name: string; input: unknown; agent?: AgentMarker }
+  | {
+      type: 'tool_result';
+      toolCallId: string;
+      output: string;
+      isError: boolean;
+      agent?: AgentMarker;
+    }
   | { type: 'error'; message: string };
 
 /**
@@ -107,6 +116,27 @@ export type MissionEvent =
       slot: string;
       payload: Extract<AgentPayload, { type: 'activity' }>;
     }
+  /** The Slot's Pilot called one of its Sub-pilots in this Attempt. */
+  | {
+      type: 'agent.sub_pilot_called';
+      missionId: string;
+      seq: number;
+      slot: string;
+      attempt: number;
+      subPilot: string;
+      callId: string;
+    }
+  /** A Sub-pilot returned to the Pilot; `isError` when it ended in an error. */
+  | {
+      type: 'agent.sub_pilot_returned';
+      missionId: string;
+      seq: number;
+      slot: string;
+      attempt: number;
+      subPilot: string;
+      callId: string;
+      isError: boolean;
+    }
   | {
       type: 'check.evaluated';
       missionId: string;
@@ -140,6 +170,34 @@ export type MissionEvent =
       cost: Cost;
       missionTotal: Cost;
     }
+  /** A Side Slot (`slot`) of the Slot `parent` joined its chain and waits for its turn. */
+  | { type: 'side_slot.waiting'; missionId: string; seq: number; slot: string; parent: string }
+  /** A Side Slot began a run; `attempt` counts its runs. Its Pilot's events carry its name. */
+  | {
+      type: 'side_slot.started';
+      missionId: string;
+      seq: number;
+      slot: string;
+      parent: string;
+      attempt: number;
+    }
+  | {
+      type: 'side_slot.ended';
+      missionId: string;
+      seq: number;
+      slot: string;
+      parent: string;
+      attempt: number;
+      status: Extract<SideSlotStatus, 'done' | 'failed' | 'interrupted'>;
+      note?: string;
+    }
+  /** The Slot (`slot`) was done again while its Side Slots from an earlier time still ran. */
+  | { type: 'side_slots.left_out'; missionId: string; seq: number; slot: string }
+  /**
+   * The Exit Condition held and the final report is written; the Mission stays Running until its
+   * Side Slots have ended, then `mission.completed` follows with the same result.
+   */
+  | { type: 'mission.reported'; missionId: string; seq: number; result: MissionResult }
   | {
       type: 'mission.completed';
       missionId: string;
@@ -171,6 +229,10 @@ export const GLOBAL_STREAM_EVENT_TYPES: ReadonlySet<MissionEventType> = new Set<
   'question.asked',
   'question.answered',
   'cost.updated',
+  'side_slot.waiting',
+  'side_slot.started',
+  'side_slot.ended',
+  'mission.reported',
   'mission.completed',
   'mission.stopped',
   'mission.dismissed',

@@ -45,6 +45,7 @@ function spec(role: AgentSpec['role'], additionalDirectories: string[]): AgentSp
       taskPath: '/tmp/x/task',
       taskDocuments: [],
       configHome: '/tmp/x/home',
+      outerFolders: [],
     },
   };
 }
@@ -65,6 +66,40 @@ describe('ClaudeEngine options of the Core', () => {
     expect(options.additionalDirectories).toEqual(['/tmp/x/workspace']);
     expect(options.disallowedTools).toEqual(['AskUserQuestion']);
     expect(options.permissionMode).toBeUndefined();
+  });
+
+  it('gives a Pilot its Sub-pilots as named agents that can neither nest nor ask', async () => {
+    const options = await optionsOf({
+      ...spec('pilot', ['/tmp/x/task']),
+      subAgents: [
+        {
+          name: 'unit-tests',
+          description: 'Unit tests',
+          model: 'sonnet',
+          systemPrompt: { rules: 'Never skip a test.', instructions: 'Write unit tests.' },
+          required: true,
+        },
+      ],
+    });
+    expect(options.forwardSubagentText).toBe(true);
+    expect(options.agents).toEqual({
+      'unit-tests': {
+        description: 'Unit tests',
+        model: 'sonnet',
+        prompt: expect.stringMatching(
+          /^Never skip a test\.\n\nWrite unit tests\.\n\n## You are a Sub-pilot/,
+        ),
+        disallowedTools: ['Agent', 'AskUserQuestion'],
+      },
+    });
+    const append = (options.systemPrompt as { append: string }).append;
+    expect(append).toContain('`unit-tests`: Unit tests (required');
+  });
+
+  it('gives a Pilot without Sub-pilots no named agents', async () => {
+    const options = await optionsOf(spec('pilot', ['/tmp/x/task']));
+    expect(options.agents).toBeUndefined();
+    expect(options.forwardSubagentText).toBeUndefined();
   });
 
   it('leaves a Pilot every tool of the Engine', async () => {

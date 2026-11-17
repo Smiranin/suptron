@@ -16,8 +16,10 @@ export {
   memoryModeSchema,
   nameSchema,
   profileFileSchema,
+  sideSlotFileSchema,
   slotContextSchema,
   slotFileSchema,
+  subPilotFileSchema,
   titleSchema,
   unitFileSchema,
   unitFrontmatterSchema,
@@ -28,6 +30,9 @@ export type {
   KnowledgeSource,
   ProfileFileInput,
   RepositoryWorkspaceFile,
+  SideSlotFile,
+  SlotFile,
+  SubPilotFile,
   UnitFileInput,
   WorkspaceFile,
   WorkspaceFileInput,
@@ -40,14 +45,22 @@ export {
 export * from './workspace/kinds.js';
 // The same slug Missions give a Task title; the editors derive a new item's ID with it.
 export { slugify } from './templates/index.js';
-export { referencesToSlot, uniqueSlotName, type SlotReference } from './config/slot-names.js';
+export {
+  referencesToSlot,
+  sideSlotName,
+  slotAndSideSlotNames,
+  uniqueSlotName,
+  type SlotReference,
+} from './config/slot-names.js';
 export {
   defaultMemoryMode,
   resolveCore,
   resolveSlot,
   type CoreDirectives,
   type ResolvedContext,
+  type ResolvedSideSlot,
   type ResolvedSlot,
+  type ResolvedSubPilot,
 } from './config/snapshot.js';
 
 export {

@@ -7,7 +7,13 @@ import {
   layoutClock,
   positionIndexAt,
 } from '../../src/features/assembly-editor/model/layout';
-import { distance } from '../../src/lib/geometry';
+import {
+  EXIT_LABEL_HEIGHT,
+  EXIT_LABEL_WIDTH,
+  PLATE_HEIGHT,
+  PLATE_WIDTH,
+} from '../../src/features/clock/layout';
+import { distance, type Point } from '../../src/lib/geometry';
 import { primaryAssembly } from '../fixtures/primary';
 
 function slots(n: number) {
@@ -80,5 +86,92 @@ describe('layoutClock', () => {
       contextChords(layout, primaryAssembly(), 'implementer').map((c) => [c.from, c.to]),
     ).toEqual([['analyst', 'implementer']]);
     expect(contextChords(layout, primaryAssembly(), 'reviewer')).toEqual([]);
+  });
+
+  /** n Slots, each an Exit Point (so each draws a label), with up to three of each attached kind. */
+  function attached(n: number, count: number, exits: boolean) {
+    return {
+      slots: Array.from({ length: n }, (_, i) => ({
+        name: `s${i}`,
+        unit: 'u',
+        ...(exits && { exitPoint: true }),
+        subPilots: Array.from({ length: count }, (_, j) => ({ unit: `sub-${j}` })),
+        sideSlots: Array.from({ length: count }, (_, j) => ({ name: `side-${i}-${j}`, unit: 'u' })),
+      })),
+    };
+  }
+
+  interface Box {
+    what: string;
+    x: number;
+    y: number;
+    w: number;
+    h: number;
+  }
+  const box = (what: string, at: Point, w: number, h: number): Box => ({
+    what,
+    x: at.x - w / 2,
+    y: at.y - h / 2,
+    w,
+    h,
+  });
+  const overlap = (a: Box, b: Box) =>
+    a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
+
+  it.each(
+    [1, 2, 3, 4, 5, 6, 7, 8].flatMap((n) =>
+      [1, 3].flatMap((c) => [
+        [n, c, true],
+        [n, c, false],
+      ]),
+    ),
+  )(
+    'lays out %i Slots with %i of each attached kind (exits: %s) without overlaps',
+    (n, count, exits) => {
+      const doc = attached(n as number, count as number, exits as boolean);
+      const layout = layoutClock(doc);
+      expect(layout.attached).toHaveLength((n as number) * (count as number) * 2);
+      const boxes: Box[] = [
+        ...layout.slots.map((s) => box(`card ${s.name}`, s.position, CARD_WIDTH, CARD_HEIGHT)),
+        ...layout.exits.map((e) =>
+          box(`label ${e.slot}`, e.labelAt, EXIT_LABEL_WIDTH, EXIT_LABEL_HEIGHT),
+        ),
+        ...layout.attached.map((p) =>
+          box(`plate ${p.slot}/${p.kind}/${p.name}`, p.position, PLATE_WIDTH, PLATE_HEIGHT),
+        ),
+      ];
+      // Cards and Exit labels are laid out as before; only what the plates add is judged here.
+      for (const [i, a] of boxes.entries()) {
+        for (const b of boxes.slice(i + 1)) {
+          if (!a.what.startsWith('plate') && !b.what.startsWith('plate')) continue;
+          expect(overlap(a, b), `${a.what} overlaps ${b.what}`).toBe(false);
+        }
+      }
+      for (const plate of layout.attached) {
+        expect(plate.position.x - PLATE_WIDTH / 2).toBeGreaterThanOrEqual(0);
+        expect(plate.position.y - PLATE_HEIGHT / 2).toBeGreaterThanOrEqual(0);
+        expect(plate.position.x + PLATE_WIDTH / 2).toBeLessThanOrEqual(layout.box.width);
+        expect(plate.position.y + PLATE_HEIGHT / 2).toBeLessThanOrEqual(layout.box.height);
+      }
+    },
+  );
+
+  it('puts Sub-pilots and Side Slots on either side of the radial axis', () => {
+    const layout = layoutClock(attached(1, 1, true));
+    const [sub, side] = layout.attached;
+    const slot = layout.slots[0]!;
+    // the single Slot sits at 6 o'clock, where the ring runs on to the left: Side Slots come
+    // after the Slot (left), Sub-pilots on the side the ring comes from (right)
+    expect(side!.position.x).toBeLessThan(slot.position.x);
+    expect(sub!.position.x).toBeGreaterThan(slot.position.x);
+  });
+
+  it('keeps a layout without attached work exactly as before', () => {
+    for (const doc of [primaryAssembly(), slots(5)]) {
+      const layout = layoutClock(doc);
+      expect(layout.attached).toEqual([]);
+      expect(layout.box.width).toBe((layout.radius + 170) * 2);
+      expect(layout.center).toEqual({ x: layout.radius + 170, y: layout.radius + 170 });
+    }
   });
 });

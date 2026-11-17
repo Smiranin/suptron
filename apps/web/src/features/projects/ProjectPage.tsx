@@ -5,7 +5,7 @@ import { toast } from '@suptron/ui/components/sonner';
 import { Link, useNavigate } from '@tanstack/react-router';
 import { ArrowLeft, Trash2 } from 'lucide-react';
 import { useCallback, useState } from 'react';
-import { InUseError, NotFoundError } from '../../api/client';
+import { InUseError, NotFoundError, ValidationError } from '../../api/client';
 import { api, useHealth, useInvalidateConfig, useProject } from '../../api/queries';
 import type { ProjectItem } from '../../api/types';
 import { ActiveMissionsNote } from '../../components/active-missions-note';
@@ -22,6 +22,7 @@ import {
   ProfileForm,
   emptyProfile,
   profileForForm,
+  showOuterFolderIssues,
   useProfileForm,
   usePathStatuses,
 } from './ProfileForm';
@@ -105,7 +106,13 @@ function ProjectEditor({ item }: { item: ProjectItem }) {
       },
       [form],
     ),
-    onError: useCallback((error: Error) => toast.error(error.message), []),
+    onError: useCallback(
+      (error: Error) => {
+        if (error instanceof ValidationError && showOuterFolderIssues(form, error.issues)) return;
+        toast.error(error.message);
+      },
+      [form],
+    ),
   });
 
   const { isDirty } = form.formState;

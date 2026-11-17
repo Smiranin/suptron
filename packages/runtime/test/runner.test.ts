@@ -1026,6 +1026,31 @@ describe('Runner scenarios on a folder and on no folder', () => {
     });
     expect(await readdir(join(h.home, 'missions')).catch(() => [])).toEqual([]);
   });
+
+  it('refuses to start while an Outer Folder is missing and gives the Pilots the list', async () => {
+    h = await harness([unit('a', [PASS])], [linear([{ name: 'a', unit: 'a' }])], 'none', {
+      outerFolders: ['/nowhere/notes'],
+    });
+    await expect(h.start()).rejects.toMatchObject({
+      issues: [{ field: 'outerFolders', message: expect.stringContaining('/nowhere/notes') }],
+    });
+    await cleanup(h);
+
+    h = await harness([unit('a', [PASS])], [linear([{ name: 'a', unit: 'a' }])], 'none');
+    const notes = h.folder;
+    await writeHome(h.home, {
+      units: [unit('a', [PASS])],
+      projects: [
+        {
+          profile: { ...noneProfile('my-app'), outerFolders: [notes] },
+          assemblies: [linear([{ name: 'a', unit: 'a' }])],
+        },
+      ],
+    });
+    const id = await h.start();
+    await h.waitForState(id, 'completed');
+    expect(h.engine.callsFor('pilot', 'a')[0]!.spec.guard.outerFolders).toEqual([notes]);
+  });
 });
 
 describe('Runner scenarios with Core Resolutions', () => {
@@ -1707,6 +1732,7 @@ describe('Runner scenarios with Resume', () => {
     expect(recovered!.note).toBeUndefined();
     await restarted.resume(id);
     await h.waitFor((es) => es.some((e) => e.type === 'mission.completed'));
+    await restarted.flush();
   });
 
   it('starts a new session with the note when the session cannot be resumed', async () => {
@@ -2016,5 +2042,374 @@ describe('Runner scenarios with a Loop inside a Loop', () => {
     ]);
     expect(h.types(id)).not.toContain('slot.skipped');
     expect(h.registry.get(id)!.slots.find((s) => s.name === 'rev')!.skipped).toBeUndefined();
+  });
+});
+
+describe('Runner scenarios with Sub-pilots', () => {
+  let h: Harness | undefined;
+  afterEach(() => cleanup(h));
+
+  const tester = (subPilots: AssemblyFile['slots'][number]['subPilots']) =>
+    linear([{ name: 'tester', unit: 'tester', attemptLimit: 2, subPilots }]);
+  const units = () => [unit('tester', [PASS]), unit('unit-tests'), unit('browser-tests')];
+  const returnedChecks = (h: Harness) =>
+    h.events.filter((e) => e.type === 'check.evaluated' && e.check.kind === 'sub_pilot_returned');
+
+  it('fails an Attempt whose Pilot left a required Sub-pilot out, without asking the Core', async () => {
+    h = await harness(units(), [
+      tester([
+        { unit: 'unit-tests', required: true },
+        { unit: 'browser-tests', required: true },
+      ]),
+    ]);
+    h.engine.script('pilot', 'tester', (call) =>
+      call.index === 0
+        ? [{ subAgent: { name: 'unit-tests' } }, { result: { output: 'tested' } }]
+        : [
+            { subAgent: { name: 'unit-tests' } },
+            { subAgent: { name: 'browser-tests', steps: [{ text: 'Clicking.' }] } },
+            { result: { output: 'tested' } },
+          ],
+    );
+    const id = await h.start();
+    await h.waitForState(id, 'completed');
+    const [first, ...rest] = returnedChecks(h);
+    expect(first).toMatchObject({ holds: true, check: { unit: 'unit-tests' } });
+    expect(rest[0]).toMatchObject({
+      holds: false,
+      check: { unit: 'browser-tests' },
+      detail: expect.stringContaining('browser-tests'),
+    });
+    expect(h.events.filter((e) => e.type === 'slot.started').map((e) => e.slot)).toEqual([
+      'tester',
+      'tester',
+    ]);
+    // the second Attempt's Pilot was told what failed, and nobody asked the Core to accept it
+    const coreCalls = h.engine.callsFor('core', 'core').map((c) => coreCallName(c.prompt));
+    expect(coreCalls).not.toContain('resolveAttention');
+    // the Pilot was given both Sub-pilots, the marked work reached the events
+    expect(h.engine.callsFor('pilot', 'tester')[0]!.spec.subAgents?.map((s) => s.name)).toEqual([
+      'unit-tests',
+      'browser-tests',
+    ]);
+    expect(
+      h.events.find((e) => e.type === 'agent.text' && e.payload.text === 'Clicking.'),
+    ).toMatchObject({ payload: { agent: { name: 'browser-tests' } } });
+    expect(h.types(id)).toContain('agent.sub_pilot_called');
+    expect(h.registry.get(id)!.slots[0]!.subPilots).toEqual([
+      { unit: 'unit-tests', calls: 1, returns: 1 },
+      { unit: 'browser-tests', calls: 1, returns: 1 },
+    ]);
+  });
+
+  it('counts an error return as not returned and leaves general agents out', async () => {
+    h = await harness(units(), [tester([{ unit: 'unit-tests', required: true }])]);
+    h.engine.script('pilot', 'tester', [
+      { subAgent: { name: 'general-purpose' } },
+      { subAgent: { name: 'unit-tests', isError: true } },
+      { result: { output: 'tested' } },
+    ]);
+    const id = await h.start();
+    await h.waitForState(id, 'needs_attention');
+    expect(returnedChecks(h).every((e) => e.type === 'check.evaluated' && !e.holds)).toBe(true);
+    expect(
+      h.events.filter((e) => e.type === 'agent.sub_pilot_called').map((e) => e.subPilot),
+    ).toEqual(['unit-tests', 'unit-tests']);
+    expect(h.registry.get(id)!.slots[0]!.subPilots).toEqual([
+      { unit: 'unit-tests', calls: 1, returns: 0 },
+    ]);
+    await h.registry.stop(id);
+  });
+
+  it('is done when an optional Sub-pilot was never called', async () => {
+    h = await harness(units(), [tester([{ unit: 'unit-tests' }])]);
+    const id = await h.start();
+    await h.waitForState(id, 'completed');
+    expect(returnedChecks(h)).toEqual([]);
+    expect(h.registry.get(id)!.slots[0]!.subPilots).toEqual([
+      { unit: 'unit-tests', calls: 0, returns: 0 },
+    ]);
+  });
+});
+
+describe('Runner scenarios with Side Slots', () => {
+  let h: Harness | undefined;
+  afterEach(() => cleanup(h));
+
+  const sideUnits = () => [
+    unit('a', [PASS]),
+    unit('b', [PASS]),
+    unit('docs'),
+    unit('demo'),
+    unit('log'),
+  ];
+  const threeOnLast = linear([
+    { name: 'a', unit: 'a' },
+    {
+      name: 'b',
+      unit: 'b',
+      sideSlots: [
+        { unit: 'docs', context: { slotOutputs: ['a', 'b'] } },
+        { unit: 'demo' },
+        { unit: 'log' },
+      ],
+    },
+  ]);
+  const ended = (h: Harness) =>
+    h.events.flatMap((e) => (e.type === 'side_slot.ended' ? [[e.slot, e.status]] : []));
+
+  it('completes with the same result whether its Side Slots are done, failed or stopped', async () => {
+    const results = [];
+    for (const outcome of ['done', 'failed', 'stopped'] as const) {
+      h = await harness(sideUnits(), [threeOnLast]);
+      let release!: () => void;
+      const gate = new Promise<void>((r) => (release = r));
+      if (outcome === 'failed') {
+        h.engine.script('pilot', 'docs', [{ error: 'network down' }]);
+        h.engine.script('pilot', 'demo', [{ result: { output: 'half', handover: 'open' } }]);
+      }
+      if (outcome === 'stopped') {
+        h.engine.script('pilot', 'demo', [{ wait: gate }, { result: { output: 'never' } }]);
+      }
+      const id = await h.start();
+      if (outcome === 'stopped') {
+        await h.waitFor((es) =>
+          es.some((e) => e.type === 'side_slot.started' && e.slot === 'demo'),
+        );
+        await h.waitFor((es) => es.some((e) => e.type === 'mission.reported'));
+        // still Running while a Side Slot runs, with the report already there
+        expect(h.registry.get(id)!.summary.state).toBe('running');
+        expect(h.registry.get(id)!.result?.exitSlot).toBe('b');
+        await expect(h.registry.stopSideSlot(id, 'docs')).rejects.toMatchObject({
+          reason: 'side_slot_not_running',
+        });
+        await h.registry.stopSideSlot(id, 'demo');
+      }
+      await h.waitForState(id, 'completed');
+      release();
+      const detail = h.registry.get(id)!;
+      results.push({ state: detail.summary.state, result: detail.result });
+      const expected = {
+        done: [
+          ['docs', 'done'],
+          ['demo', 'done'],
+          ['log', 'done'],
+        ],
+        failed: [
+          ['docs', 'failed'],
+          ['demo', 'failed'],
+          ['log', 'done'],
+        ],
+        stopped: [
+          ['docs', 'done'],
+          ['demo', 'failed'],
+          ['log', 'done'],
+        ],
+      }[outcome];
+      expect(ended(h)).toEqual(expected);
+      expect(detail.sideSlots.map((s) => [s.name, s.status])).toEqual(expected);
+      if (outcome === 'stopped') {
+        expect(detail.sideSlots[1]!.note).toBe('Stopped by the Commander');
+      }
+      if (outcome === 'failed') {
+        expect(detail.sideSlots[0]!.note).toContain('network down');
+      }
+      // a failing Side Slot causes no Needs Attention, Resolution or extra Attempt
+      expect(h.types(id)).not.toContain('core.resolved');
+      expect(
+        h.events.filter((e) => e.type === 'mission.state' && e.state === 'needs_attention'),
+      ).toEqual([]);
+      expect(detail.slots.map((s) => s.attempts)).toEqual([1, 1, 0]);
+      // the report comes before Completed, and Completed after the last Side Slot ended
+      const types = h.types(id);
+      expect(types.indexOf('mission.reported')).toBeLessThan(types.indexOf('mission.completed'));
+      expect(types.lastIndexOf('side_slot.ended')).toBeLessThan(types.indexOf('mission.completed'));
+      expect(types.at(-1)).toBe('mission.completed');
+      await cleanup(h);
+    }
+    expect(results.map((r) => r.state)).toEqual(['completed', 'completed', 'completed']);
+    expect(results[1]!.result).toEqual(results[0]!.result);
+    expect(results[2]!.result).toEqual(results[0]!.result);
+    h = undefined;
+  });
+
+  it('runs its Side Slots beside the ordered list, without the Core, at their cost', async () => {
+    h = await harness(sideUnits(), [
+      linear([
+        { name: 'a', unit: 'a', sideSlots: [{ unit: 'docs', context: { slotOutputs: ['a'] } }] },
+        { name: 'b', unit: 'b' },
+      ]),
+    ]);
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    h.engine.script('pilot', 'docs', [
+      { text: 'Updating the docs.' },
+      { wait: gate },
+      { result: { output: 'Docs updated.', cost: { usd: 1 } } },
+    ]);
+    const id = await h.start();
+    // the next Slot runs and is done while the Side Slot still waits for its gate
+    await h.waitFor((es) => es.some((e) => e.type === 'slot.done' && e.slot === 'b'));
+    await h.waitFor((es) => es.some((e) => e.type === 'mission.reported'));
+    expect(h.registry.get(id)!.summary.state).toBe('running');
+    release();
+    await h.waitForState(id, 'completed');
+    // the Core neither composed nor judged anything for the Side Slot
+    const composed = h.engine
+      .callsFor('core', 'core')
+      .filter((c) => coreCallName(c.prompt) === 'composeSlotPrompt')
+      .map((c) => (coreCallInput(c.prompt) as { slot: { name: string } }).slot.name);
+    expect(composed).toEqual(['a', 'b']);
+    const docs = h.engine.callsFor('pilot', 'docs')[0]!;
+    expect(docs.prompt).toContain('The Slot "a" of this Mission is done');
+    expect(docs.prompt).toContain('a output');
+    expect(docs.spec.allowQuestions).toBe(false);
+    expect(docs.spec.resumeSessionId).toBeUndefined();
+    // its events carry its name; its cost counts towards the Mission
+    expect(
+      h.events.find((e) => e.type === 'agent.text' && e.payload.text === 'Updating the docs.'),
+    ).toMatchObject({ slot: 'docs' });
+    const detail = h.registry.get(id)!;
+    expect(detail.sideSlots[0]!.cost.usd).toBe(1);
+    expect(detail.summary.cost.usd).toBeCloseTo(
+      detail.slots.reduce((sum, s) => sum + s.cost.usd, 0) + 1,
+    );
+    // the report names the Side Slots as far as known
+    const report = h.engine
+      .callsFor('core', 'core')
+      .find((c) => coreCallName(c.prompt) === 'finalReport')!;
+    expect(
+      (coreCallInput(report.prompt) as { sideSlots: { name: string; status: string }[] }).sideSlots,
+    ).toMatchObject([{ name: 'docs', status: 'running' }]);
+  });
+
+  it('leaves out a start while the chain of an earlier time still runs, and goes on through Needs Attention', async () => {
+    h = await harness(
+      [unit('w', [PASS]), unit('r', [FAIL]), unit('docs')],
+      [
+        linear([
+          { name: 'w', unit: 'w', sideSlots: [{ unit: 'docs' }] },
+          { name: 'r', unit: 'r', loop: { target: 'w', limit: 1 } },
+        ]),
+      ],
+    );
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    h.engine.script('pilot', 'docs', [{ wait: gate }, { result: { output: 'Docs.' } }]);
+    const id = await h.start();
+    await h.waitForState(id, 'needs_attention');
+    expect(h.types(id)).toContain('side_slots.left_out');
+    expect(h.registry.get(id)!.sideSlots).toMatchObject([{ name: 'docs', status: 'running' }]);
+    release();
+    await h.waitFor((es) => es.some((e) => e.type === 'side_slot.ended'));
+    expect(h.registry.get(id)!.sideSlots).toMatchObject([{ name: 'docs', status: 'done' }]);
+    expect(h.registry.get(id)!.summary.state).toBe('needs_attention');
+    await h.registry.stop(id);
+  });
+
+  it('stops every Side Slot with the Mission', async () => {
+    h = await harness(sideUnits(), [threeOnLast]);
+    h.engine.script('pilot', 'docs', [{ wait: new Promise(() => {}) }]);
+    const id = await h.start();
+    await h.waitFor((es) => es.some((e) => e.type === 'side_slot.started'));
+    await h.registry.stop(id);
+    expect(h.registry.get(id)!.summary.state).toBe('stopped');
+    expect(h.registry.get(id)!.sideSlots.map((s) => [s.name, s.status])).toEqual([
+      ['docs', 'interrupted'],
+      ['demo', 'interrupted'],
+      ['log', 'interrupted'],
+    ]);
+    expect(h.engine.callsFor('pilot', 'demo')).toEqual([]);
+  });
+});
+
+describe('Side Slots over a restart, a Resume and Run again', () => {
+  let h: Harness | undefined;
+  afterEach(() => cleanup(h));
+
+  const assembly = linear([{ name: 'a', unit: 'a', sideSlots: [{ unit: 'docs' }] }]);
+  const units = () => [unit('a', [PASS]), unit('docs')];
+  const restart = (harness: Harness) => {
+    const registry = new MissionRegistry({
+      home: harness.home,
+      engine: harness.engine,
+      host: harness.host,
+      git: new RealGitClient(),
+    });
+    registry.events.onAny((e) => harness.events.push(e));
+    return registry;
+  };
+
+  it('marks a running Side Slot interrupted after a restart and completes on Resume without it', async () => {
+    h = await harness(units(), [assembly]);
+    h.engine.script('pilot', 'docs', [{ wait: new Promise(() => {}) }]);
+    const id = await h.start();
+    await h.waitFor((es) => es.some((e) => e.type === 'mission.reported'));
+    await h.waitFor((es) => es.some((e) => e.type === 'side_slot.started'));
+    await h.registry.flush();
+
+    const restarted = restart(h);
+    await restarted.recoverInterrupted();
+    expect(restarted.get(id)!.sideSlots).toMatchObject([
+      { name: 'docs', status: 'interrupted', note: expect.stringContaining('restart') },
+    ]);
+    // The old registry still holds the Checkout in this test; a real restart has freed it.
+    await h.registry.stop(id);
+
+    await restarted.resume(id);
+    await h.waitFor((es) => es.filter((e) => e.type === 'mission.completed').length === 1);
+    const detail = restarted.get(id)!;
+    expect(detail.summary.state).toBe('completed');
+    expect(detail.result?.exitSlot).toBe('a');
+    expect(detail.sideSlots).toMatchObject([{ name: 'docs', status: 'interrupted' }]);
+    expect(h.engine.callsFor('pilot', 'a')).toHaveLength(1);
+    expect(h.engine.callsFor('pilot', 'docs')).toHaveLength(1);
+    await restarted.flush();
+  });
+
+  it('runs a failed Side Slot again in a Completed Mission, which is Completed again after it', async () => {
+    h = await harness(units(), [assembly]);
+    h.engine.script('pilot', 'docs', (call) =>
+      call.index === 0 ? [{ error: 'network down' }] : [{ result: { output: 'Docs.' } }],
+    );
+    const id = await h.start();
+    await h.waitForState(id, 'completed');
+    expect(h.registry.get(id)!.sideSlots).toMatchObject([{ status: 'failed', starts: 1 }]);
+    expect(() => h!.registry.runSideSlot(id, 'nope')).toThrow(
+      expect.objectContaining({ reason: 'not_found' }),
+    );
+
+    h.registry.runSideSlot(id, 'docs');
+    expect(h.registry.get(id)!.summary.state).toBe('running');
+    await h.waitFor((es) => es.filter((e) => e.type === 'mission.completed').length === 2);
+    const detail = h.registry.get(id)!;
+    expect(detail.summary.state).toBe('completed');
+    expect(detail.sideSlots).toMatchObject([{ status: 'done', starts: 2 }]);
+    expect(() => h!.registry.runSideSlot(id, 'docs')).toThrow(
+      expect.objectContaining({ reason: 'side_slot_not_runnable' }),
+    );
+  });
+
+  it('refuses Run again while another Mission holds the Workspace, and in a Stopped Mission', async () => {
+    h = await harness(units(), [assembly]);
+    h.engine.script('pilot', 'docs', [{ error: 'network down' }]);
+    const first = await h.start();
+    await h.waitForState(first, 'completed');
+    h.engine.script('pilot', 'a', [{ wait: new Promise(() => {}) }]);
+    const second = await h.start();
+    expect(() => h!.registry.runSideSlot(first, 'docs')).toThrow(WorkspaceBusyError);
+    await h.registry.stop(second);
+
+    h.engine.script('pilot', 'a', [{ result: { output: 'ok' } }]);
+    h.engine.script('pilot', 'docs', [{ wait: new Promise(() => {}) }]);
+    const third = await h.start();
+    await h.waitFor((es) =>
+      es.some((e) => e.type === 'side_slot.started' && e.missionId === third),
+    );
+    await h.registry.stop(third);
+    expect(h.registry.get(third)!.sideSlots).toMatchObject([{ status: 'interrupted' }]);
+    expect(() => h!.registry.runSideSlot(third, 'docs')).toThrow(
+      expect.objectContaining({ reason: 'side_slot_not_runnable' }),
+    );
   });
 });

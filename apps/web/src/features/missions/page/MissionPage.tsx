@@ -40,6 +40,8 @@ export function MissionPage({ id }: { id: string }) {
             state={state}
             onSelectSlot={(name) => dispatch({ type: 'selectSlot', name })}
             onSelectMission={() => dispatch({ type: 'selectMission' })}
+            onSelectSideSlot={(name) => dispatch({ type: 'selectSideSlot', name })}
+            onSelectSubPilot={(slot, unit) => dispatch({ type: 'selectSubPilot', slot, unit })}
           />
         </div>
         <SidePanel state={state} dispatch={dispatch} onStop={stop.request} />

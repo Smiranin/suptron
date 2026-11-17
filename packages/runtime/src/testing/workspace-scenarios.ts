@@ -6,6 +6,7 @@ export function folderProfile(path: string, name = 'notes'): ProfileFile {
     name,
     workspace: { kind: 'folder', path },
     knowledgeSources: [],
+    outerFolders: [],
     engine: 'claude-code',
   };
 }
@@ -21,6 +22,7 @@ export function noneProfile(name = 'research'): ProfileFile {
         text: 'Cite every claim with a dated source. Prefer primary sources over summaries.',
       },
     ],
+    outerFolders: [],
     engine: 'claude-code',
   };
 }

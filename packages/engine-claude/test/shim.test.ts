@@ -34,6 +34,7 @@ describe('git/gh shims', () => {
     taskPath: join(home, 'task'),
     taskDocuments: [join(home, 'task', 'SPEC.md')],
     configHome: home,
+    outerFolders: [join(home, '..', 'notes'), '/var/logs'],
   });
   const env = (protectedBranch: string | null = 'main') => ({
     ...process.env,
@@ -44,6 +45,7 @@ describe('git/gh shims', () => {
   it('round-trips the GuardContext through the environment', () => {
     expect(guardFromEnv(guardEnv(guard()))).toEqual(guard());
     expect(guardFromEnv(guardEnv(guard(null)))).toEqual(guard(null));
+    expect(guardFromEnv(guardEnv({ ...guard(), outerFolders: [] }))?.outerFolders).toEqual([]);
     expect(guardFromEnv({})).toBeNull();
   });
 

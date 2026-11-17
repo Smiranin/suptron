@@ -241,6 +241,17 @@ function AssemblyEditor({
 
   const unitMap = useMemo(() => unitIndex(units), [units]);
   const layout = useMemo(() => layoutClock(state.doc), [state.doc]);
+  // The plate of the row the Attached tab shows, while that tab is open on its Slot.
+  const focusedPlate = useMemo(() => {
+    const focus = state.attachedFocus;
+    if (!focus || !state.inspectorOpen || state.tab !== 'attached') return null;
+    const kind = focus.list === 'subPilots' ? 'subPilot' : 'sideSlot';
+    return (
+      layout.attached.find(
+        (p) => p.slot === state.selected && p.kind === kind && p.index === focus.index,
+      ) ?? null
+    );
+  }, [layout, state.attachedFocus, state.inspectorOpen, state.selected, state.tab]);
   const issues = useMemo(
     () => validate(state.doc, units, capabilities),
     [state.doc, units, capabilities],
@@ -375,6 +386,17 @@ function AssemblyEditor({
               selected={state.selected}
               dispatch={dispatch}
               onSelect={(selected) => dispatchAction({ type: 'select', selected })}
+              onPlateClick={(plate) =>
+                dispatchAction({
+                  type: 'selectAttached',
+                  slot: plate.slot,
+                  focus: {
+                    list: plate.kind === 'subPilot' ? 'subPilots' : 'sideSlots',
+                    index: plate.index,
+                  },
+                })
+              }
+              focusedPlate={focusedPlate}
               onOpenInspector={() => dispatchAction({ type: 'openInspector', tab: 'general' })}
               onPlus={setPicker}
               container={container}
@@ -402,6 +424,7 @@ function AssemblyEditor({
             onTab={(tab) => dispatchAction({ type: 'setTab', tab })}
             dispatch={dispatch}
             onClose={() => dispatchAction({ type: 'closeInspector' })}
+            attachedFocus={state.attachedFocus}
           />
         )}
       </div>

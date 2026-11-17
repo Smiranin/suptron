@@ -65,7 +65,12 @@ describe('openWorkspace', () => {
       deps.host.seedPullRequest('feature/x');
       expect(await ws.pullRequest()).toMatchObject({ number: 1 });
       expect(
-        buildGuard(ws, { taskPath: '/t', taskDocuments: ['/t/SPEC.md'], configHome: '/h' }),
+        buildGuard(ws, {
+          taskPath: '/t',
+          taskDocuments: ['/t/SPEC.md'],
+          configHome: '/h',
+          outerFolders: ['/notes'],
+        }),
       ).toEqual({
         cwd: clone,
         writeRoots: [clone],
@@ -73,6 +78,7 @@ describe('openWorkspace', () => {
         taskPath: '/t',
         taskDocuments: ['/t/SPEC.md'],
         configHome: '/h',
+        outerFolders: ['/notes'],
       });
       await repo.git(['checkout', '-q', 'main']);
     });
@@ -160,7 +166,13 @@ describe('openWorkspace', () => {
       expect(ws.protectedBranch).toBeNull();
       expect(await ws.changeSummary()).toBeNull();
       expect(
-        buildGuard(ws, { cwd: '/task', taskPath: '/task', taskDocuments: [], configHome: '/h' }),
+        buildGuard(ws, {
+          cwd: '/task',
+          taskPath: '/task',
+          taskDocuments: [],
+          configHome: '/h',
+          outerFolders: [],
+        }),
       ).toMatchObject({
         cwd: '/task',
         writeRoots: [missionDir()],

@@ -154,6 +154,25 @@ describe('Projects, Profiles, Assemblies and tools routes', () => {
     });
     expect(stray.statusCode).toBe(400);
     expect(stray.json().issues[0].path).toBe('workspace');
+    for (const folder of [s.home, join(s.home, 'notes'), 'notes']) {
+      const outer = await s.app.inject({
+        method: 'PUT',
+        url: '/api/projects/research/profile?force=1',
+        payload: { ...noneProfile(), outerFolders: [folder] },
+      });
+      expect(outer.statusCode).toBe(400);
+      expect(outer.json().issues[0].path).toBe('outerFolders.0');
+    }
+    const listed = await s.app.inject({
+      method: 'PUT',
+      url: '/api/projects/research/profile?force=1',
+      payload: { ...noneProfile(), outerFolders: ['/work/notes'] },
+    });
+    expect(listed.statusCode).toBe(200);
+    expect(
+      (await s.app.inject({ method: 'GET', url: '/api/projects/research' })).json().profile
+        .outerFolders,
+    ).toEqual(['/work/notes']);
     const hostCheck = await s.app.inject({
       method: 'PUT',
       url: '/api/projects/research/assemblies/brief?force=1',

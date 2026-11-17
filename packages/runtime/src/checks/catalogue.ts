@@ -18,6 +18,8 @@ export interface CheckDescriptor {
   params: CheckParam[];
   /** What the Project's Workspace must provide for the Check to run (SPEC FR-5). */
   requires: readonly Capability[];
+  /** Added by the system only: no file names it and the editor's picker leaves it out. */
+  system?: boolean;
   summarize(check: Check): string;
 }
 
@@ -89,6 +91,17 @@ export const CHECK_CATALOGUE: readonly CheckDescriptor[] = [
     ],
     requires: [],
     summarize: (check) => (check.kind === 'llm_judgment' ? `judgment: ${check.criterion}` : ''),
+  },
+  {
+    kind: 'sub_pilot_returned',
+    label: 'Sub-pilot returned',
+    description:
+      'A required Sub-pilot was called and returned in this Attempt. Added by the system for every required Sub-pilot of the Slot.',
+    params: [],
+    requires: [],
+    system: true,
+    summarize: (check) =>
+      check.kind === 'sub_pilot_returned' ? `Sub-pilot ${check.unit} returned` : '',
   },
 ];
 

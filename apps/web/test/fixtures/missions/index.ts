@@ -75,6 +75,7 @@ export function runningDetail(id = 'm-running'): MissionDetail {
         cost: { usd: 0.07, inputTokens: 2000, outputTokens: 300 },
       },
     }),
+    sideSlots: [],
     transcript: [
       analystSection(id),
       {
@@ -145,6 +146,7 @@ export function waitingDetail(id = 'm-waiting'): MissionDetail {
     }),
     assembly: primaryAssembly(),
     slots: records({ analyst: { attempts: 1 } }),
+    sideSlots: [],
     transcript: [
       {
         execution: { slot: 'analyst', attempt: 1 },
@@ -176,6 +178,7 @@ export function attentionDetail(id = 'm-attention'): MissionDetail {
       implementer: { attempts: 4, lastOutput: 'implemented' },
       reviewer: { attempts: 2, loops: 3 },
     }),
+    sideSlots: [],
     transcript: [
       analystSection(id),
       { execution: { slot: 'implementer', attempt: 1 }, entries: [], dropped: 0 },
@@ -240,6 +243,7 @@ export function completedDetail(id = 'm-completed'): MissionDetail {
       'pr-reviewer': { attempts: 1, lastOutput: 'ok' },
       core: { cost: { usd: 0.11, inputTokens: 5000, outputTokens: 800 } },
     }),
+    sideSlots: [],
     transcript: [
       analystSection(id),
       { execution: { slot: 'pr-reviewer', attempt: 1 }, entries: [], dropped: 0 },
@@ -264,6 +268,7 @@ export function stoppedDetail(id = 'm-stopped'): MissionDetail {
     }),
     assembly: primaryAssembly(),
     slots: records({ analyst: { attempts: 1, lastOutput: 'ok' }, implementer: { attempts: 1 } }),
+    sideSlots: [],
     transcript: [
       analystSection(id),
       {
@@ -288,6 +293,7 @@ export function interruptedDetail(id = 'm-interrupted'): MissionDetail {
     }),
     assembly: primaryAssembly(),
     slots: records({ analyst: { attempts: 1, lastOutput: 'ok' }, implementer: { attempts: 1 } }),
+    sideSlots: [],
     transcript: [],
     transcriptLost: true,
     resumable: true,
@@ -327,6 +333,7 @@ export function completedNoneDetail(id = 'm-brief'): MissionDetail {
       researcher: { attempts: 1, lastOutput: 'three sources' },
       'brief-writer': { attempts: 1, lastOutput: 'brief written' },
     }),
+    sideSlots: [],
     transcript: [
       {
         execution: { slot: 'brief-writer', attempt: 1 },
@@ -360,6 +367,7 @@ export function runningFolderDetail(id = 'm-notes'): MissionDetail {
     }),
     assembly: briefAssembly(),
     slots: briefRecords({ researcher: { attempts: 1 } }),
+    sideSlots: [],
     transcript: [{ execution: { slot: 'researcher', attempt: 1 }, entries: [], dropped: 0 }],
     transcriptLost: false,
     resumable: false,

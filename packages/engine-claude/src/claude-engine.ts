@@ -24,6 +24,13 @@ import { sdkMessageToEvents } from './events.js';
 import { lawsHooks } from './hooks.js';
 import { SessionCostLedger } from './session-costs.js';
 import { guardEnv, installShims } from './shim.js';
+import {
+  AGENT_TOOL,
+  ASK_USER_QUESTION,
+  SubAgentTracker,
+  agentDefinitions,
+  subPilotsPrompt,
+} from './sub-agents.js';
 
 export const FALLBACK_MODELS: ModelInfo[] = [
   { id: 'sonnet', displayName: 'Claude Sonnet' },
@@ -45,10 +52,6 @@ export function offeredModels(models: { value: string; displayName: string }[]):
     )
     .map((m) => ({ id: m.value, displayName: m.displayName || m.value }));
 }
-
-const ASK_USER_QUESTION = 'AskUserQuestion';
-/** The sub-agent tool of Claude Code; `run_in_background: true` detaches it from the turn. */
-const AGENT_TOOL = 'Agent';
 
 /**
  * Appended to every Pilot's system prompt. Claude Code loads the instructions of the repository
@@ -93,15 +96,16 @@ judged on what you produced.`;
 
 /**
  * The system text of an agent: its Rules, then its Instructions, then, for a Pilot, that it
- * works on its own, how a Slot ends and, when it may ask the Commander, how to reach them. The
- * Core gets none of these. (How a Pilot hands over is the runtime's and arrives as part of the
- * Instructions.)
+ * works on its own, how a Slot ends, when it may ask the Commander how to reach them, and when
+ * it has Sub-pilots who they are. The Core gets none of these. (How a Pilot hands over is the
+ * runtime's and arrives as part of the Instructions.)
  */
 export function systemText(spec: SystemTextSpec): string {
   const parts = [spec.systemPrompt.rules.trim(), spec.systemPrompt.instructions.trim()];
   if (spec.role === 'pilot') {
     parts.push(AUTONOMY_PROMPT, SLOT_END_PROMPT);
     if (spec.allowQuestions) parts.push(COMMANDER_CHANNEL_PROMPT);
+    if (spec.subAgents && spec.subAgents.length > 0) parts.push(subPilotsPrompt(spec.subAgents));
   }
   return parts.join('\n\n');
 }
@@ -269,6 +273,11 @@ class ClaudeAgentHandle implements AgentHandle {
       // edits and routes everything else through canUseTool, which allows all but questions.
       options.permissionMode = 'acceptEdits';
       if (!spec.allowQuestions) options.disallowedTools = [ASK_USER_QUESTION];
+      if (spec.subAgents && spec.subAgents.length > 0) {
+        options.agents = agentDefinitions(spec.subAgents);
+        // Without it only the tool calls of a called agent come through, not what it writes.
+        options.forwardSubagentText = true;
+      }
     } else {
       options.systemPrompt = text;
       options.tools = [...CORE_TOOLS];
@@ -293,9 +302,10 @@ class ClaudeAgentHandle implements AgentHandle {
       const options = await this.buildOptions();
       const active = query({ prompt: this.input(), options });
       this.active = active;
+      const tracker = new SubAgentTracker();
       for await (const message of active as AsyncIterable<SDKMessage>) {
         if (this.interrupted) break;
-        for (const event of sdkMessageToEvents(message)) {
+        for (const event of tracker.track(message, sdkMessageToEvents(message))) {
           const passed = this.activity.pass(event);
           if (passed !== null) this.out.push(this.withCallCost(passed));
         }

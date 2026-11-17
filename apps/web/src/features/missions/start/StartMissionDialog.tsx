@@ -372,9 +372,9 @@ export function StartMissionDialog({
               </ul>
             </CollapsibleContent>
           </Collapsible>
-          {(errors.assembly ?? errors.workspace) && (
+          {(errors.assembly ?? errors.workspace ?? errors.outerFolders) && (
             <p className="text-destructive text-sm" role="alert">
-              {errors.assembly ?? errors.workspace}
+              {errors.assembly ?? errors.workspace ?? errors.outerFolders}
             </p>
           )}
           <DialogFooter>

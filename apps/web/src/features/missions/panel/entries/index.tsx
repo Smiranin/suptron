@@ -1,4 +1,4 @@
-import { summarizeCheck, type TranscriptEntry } from '@suptron/runtime/browser';
+import { summarizeCheck, type AgentMarker, type TranscriptEntry } from '@suptron/runtime/browser';
 import { cn } from '@suptron/ui/lib/utils';
 import {
   AlertCircle,
@@ -38,9 +38,27 @@ function pretty(value: unknown): string {
   }
 }
 
+/** Names the agent the Pilot called, on an entry made inside it. */
+function AgentBadge({ agent }: { agent: AgentMarker | undefined }) {
+  if (!agent) return null;
+  return (
+    <span
+      className="bg-muted text-muted-foreground shrink-0 rounded-full px-1.5 py-0.5 font-mono text-[10px]"
+      data-testid="agent-badge"
+    >
+      {agent.name}
+    </span>
+  );
+}
+
 export function TextEntry({ entry }: { entry: Extract<TranscriptEntry, { kind: 'text' }> }) {
   return (
-    <div className={ROW} data-entry="text">
+    <div className={ROW} data-entry="text" data-agent={entry.agent?.name}>
+      {entry.agent && (
+        <div className="mb-1">
+          <AgentBadge agent={entry.agent} />
+        </div>
+      )}
       <Markdown text={entry.text} />
     </div>
   );
@@ -58,6 +76,7 @@ export function ToolCallEntry({
     <div
       className={cn(ROW, 'py-1')}
       data-entry="tool_call"
+      data-agent={entry.agent?.name}
       data-error={isError ? 'true' : undefined}
     >
       <button
@@ -73,6 +92,7 @@ export function ToolCallEntry({
           aria-hidden="true"
           className={cn('size-3.5 shrink-0 transition-transform', open && 'rotate-90')}
         />
+        <AgentBadge agent={entry.agent} />
         <span className="font-mono text-xs font-semibold">{entry.name}</span>
         <span className="truncate font-mono text-xs">{summary}</span>
         {entry.result === undefined && <span className="text-xs italic">running…</span>}

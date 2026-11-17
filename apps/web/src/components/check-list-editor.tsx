@@ -29,7 +29,10 @@ export interface CheckListEditorProps {
   capabilities?: ReadonlySet<Capability> | null;
 }
 
-function blankCheck(kind: CheckKind): Check {
+/** The Check kinds the Commander may pick: every kind but the ones only the system adds. */
+type PickableKind = Exclude<CheckKind, 'sub_pilot_returned'>;
+
+function blankCheck(kind: PickableKind): Check {
   switch (kind) {
     case 'command':
       return { kind, command: '' };
@@ -48,10 +51,12 @@ export function CheckListEditor({
   label = 'Checks',
   capabilities = null,
 }: CheckListEditorProps) {
-  const [kind, setKind] = useState<CheckKind>('command');
+  const [kind, setKind] = useState<PickableKind>('command');
   const baseId = useId();
   const offered = CHECK_CATALOGUE.filter(
-    (d) => capabilities === null || missingCapabilities(d.requires, capabilities).length === 0,
+    (d) =>
+      !d.system &&
+      (capabilities === null || missingCapabilities(d.requires, capabilities).length === 0),
   );
   const update = (index: number, check: Check) =>
     onChange(value.map((c, i) => (i === index ? check : c)));
@@ -164,7 +169,7 @@ export function CheckListEditor({
         })}
       </ol>
       <div className="flex items-center gap-2">
-        <Select value={kind} onValueChange={(v) => setKind(v as CheckKind)} disabled={disabled}>
+        <Select value={kind} onValueChange={(v) => setKind(v as PickableKind)} disabled={disabled}>
           <SelectTrigger aria-label="Check kind" className="w-56">
             <SelectValue />
           </SelectTrigger>

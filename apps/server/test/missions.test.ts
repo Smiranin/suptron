@@ -456,4 +456,65 @@ describe('Missions routes', () => {
     await s.app.inject({ method: 'POST', url: `/api/missions/${id}/stop` });
     release();
   });
+
+  it('stops and runs again a Side Slot, and carries the Side Slots in the detail and the stream', async () => {
+    await s.cleanup();
+    const brief = briefAssembly();
+    const withSide = {
+      ...brief,
+      slots: [
+        brief.slots[0]!,
+        { ...brief.slots[1]!, sideSlots: [{ name: 'notes', unit: 'researcher' }] },
+      ],
+    };
+    s = await testServer({
+      units: briefUnits(),
+      projects: [{ profile: noneProfile(), assemblies: [withSide] }],
+    });
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    s.engine.script('pilot', 'notes', (call) =>
+      call.index === 0
+        ? [{ text: 'noting' }, { wait: gate }, { result: { output: 'never' } }]
+        : [{ result: { output: 'Notes written.' } }],
+    );
+    const id = (
+      await s.app.inject({
+        method: 'POST',
+        url: '/api/missions',
+        payload: { project: 'research', assembly: 'brief', task: { kind: 'text', text: '# Q' } },
+      })
+    ).json().id as string;
+    await s.waitFor((es) => es.some((e) => e.type === 'agent.text' && e.slot === 'notes'));
+    const post = (name: string, action: string) =>
+      s.app.inject({ method: 'POST', url: `/api/missions/${id}/side-slots/${name}/${action}` });
+
+    expect((await post('nope', 'stop')).statusCode).toBe(404);
+    const notRunnable = await post('notes', 'run');
+    expect(notRunnable.statusCode).toBe(409);
+    expect(notRunnable.json()).toMatchObject({ reason: 'side_slot_not_runnable' });
+    const running = (
+      await s.app.inject({ method: 'GET', url: `/api/missions/${id}` })
+    ).json() as MissionDetail;
+    expect(running.sideSlots).toMatchObject([
+      { name: 'notes', parent: 'brief-writer', status: 'running' },
+    ]);
+    expect(running.result?.exitSlot).toBe('brief-writer');
+    expect(running.transcript.at(-1)).toMatchObject({ sideSlotOf: 'brief-writer' });
+
+    expect((await post('notes', 'stop')).statusCode).toBe(204);
+    await s.waitForState(id, 'completed');
+    const notRunning = await post('notes', 'stop');
+    expect(notRunning.statusCode).toBe(409);
+    expect(notRunning.json()).toMatchObject({ reason: 'side_slot_not_running' });
+
+    expect((await post('notes', 'run')).statusCode).toBe(204);
+    await s.waitFor((es) => es.filter((e) => e.type === 'mission.completed').length === 2);
+    const detail = (
+      await s.app.inject({ method: 'GET', url: `/api/missions/${id}` })
+    ).json() as MissionDetail;
+    expect(detail.sideSlots).toMatchObject([{ name: 'notes', status: 'done', starts: 2 }]);
+    expect(detail.transcript.filter((t) => t.sideSlotOf === 'brief-writer')).toHaveLength(2);
+    release();
+  });
 });

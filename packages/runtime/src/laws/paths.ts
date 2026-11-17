@@ -30,7 +30,8 @@ export function canonicalPath(path: string): string {
   }
 }
 
-function isInside(target: string, root: string): boolean {
+/** True when `target` is `root` itself or lies under it. */
+export function isInside(target: string, root: string): boolean {
   const rel = relative(root, target);
   return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel));
 }
@@ -42,8 +43,8 @@ function isGitInternal(target: string, root: string): boolean {
 
 /**
  * Denies any access to the configuration home, writes to the Commander's Task documents (a Slot's
- * own files next to them, such as OUTLINE.md, may be rewritten), writes outside the write roots
- * and the Task location, and writes to `.git` internals wherever a `.git` directory sits under a
+ * own files next to them, such as OUTLINE.md, may be rewritten), writes outside the write roots,
+ * the Task location and the Project's Outer Folders, and writes to `.git` internals wherever a `.git` directory sits under a
  * write root.
  *
  * The Task location and the write roots are decided before the configuration home, because
@@ -71,11 +72,19 @@ export function evaluatePath(path: string, mode: PathMode, ctx: GuardContext): P
   if (isInside(target, canonicalPath(ctx.configHome))) {
     return { allowed: false, reason: 'Agents may not touch the Suptron configuration home' };
   }
+  // After the configuration home, so that no listed folder can open it.
+  if (ctx.outerFolders.some((folder) => isInside(target, canonicalPath(folder)))) {
+    return { allowed: true };
+  }
   if (mode === 'read') return { allowed: true };
   return { allowed: false, reason: outsideWriteReason(ctx) };
 }
 
 /** Names the Task folder so a Slot that wanted a scratch file (run 4: `/tmp`) knows where it goes. */
 export function outsideWriteReason(ctx: GuardContext): string {
-  return `Writes are allowed only inside the Workspace and the Task folder; keep working files in ${ctx.taskPath}`;
+  const places =
+    ctx.outerFolders.length > 0
+      ? `the Workspace, the Task folder and the Outer Folders (${ctx.outerFolders.join(', ')})`
+      : 'the Workspace and the Task folder';
+  return `Writes are allowed only inside ${places}; keep working files in ${ctx.taskPath}`;
 }

@@ -22,6 +22,7 @@ import {
   uniqueSlotName,
   validateAssembly,
   type AssemblyFile,
+  type SlotFile,
   type UnitFile,
 } from '../src/index.js';
 import {
@@ -411,7 +412,7 @@ describe('serialize round-trips', () => {
     const assembly = primaryAssembly();
     const slot = { ...assembly.slots[1]!, rules: 'Never touch docs/.' };
     const unit = primaryUnits().find((u) => u.name === slot.unit)!;
-    const resolved = resolveSlot(slot, unit, resolveCore(assembly.core), false);
+    const resolved = resolveSlot(slot, unit, resolveCore(assembly.core), false, primaryUnits());
     expect(resolved.rules).toBe(`${unit.rules.trim()}\n\nNever touch docs/.`);
     expect(serializeAssembly({ ...assembly, slots: [assembly.slots[0]!, slot] })).toContain(
       'rules: Never touch docs/.',
@@ -559,5 +560,225 @@ describe('UnitFile type', () => {
   it('is the parsed shape', () => {
     const unit: UnitFile = primaryUnits()[0]!;
     expect(unit.name).toBe('analyst');
+  });
+});
+
+describe('Sub-pilots and Side Slots in the configuration', () => {
+  /** analyst → tester (last), where the tester carries the attached work under test. */
+  function withAttached(tester: Partial<SlotFile>): AssemblyFile {
+    return assembly({
+      slots: [
+        { name: 'analyst', unit: 'analyst' },
+        { name: 'tester', unit: 'tester', ...tester },
+      ],
+    });
+  }
+
+  it('accepts Sub-pilots and Side Slots that name existing Units', () => {
+    const doc = withAttached({
+      subPilots: [{ unit: 'reviewer', required: true }, { unit: 'implementer' }],
+      sideSlots: [
+        { unit: 'publisher', context: { slotOutputs: ['analyst', 'tester'] } },
+        { name: 'notes', unit: 'reviewer', subPilots: [{ unit: 'analyst' }] },
+      ],
+    });
+    expect(validateAssembly(doc, units, ALL).errors).toEqual([]);
+  });
+
+  it.each([
+    ['unknown_unit', { subPilots: [{ unit: 'nope' }] }, 'subPilots[0].unit'],
+    ['unknown_unit', { sideSlots: [{ unit: 'nope' }] }, 'sideSlots[0].unit'],
+    [
+      'unknown_unit',
+      { sideSlots: [{ unit: 'publisher', subPilots: [{ unit: 'nope' }] }] },
+      'sideSlots[0].subPilots[0].unit',
+    ],
+    [
+      'duplicate_sub_pilot',
+      { subPilots: [{ unit: 'reviewer' }, { unit: 'reviewer', required: true }] },
+      'subPilots[1].unit',
+    ],
+    ['duplicate_side_slot_name', { sideSlots: [{ unit: 'analyst' }] }, 'sideSlots[0].name'],
+    [
+      'duplicate_side_slot_name',
+      { sideSlots: [{ name: 'core', unit: 'analyst' }] },
+      'sideSlots[0].name',
+    ],
+    [
+      'duplicate_side_slot_name',
+      { sideSlots: [{ unit: 'publisher' }, { unit: 'publisher' }] },
+      'sideSlots[1].name',
+    ],
+    [
+      'context_reference_missing',
+      { sideSlots: [{ unit: 'publisher', context: { slotOutputs: ['zz'] } }] },
+      'sideSlots[0].context.slotOutputs',
+    ],
+    [
+      'system_check_in_condition',
+      { doneCondition: [{ kind: 'sub_pilot_returned', unit: 'reviewer' }] },
+      'doneCondition[0]',
+    ],
+  ] as [string, Partial<SlotFile>, string][])('reports %s at %s', (code, tester, path) => {
+    const errors = validateAssembly(withAttached(tester), units, ALL).errors;
+    expect(errors.map((e) => [e.code, e.slotName, e.path])).toContainEqual([code, 'tester', path]);
+  });
+
+  it('lets a Side Slot read only Slot Outputs of its Slot and earlier ones', () => {
+    const doc = assembly({
+      slots: [
+        {
+          name: 'analyst',
+          unit: 'analyst',
+          sideSlots: [{ unit: 'publisher', context: { slotOutputs: ['tester'] } }],
+        },
+        { name: 'tester', unit: 'tester' },
+      ],
+    });
+    expect(validateAssembly(doc, units, ALL).errors.map((e) => [e.code, e.slotName])).toEqual([
+      ['context_reference_not_earlier', 'analyst'],
+    ]);
+  });
+
+  it('reports Git conventions a Side Slot reads but the Workspace cannot give', () => {
+    const doc = withAttached({
+      sideSlots: [{ unit: 'publisher', context: { gitConventions: true } }],
+    });
+    expect(
+      validateAssembly(doc, units, NONE).errors.map((e) => [e.code, e.slotName, e.path]),
+    ).toContainEqual([
+      'context_source_unavailable',
+      'tester',
+      'sideSlots[0].context.gitConventions',
+    ]);
+  });
+
+  it.each(['loop', 'exitPoint', 'doneCondition', 'memoryMode', 'mayAskCommander', 'sideSlots'])(
+    'refuses a Side Slot with %s',
+    (key) => {
+      const value: Record<string, unknown> = {
+        loop: { target: 'analyst' },
+        exitPoint: true,
+        doneCondition: [],
+        memoryMode: 'fresh',
+        mayAskCommander: true,
+        sideSlots: [],
+      };
+      const parsed = assemblyFileSchema.safeParse({
+        ...withAttached({}),
+        slots: [
+          { name: 'analyst', unit: 'analyst' },
+          { name: 'tester', unit: 'tester', sideSlots: [{ unit: 'publisher', [key]: value[key] }] },
+        ],
+      });
+      expect(parsed.success).toBe(false);
+      const issue = parsed.error!.issues[0]!;
+      expect(issue.path).toEqual(['slots', 1, 'sideSlots', 0]);
+      expect(issue.message).toContain(key);
+    },
+  );
+
+  it('refuses a Sub-pilot with a setting it cannot have', () => {
+    const parsed = assemblyFileSchema.safeParse({
+      ...withAttached({}),
+      slots: [{ name: 'tester', unit: 'tester', subPilots: [{ unit: 'reviewer', loop: {} }] }],
+    });
+    expect(parsed.success).toBe(false);
+  });
+
+  it('snapshots both lists and puts a Check per required Sub-pilot first', () => {
+    const doc = withAttached({
+      subPilots: [
+        { unit: 'reviewer', required: true, model: 'opus', instructions: 'Only the diff.' },
+        { unit: 'implementer' },
+      ],
+      sideSlots: [
+        {
+          unit: 'publisher',
+          rules: 'Never push.',
+          context: { slotOutputs: ['tester'] },
+          subPilots: [{ unit: 'analyst', required: true }],
+        },
+      ],
+    });
+    const tester = buildSnapshot(primaryProfile('/repo'), doc, primaryUnits()).assembly.slots[1]!;
+    const reviewer = primaryUnits().find((u) => u.name === 'reviewer')!;
+    expect(tester.doneCondition[0]).toEqual({ kind: 'sub_pilot_returned', unit: 'reviewer' });
+    expect(tester.doneCondition.slice(1)).toEqual(
+      primaryUnits().find((u) => u.name === 'tester')!.doneCondition,
+    );
+    expect(tester.subPilots).toEqual([
+      {
+        unit: 'reviewer',
+        title: reviewer.title ?? 'reviewer',
+        model: 'opus',
+        rules: reviewer.rules,
+        instructions: `${reviewer.instructions.trim()}\n\nOnly the diff.`,
+        required: true,
+      },
+      expect.objectContaining({ unit: 'implementer', required: false }),
+    ]);
+    expect(tester.sideSlots).toEqual([
+      expect.objectContaining({
+        name: 'publisher',
+        unit: 'publisher',
+        rules: expect.stringMatching(/Never push\.$/),
+        context: { ...DEFAULTS.slot.context, slotOutputs: ['tester'] },
+        subPilots: [expect.objectContaining({ unit: 'analyst', required: true })],
+      }),
+    ]);
+  });
+
+  it('snapshots an Assembly without attached work as before', () => {
+    const snapshot = buildSnapshot(primaryProfile('/repo'), primaryAssembly(), primaryUnits());
+    for (const [index, slot] of snapshot.assembly.slots.entries()) {
+      expect(slot.subPilots).toEqual([]);
+      expect(slot.sideSlots).toEqual([]);
+      const unit = primaryUnits().find((u) => u.name === slot.unit)!;
+      expect(slot.doneCondition).toEqual(
+        primaryAssembly().slots[index]!.doneCondition ?? unit.doneCondition,
+      );
+    }
+    expect(serializeAssembly(primaryAssembly())).not.toMatch(/subPilots|sideSlots/);
+  });
+
+  it('round-trips both lists through the file and finds their Units in use', () => {
+    const doc = withAttached({
+      exitPoint: true,
+      subPilots: [{ unit: 'reviewer', required: true, model: 'opus', instructions: 'x' }],
+      sideSlots: [
+        {
+          name: 'notes',
+          unit: 'publisher',
+          model: 'sonnet',
+          rules: 'r',
+          instructions: 'i',
+          context: { taskDocuments: false, slotOutputs: ['analyst'] },
+          subPilots: [{ unit: 'implementer' }],
+        },
+      ],
+    });
+    expect(assemblyFileSchema.parse(parse(serializeAssembly(doc)))).toEqual(doc);
+    const config = {
+      home: '/h',
+      units: [],
+      projects: [
+        {
+          name: 'p',
+          assemblies: [{ name: 'a', assembly: doc }],
+        },
+      ],
+    } as unknown as Parameters<typeof findUnitUsage>[0];
+    for (const unit of ['tester', 'reviewer', 'publisher', 'implementer']) {
+      expect(findUnitUsage(config, unit)).toEqual([{ project: 'p', assembly: 'a' }]);
+    }
+    expect(findUnitUsage(config, 'pr-reviewer')).toEqual([]);
+  });
+
+  it('finds the references a Side Slot holds to a Slot', () => {
+    const doc = withAttached({
+      sideSlots: [{ name: 'notes', unit: 'publisher', context: { slotOutputs: ['analyst'] } }],
+    });
+    expect(referencesToSlot(doc, 'analyst')).toEqual([{ from: 'notes', kind: 'slotOutput' }]);
   });
 });

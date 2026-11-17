@@ -1,6 +1,7 @@
 import type { SDKMessage } from '@anthropic-ai/claude-agent-sdk';
 import { describe, expect, it } from 'vitest';
 import { costOfResult, sdkMessageToEvents } from '../src/events.js';
+import { SubAgentTracker } from '../src/sub-agents.js';
 
 function message(partial: Record<string, unknown>): SDKMessage {
   return { uuid: 'u', session_id: 's1', ...partial } as unknown as SDKMessage;
@@ -219,5 +220,149 @@ describe('sdkMessageToEvents', () => {
     expect(events).toEqual([
       { type: 'error', message: 'Engine error (error_during_execution): boom; again' },
     ]);
+  });
+});
+
+describe('SubAgentTracker', () => {
+  /** Feeds SDK messages through `sdkMessageToEvents` and the tracker, as the Engine does. */
+  function play(messages: Record<string, unknown>[]) {
+    const tracker = new SubAgentTracker();
+    return messages.flatMap((m) => {
+      const sdk = message(m);
+      return tracker.track(sdk, sdkMessageToEvents(sdk));
+    });
+  }
+  const call = (id: string, subagentType?: string) => ({
+    type: 'assistant',
+    parent_tool_use_id: null,
+    message: {
+      content: [
+        {
+          type: 'tool_use',
+          id,
+          name: 'Agent',
+          input: { prompt: 'Do it.', ...(subagentType && { subagent_type: subagentType }) },
+        },
+      ],
+    },
+  });
+  const inside = (parent: string, text: string) => ({
+    type: 'assistant',
+    parent_tool_use_id: parent,
+    message: {
+      content: [
+        { type: 'text', text },
+        { type: 'tool_use', id: `${parent}-bash`, name: 'Bash', input: { command: 'ls' } },
+      ],
+    },
+  });
+  const insideResult = (parent: string) => ({
+    type: 'user',
+    parent_tool_use_id: parent,
+    message: {
+      role: 'user',
+      content: [{ type: 'tool_result', tool_use_id: `${parent}-bash`, content: 'a.txt' }],
+    },
+  });
+  const returned = (id: string, isError = false) => ({
+    type: 'user',
+    parent_tool_use_id: null,
+    message: {
+      role: 'user',
+      content: [{ type: 'tool_result', tool_use_id: id, content: 'Report.', is_error: isError }],
+    },
+  });
+
+  it('turns one call into called, marked work and returned', () => {
+    const marker = { name: 'unit-tests', callId: 'c1' };
+    expect(
+      play([
+        call('c1', 'unit-tests'),
+        inside('c1', 'Testing.'),
+        insideResult('c1'),
+        returned('c1'),
+      ]),
+    ).toEqual([
+      {
+        type: 'tool_call',
+        id: 'c1',
+        name: 'Agent',
+        input: { prompt: 'Do it.', subagent_type: 'unit-tests' },
+      },
+      { type: 'sub_agent_called', callId: 'c1', name: 'unit-tests' },
+      { type: 'text', text: 'Testing.', agent: marker },
+      { type: 'tool_call', id: 'c1-bash', name: 'Bash', input: { command: 'ls' }, agent: marker },
+      {
+        type: 'tool_result',
+        toolCallId: 'c1-bash',
+        output: 'a.txt',
+        isError: false,
+        agent: marker,
+      },
+      { type: 'tool_result', toolCallId: 'c1', output: 'Report.', isError: false },
+      { type: 'sub_agent_returned', callId: 'c1', name: 'unit-tests', isError: false },
+    ]);
+  });
+
+  it('keeps two calls at once apart and reports an error return', () => {
+    const events = play([
+      {
+        type: 'assistant',
+        parent_tool_use_id: null,
+        message: {
+          content: [
+            { type: 'tool_use', id: 'a', name: 'Agent', input: { subagent_type: 'unit-tests' } },
+            { type: 'tool_use', id: 'b', name: 'Agent', input: { subagent_type: 'browser-tests' } },
+          ],
+        },
+      },
+      inside('b', 'Browser.'),
+      inside('a', 'Unit.'),
+      returned('b', true),
+      returned('a'),
+    ]);
+    const neutral = events.filter((e) => e.type.startsWith('sub_agent'));
+    expect(neutral).toEqual([
+      { type: 'sub_agent_called', callId: 'a', name: 'unit-tests' },
+      { type: 'sub_agent_called', callId: 'b', name: 'browser-tests' },
+      { type: 'sub_agent_returned', callId: 'b', name: 'browser-tests', isError: true },
+      { type: 'sub_agent_returned', callId: 'a', name: 'unit-tests', isError: false },
+    ]);
+    expect(events.find((e) => e.type === 'text' && e.text === 'Browser.')).toMatchObject({
+      agent: { name: 'browser-tests', callId: 'b' },
+    });
+  });
+
+  it("names a call without a type after the Engine's general agent and leaves other tools alone", () => {
+    const events = play([
+      call('g'),
+      {
+        type: 'assistant',
+        parent_tool_use_id: null,
+        message: { content: [{ type: 'tool_use', id: 't', name: 'Read', input: {} }] },
+      },
+      returned('t'),
+      returned('g'),
+    ]);
+    expect(events.filter((e) => e.type.startsWith('sub_agent'))).toEqual([
+      { type: 'sub_agent_called', callId: 'g', name: 'general-purpose' },
+      { type: 'sub_agent_returned', callId: 'g', name: 'general-purpose', isError: false },
+    ]);
+  });
+
+  it('attributes the work of a nested call to the outermost agent', () => {
+    const events = play([
+      call('outer', 'general-purpose'),
+      {
+        type: 'assistant',
+        parent_tool_use_id: 'outer',
+        message: { content: [{ type: 'tool_use', id: 'inner', name: 'Agent', input: {} }] },
+      },
+      inside('inner', 'Deep.'),
+    ]);
+    expect(events.find((e) => e.type === 'text')).toMatchObject({
+      agent: { name: 'general-purpose', callId: 'outer' },
+    });
+    expect(events.filter((e) => e.type === 'sub_agent_called')).toHaveLength(1);
   });
 });

@@ -3,7 +3,8 @@ import { stat } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { loadConfig as defaultLoadConfig, type LoadedConfig } from '../config/load.js';
 import type { AssemblyFile } from '../config/schemas.js';
-import { buildSnapshot, type MissionSnapshot } from '../config/snapshot.js';
+import { buildSnapshot, readStoredSnapshot, type MissionSnapshot } from '../config/snapshot.js';
+import { unitsOfSlot } from '../config/usage.js';
 import { EngineCoreAgent } from '../core-agent/index.js';
 import {
   MISSION_TITLE_MAX_LENGTH,
@@ -14,6 +15,7 @@ import {
   type MissionSummary,
   type MissionTask,
   type PendingQuestion,
+  type SideSlotRecord,
   type SlotRecord,
 } from '../domain/mission.js';
 import type { Answers } from '../domain/transcript.js';
@@ -56,7 +58,13 @@ export interface StartMissionInput {
 }
 
 export type StartIssueField =
-  'taskPath' | 'taskText' | 'title' | 'assembly' | 'workItemId' | WorkspaceIssueField;
+  | 'taskPath'
+  | 'taskText'
+  | 'title'
+  | 'assembly'
+  | 'workItemId'
+  | 'outerFolders'
+  | WorkspaceIssueField;
 
 export class MissionStartError extends Error {
   constructor(readonly issues: { field: StartIssueField; message: string }[]) {
@@ -79,6 +87,7 @@ export interface MissionRecord {
   assembly: AssemblyFile;
   snapshot: MissionSnapshot | null;
   slots: SlotRecord[];
+  sideSlots: SideSlotRecord[];
   transcriptLost: boolean;
   resumable: boolean;
   pendingQuestion?: PendingQuestion;
@@ -123,6 +132,9 @@ export interface CheckoutStatus extends Checkout {
 
 const WORK_ITEM_ID = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 
+/** The note of a Side Slot that ran or waited when the application stopped. */
+export const INTERRUPTED_BY_RESTART = 'Interrupted by a restart of the application';
+
 /** Every Mission known since start: starts, controls, Workspace busy-ness, the ledger. */
 export class MissionRegistry {
   readonly events = new TypedEmitter<MissionEvent>();
@@ -155,6 +167,7 @@ export class MissionRegistry {
         assembly: entry.assembly,
         snapshot: entry.snapshot,
         slots: structuredClone(runner.slotRecords()),
+        sideSlots: runner.sideSlotRecords(),
         transcriptLost: entry.transcriptLost,
         resumable: runner.state === 'stopped' && entry.origin !== null,
         ...(runner.pendingQuestion && { pendingQuestion: structuredClone(runner.pendingQuestion) }),
@@ -169,6 +182,7 @@ export class MissionRegistry {
       assembly: entry.assembly,
       snapshot: null,
       slots: structuredClone(recovered.slots),
+      sideSlots: structuredClone(recovered.sideSlots ?? []),
       transcriptLost: true,
       resumable: recovered.resume !== undefined,
       seq: entry.seq,
@@ -198,7 +212,7 @@ export class MissionRegistry {
     return this.isWorkspaceBusy(busyKeyOf(path));
   }
 
-  /** Active Missions whose snapshot matches: a Unit in a Slot, an Assembly of a Project, or a Project. */
+  /** Active Missions whose snapshot matches: a Unit anywhere in a Slot, an Assembly of a Project, or a Project. */
   countActiveMissions(filter: { unit?: string; project?: string; assembly?: string }): number {
     let count = 0;
     for (const entry of this.entries.values()) {
@@ -206,9 +220,10 @@ export class MissionRegistry {
       if (!summary || !isActiveState(summary.state) || !entry.snapshot) continue;
       if (filter.project !== undefined && summary.projectName !== filter.project) continue;
       if (filter.assembly !== undefined && summary.assemblyName !== filter.assembly) continue;
+      const unit = filter.unit;
       if (
-        filter.unit !== undefined &&
-        !entry.snapshot.assembly.slots.some((s) => s.unit === filter.unit)
+        unit !== undefined &&
+        !entry.snapshot.assembly.slots.some((s) => unitsOfSlot(s).includes(unit))
       )
         continue;
       count += 1;
@@ -274,6 +289,11 @@ export class MissionRegistry {
       }
     } else if (input.task.text.trim() === '') {
       issues.push({ field: 'taskText', message: 'The Task text is empty' });
+    }
+    for (const folder of project?.profile
+      ? await missingFolders(project.profile.outerFolders)
+      : []) {
+      issues.push({ field: 'outerFolders', message: `The Outer Folder does not exist: ${folder}` });
     }
     if (issues.length > 0) throw new MissionStartError(issues);
 
@@ -361,6 +381,7 @@ export class MissionRegistry {
         taskDocuments,
         ...(workItemId !== undefined && { workItemId }),
         configHome: this.deps.home,
+        outerFolders: [...profile.outerFolders],
         gitConventions,
         knowledgeSources: resolveKnowledgeSources(profile.knowledgeSources, workspace.cwd),
         startedAt: startedAt.toISOString(),
@@ -409,6 +430,7 @@ export class MissionRegistry {
         taskPath: meta.taskPath,
         taskDocuments: meta.taskDocuments,
         configHome: this.deps.home,
+        outerFolders: meta.outerFolders ?? [],
       }),
       ...(resume?.coreSessionId !== undefined && { resumeSessionId: resume.coreSessionId }),
       onCost: (cost) => runner.addCoreCost(cost),
@@ -435,7 +457,7 @@ export class MissionRegistry {
           usageResetMarginMs: this.deps.usageResetMarginMs,
         }),
       },
-      resume && { progress: resume.progress, records: resume.records },
+      resume && { progress: resume.progress, records: resume.records, sideSlots: resume.sideSlots },
     );
     entry.runner = runner;
     entry.core = core;
@@ -467,6 +489,9 @@ export class MissionRegistry {
       const missionDir = missionFolder(this.deps.home, id);
       await requirePath('The Mission folder', missionDir);
       await requirePath('The Task location', state.meta.taskPath);
+      for (const folder of state.meta.outerFolders ?? []) {
+        await requirePath('The Outer Folder', folder);
+      }
       let workspace: Workspace;
       try {
         workspace = await openWorkspace(
@@ -488,9 +513,13 @@ export class MissionRegistry {
       if (busy) throw new WorkspaceBusyError(busy);
       const { progress, coreSessionId, ...origin } = state;
       entry.origin = origin;
+      const sideSlots = entry.runner
+        ? entry.runner.sideSlotRecords()
+        : (entry.recovered!.sideSlots ?? []);
       const runner = this.engage(entry, origin, workspace, {
         progress,
         records: structuredClone(slots),
+        sideSlots: structuredClone(sideSlots),
         ...(coreSessionId !== undefined && { coreSessionId }),
       });
       await this.writeLedger();
@@ -524,6 +553,38 @@ export class MissionRegistry {
     await entry.runner.stop();
   }
 
+  /** Stops one running Side Slot of a Mission; it counts as failed and the next one starts. */
+  async stopSideSlot(id: string, name: string): Promise<void> {
+    const entry = this.requireEntry(id);
+    if (!entry.runner) {
+      throw new MissionStateError(
+        'side_slot_not_running',
+        `The Side Slot "${name}" is not running`,
+      );
+    }
+    await entry.runner.stopSideSlot(name);
+  }
+
+  /**
+   * Runs a failed or interrupted Side Slot of a Mission that is not Stopped once more. A Completed
+   * Mission holds its Workspace again for the run, so it is refused while another one holds it.
+   */
+  runSideSlot(id: string, name: string): void {
+    const entry = this.requireEntry(id);
+    const runner = entry.runner;
+    if (!runner) {
+      throw new MissionStateError(
+        'side_slot_not_runnable',
+        'A Side Slot of a Stopped Mission cannot run again',
+      );
+    }
+    if (runner.state === 'completed') {
+      const busy = this.isWorkspaceBusy(entry.workspace?.busyKey ?? null);
+      if (busy) throw new WorkspaceBusyError(busy);
+    }
+    runner.runSideSlotAgain(name);
+  }
+
   retry(id: string, note?: string): void {
     const entry = this.requireEntry(id);
     if (!entry.runner)
@@ -547,6 +608,7 @@ export class MissionRegistry {
         'Only Completed and Stopped Missions can be dismissed',
       );
     }
+    await entry.runner?.stopSideSlots();
     this.entries.delete(id);
     await Promise.all([this.writeLedger(), removeMissionFolder(this.deps.home, id)]);
     const seq = entry.seq + 1;
@@ -564,6 +626,16 @@ export class MissionRegistry {
       if (this.entries.has(id) || !raw?.summary) continue;
       const { usageResetsAt: _dropped, ...kept } = raw.summary;
       void _dropped;
+      const resume = raw.resume && {
+        ...raw.resume,
+        snapshot: readStoredSnapshot(raw.resume.snapshot),
+      };
+      // What ran or waited when the application stopped is over; Run again may start it.
+      const sideSlots = (raw.sideSlots ?? []).map((record) =>
+        record.status === 'running' || record.status === 'waiting'
+          ? { ...record, status: 'interrupted' as const, note: INTERRUPTED_BY_RESTART }
+          : record,
+      );
       const summary: MissionSummary = {
         ...kept,
         state: 'stopped',
@@ -577,10 +649,11 @@ export class MissionRegistry {
           summary,
           assembly: raw.assembly,
           slots: raw.slots ?? [],
-          ...(raw.resume && { resume: raw.resume }),
+          sideSlots,
+          ...(resume && { resume }),
         },
         assembly: raw.assembly,
-        snapshot: raw.resume?.snapshot ?? null,
+        snapshot: resume?.snapshot ?? null,
         workspace: null,
         origin: null,
         transcriptLost: true,
@@ -632,6 +705,7 @@ export class MissionRegistry {
         summary: structuredClone(runner.summary),
         assembly: entry.assembly,
         slots: structuredClone(runner.slotRecords()),
+        sideSlots: runner.sideSlotRecords(),
         ...(resume && { resume }),
       };
     }
@@ -646,11 +720,28 @@ const LEDGER_EVENT_TYPES: ReadonlySet<MissionEvent['type']> = new Set<MissionEve
   'slot.skipped',
   'core.resolved',
   'cost.updated',
+  'side_slot.waiting',
+  'side_slot.started',
+  'side_slot.ended',
   'mission.state',
   'mission.resumed',
+  'mission.reported',
   'mission.completed',
   'mission.stopped',
 ]);
+
+/** The folders of the list that do not exist as directories. */
+async function missingFolders(folders: readonly string[]): Promise<string[]> {
+  const missing: string[] = [];
+  for (const folder of folders) {
+    const isDirectory = await stat(folder).then(
+      (info) => info.isDirectory(),
+      () => false,
+    );
+    if (!isDirectory) missing.push(folder);
+  }
+  return missing;
+}
 
 async function requirePath(what: string, path: string): Promise<void> {
   try {

@@ -15,7 +15,13 @@ import { NameTakenError, ValidationError } from '../../api/client';
 import { api, useInvalidateConfig, useProjects } from '../../api/queries';
 import { ConfirmDialog } from '../../components/confirm-dialog';
 import { titleIdProblems } from '../../components/title-id-fields';
-import { ProfileForm, emptyProfile, useProfileForm, usePathStatuses } from './ProfileForm';
+import {
+  ProfileForm,
+  emptyProfile,
+  showOuterFolderIssues,
+  useProfileForm,
+  usePathStatuses,
+} from './ProfileForm';
 
 /**
  * "New Project": the whole Profile at once, then straight to the Project page.
@@ -108,8 +114,9 @@ function NewProjectForm({
     } catch (error) {
       if (error instanceof NameTakenError)
         setNameError({ name: profile.name, message: 'That ID is already taken' });
-      else if (error instanceof ValidationError) toast.error(error.message);
-      else toast.error(error instanceof Error ? error.message : String(error));
+      else if (error instanceof ValidationError) {
+        if (!showOuterFolderIssues(form, error.issues)) toast.error(error.message);
+      } else toast.error(error instanceof Error ? error.message : String(error));
     } finally {
       setBusy(false);
     }

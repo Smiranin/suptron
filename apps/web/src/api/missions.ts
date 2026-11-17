@@ -2,7 +2,14 @@ import type { MissionDetail, MissionSummary, MissionTask } from '@suptron/runtim
 import { HttpError, NotFoundError, request } from './client';
 
 export type StartIssueField =
-  'taskPath' | 'taskText' | 'title' | 'checkoutPath' | 'workspace' | 'assembly' | 'workItemId';
+  | 'taskPath'
+  | 'taskText'
+  | 'title'
+  | 'checkoutPath'
+  | 'workspace'
+  | 'assembly'
+  | 'workItemId'
+  | 'outerFolders';
 
 export class MissionValidationError extends Error {
   constructor(readonly issues: { field: StartIssueField; message: string }[]) {
@@ -29,6 +36,23 @@ export interface StartMissionRequest {
   /** Only for a repository Project. */
   checkoutPath?: string;
   mayAskCommander: Record<string, boolean>;
+}
+
+/** A Side Slot action; a 409 becomes WorkspaceBusyError or an Error with the server's message. */
+async function sideSlotAction(id: string, name: string, action: 'stop' | 'run'): Promise<void> {
+  try {
+    await request<void>(
+      `/api/missions/${encodeURIComponent(id)}/side-slots/${encodeURIComponent(name)}/${action}`,
+      { method: 'POST' },
+    );
+  } catch (error) {
+    if (error instanceof HttpError && error.status === 409) {
+      const body = error.body as { reason?: string; message?: string; missionId?: string };
+      if (body?.reason === 'workspace_busy') throw new WorkspaceBusyError(body.missionId ?? '');
+      throw new Error(body?.message ?? `The Side Slot cannot ${action}`, { cause: error });
+    }
+    throw error;
+  }
 }
 
 export const missionsApi = {
@@ -66,6 +90,10 @@ export const missionsApi = {
   },
   stop: (id: string) =>
     request<void>(`/api/missions/${encodeURIComponent(id)}/stop`, { method: 'POST' }),
+  /** Stops one running Side Slot; a refusal carries the server's message. */
+  stopSideSlot: (id: string, name: string) => sideSlotAction(id, name, 'stop'),
+  /** Runs a failed or interrupted Side Slot once more; refused while the Workspace is busy. */
+  runSideSlot: (id: string, name: string) => sideSlotAction(id, name, 'run'),
   retry: (id: string, note: string) =>
     request<void>(`/api/missions/${encodeURIComponent(id)}/retry`, {
       method: 'POST',

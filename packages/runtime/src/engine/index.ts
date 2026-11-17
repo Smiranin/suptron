@@ -1,5 +1,5 @@
 import type { Cost } from '../domain/cost.js';
-import type { Answers, Question } from '../domain/transcript.js';
+import type { AgentMarker, Answers, Question } from '../domain/transcript.js';
 import type { ActivityPhase } from '../events/mission-event.js';
 
 export interface ModelInfo {
@@ -24,9 +24,25 @@ export interface GuardContext {
    */
   taskDocuments: readonly string[];
   configHome: string;
+  /** Folders outside the Workspace that the Laws open for writes, never the configuration home. */
+  outerFolders: readonly string[];
 }
 
+export type { AgentMarker } from '../domain/transcript.js';
+
 export type JsonSchema = Record<string, unknown>;
+
+/**
+ * A named agent the Pilot may call inside its own session: a Sub-pilot. It works under its own
+ * Rules and Instructions, cannot ask the Commander and cannot call agents itself.
+ */
+export interface SubAgentSpec {
+  name: string;
+  description: string;
+  model: string;
+  systemPrompt: { rules: string; instructions: string };
+  required: boolean;
+}
 
 export interface AgentSpec {
   role: 'pilot' | 'core';
@@ -46,14 +62,28 @@ export interface AgentSpec {
   guard: GuardContext;
   /** Structured output for Core calls. */
   outputSchema?: JsonSchema;
+  subAgents?: SubAgentSpec[];
 }
 
 export type AgentEvent =
-  | { type: 'text'; text: string }
+  | { type: 'text'; text: string; agent?: AgentMarker }
   /** A sign of life while the model thinks, writes or calls a tool; never part of the transcript. */
   | { type: 'activity'; phase: ActivityPhase; detail?: string }
-  | { type: 'tool_call'; id: string; name: string; input: unknown }
-  | { type: 'tool_result'; toolCallId: string; output: string; isError: boolean }
+  | { type: 'tool_call'; id: string; name: string; input: unknown; agent?: AgentMarker }
+  | {
+      type: 'tool_result';
+      toolCallId: string;
+      output: string;
+      isError: boolean;
+      agent?: AgentMarker;
+    }
+  /**
+   * The agent called a named agent, a Sub-pilot or one of the Engine's own general agents.
+   * `name` is what it called; what that agent says carries the marker with this `callId`.
+   */
+  | { type: 'sub_agent_called'; callId: string; name: string }
+  /** The called agent returned to its caller; `isError` when it ended in an error. */
+  | { type: 'sub_agent_returned'; callId: string; name: string; isError: boolean }
   | {
       type: 'question';
       id: string;
@@ -81,7 +111,8 @@ export interface AgentHandle {
 }
 
 /** What decides an agent's system text, without the Mission-bound parts of an AgentSpec. */
-export type SystemTextSpec = Pick<AgentSpec, 'role' | 'systemPrompt' | 'allowQuestions'>;
+export type SystemTextSpec = Pick<AgentSpec, 'role' | 'systemPrompt' | 'allowQuestions'> &
+  Partial<Pick<AgentSpec, 'subAgents'>>;
 
 export interface Engine {
   listModels(): Promise<ModelInfo[]>;

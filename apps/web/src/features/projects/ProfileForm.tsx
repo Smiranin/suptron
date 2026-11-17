@@ -14,13 +14,20 @@ import { Field } from '../../components/field';
 import type { PathStatus } from '../../components/path-field';
 import { TitleIdFields } from '../../components/title-id-fields';
 import { KnowledgeSourcesField } from './KnowledgeSourcesField';
+import { OuterFoldersField } from './OuterFoldersField';
 import { emptyWorkspace, type ProfileFormHandle } from './profile-form-model';
 import { FolderFields } from './workspace/FolderFields';
 import { NoneFields } from './workspace/NoneFields';
 import { RepositoryFields } from './workspace/RepositoryFields';
 import type { WorkspaceFieldsProps } from './workspace/types';
 
-export { emptyProfile, emptyWorkspace, profileForForm, useProfileForm } from './profile-form-model';
+export {
+  emptyProfile,
+  emptyWorkspace,
+  profileForForm,
+  showOuterFolderIssues,
+  useProfileForm,
+} from './profile-form-model';
 export type { ProfileFormHandle } from './profile-form-model';
 
 /** Tracks the existence checks of the typed paths; a missing path blocks Save (SPEC FR-14, FR-15). */
@@ -137,6 +144,7 @@ export function ProfileForm({
         <WorkspaceFields kind={kind} form={form} paths={paths} id={id} />
       </section>
       <KnowledgeSourcesField form={form} paths={paths} base={knowledgeBase} id={id} />
+      <OuterFoldersField form={form} paths={paths} id={id} />
       <Field id={`${id}-engine`} label="Engine">
         <Input
           id={`${id}-engine`}

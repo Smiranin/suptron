@@ -6,6 +6,7 @@ export {
   insertionIndexAt,
   layoutClock,
   positionIndexAt,
+  type AttachedPlate,
   type ClockLayout,
   type SlotPosition,
   type Viewport,

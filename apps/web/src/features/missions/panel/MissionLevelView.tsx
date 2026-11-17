@@ -6,6 +6,41 @@ import { CAUSE_LABELS } from '../model/selectors';
 import type { ReadyMissionState } from '../model/types';
 import { LiveRow } from './LiveRow';
 
+/** Every Side Slot started so far: its Slot, how it stands or ended, its note and cost. */
+export function SideSlotsTable({ state }: { state: ReadyMissionState }) {
+  return (
+    <table className="w-full border-collapse text-sm" data-testid="side-slots-table">
+      <thead>
+        <tr className="text-muted-foreground text-left text-xs tracking-wider uppercase">
+          <th className="py-1 pr-2 font-semibold">Side Slot</th>
+          <th className="py-1 pr-2 font-semibold">Slot</th>
+          <th className="py-1 pr-2 font-semibold">Status</th>
+          <th className="py-1 pr-2 font-semibold">Note</th>
+          <th className="py-1 font-semibold">Cost</th>
+        </tr>
+      </thead>
+      <tbody>
+        {state.sideSlots.map((record) => (
+          <tr key={record.name} className="border-border border-t" data-side-slot={record.name}>
+            <td className="py-1 pr-2 font-medium">{record.name}</td>
+            <td className="py-1 pr-2">{record.parent}</td>
+            <td className="py-1 pr-2">{record.status}</td>
+            <td
+              className="text-muted-foreground max-w-[12rem] truncate py-1 pr-2"
+              title={record.note}
+            >
+              {record.note ?? ''}
+            </td>
+            <td className="py-1 tabular-nums">
+              <CostLabel cost={record.cost} />
+            </td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
+
 export function SlotsTable({ state }: { state: ReadyMissionState }) {
   return (
     <table className="w-full border-collapse text-sm" data-testid="slots-table">
@@ -38,7 +73,10 @@ export function SlotsTable({ state }: { state: ReadyMissionState }) {
   );
 }
 
-/** The Mission as a whole: state, cost, explanation, report, PR, Slots table (FR-24, FR-31). */
+/**
+ * The Mission as a whole: state, cost, explanation, the report as soon as it is written (while
+ * Side Slots may still run), PR, Slots and Side Slots tables (FR-24, FR-31).
+ */
 export function MissionLevelView({ state }: { state: ReadyMissionState }) {
   const { summary, attention, result } = state;
   const pr = summary.pr ?? result?.pr ?? null;
@@ -70,9 +108,14 @@ export function MissionLevelView({ state }: { state: ReadyMissionState }) {
           <Markdown text={attention.reason} />
         </section>
       )}
-      {summary.state === 'completed' && (
+      {(summary.state === 'completed' || result !== undefined) && (
         <section className="flex flex-col gap-2">
           <h3 className="m-0 text-xs font-bold tracking-wider uppercase">Result</h3>
+          {summary.state === 'running' && (
+            <p className="text-muted-foreground m-0" data-testid="side-slots-still-run">
+              The Mission is done; it is Completed once its Side Slots have ended.
+            </p>
+          )}
           {pr ? (
             <a
               href={pr.url}
@@ -100,6 +143,12 @@ export function MissionLevelView({ state }: { state: ReadyMissionState }) {
         <h3 className="m-0 mb-2 text-xs font-bold tracking-wider uppercase">Slots</h3>
         <SlotsTable state={state} />
       </section>
+      {state.sideSlots.length > 0 && (
+        <section>
+          <h3 className="m-0 mb-2 text-xs font-bold tracking-wider uppercase">Side Slots</h3>
+          <SideSlotsTable state={state} />
+        </section>
+      )}
     </div>
   );
 }

@@ -8,24 +8,31 @@ import {
   DialogTitle,
 } from '@suptron/ui/components/dialog';
 
-/** The modal the "+" control opens: pick a Unit to place at that gap (FR-26). */
+/**
+ * The modal the "+" control opens: pick a Unit to place at that gap (FR-26). The Attached tab
+ * opens it with its own title to add a Sub-pilot or a Side Slot.
+ */
 export function UnitPicker({
   open,
   units,
   onPick,
   onClose,
+  title = 'Add a Slot',
+  description = 'Pick the Unit to mount at this position.',
 }: {
   open: boolean;
   units: UnitFile[];
   onPick: (unit: string) => void;
   onClose: () => void;
+  title?: string;
+  description?: string;
 }) {
   return (
     <Dialog open={open} onOpenChange={(next) => !next && onClose()}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Add a Slot</DialogTitle>
-          <DialogDescription>Pick the Unit to mount at this position.</DialogDescription>
+          <DialogTitle>{title}</DialogTitle>
+          <DialogDescription>{description}</DialogDescription>
         </DialogHeader>
         <div className="flex max-h-80 flex-col gap-1 overflow-y-auto" data-testid="unit-picker">
           {units.length === 0 && (

@@ -22,3 +22,11 @@ export {
   type ToolDecision,
 } from './hooks.js';
 export { findExecutable, guardEnv, installShims, type ShimEnv, type ShimInstall } from './shim.js';
+export {
+  SUB_PILOT_DISALLOWED_TOOLS,
+  SUB_PILOT_PROMPT,
+  SubAgentTracker,
+  agentDefinitions,
+  subAgentSystemText,
+  subPilotsPrompt,
+} from './sub-agents.js';

@@ -1,10 +1,14 @@
 import {
+  SIDE_SLOTS_LEFT_OUT_NOTE,
   executionId,
   executionKeyOf,
   resolutionNote,
+  sideSlotEndedNote,
+  sideSlotName,
   type MissionDetail,
   type MissionEvent,
   type MissionSummary,
+  type SideSlotRecord,
   type TranscriptEntry,
   type TranscriptSection,
 } from '@suptron/runtime/browser';
@@ -12,6 +16,7 @@ import { slotUnderWay } from './selectors';
 import type {
   MissionPageAction,
   MissionPageState,
+  PanelSelection,
   PanelState,
   ReadyMissionState,
   SlotVisualState,
@@ -73,12 +78,7 @@ export function initMissionPage(
   now: number = Date.now(),
 ): ReadyMissionState {
   const prior = previous?.status === 'ready' ? previous : null;
-  const keepSelection =
-    prior &&
-    (prior.panel.selection.kind === 'mission' ||
-      detail.assembly.slots.some(
-        (s) => prior.panel.selection.kind === 'slot' && s.name === prior.panel.selection.name,
-      ));
+  const keepSelection = prior && selectionExists(prior.panel.selection, detail);
   const panel = keepSelection
     ? { ...prior.panel, tab: defaultPanel(detail).tab }
     : defaultPanel(detail);
@@ -87,6 +87,7 @@ export function initMissionPage(
     summary: detail.summary,
     assembly: detail.assembly,
     slots: Object.fromEntries(detail.slots.map((s) => [s.name, s])),
+    sideSlots: detail.sideSlots,
     slotOrder: [...detail.assembly.slots.map((s) => s.name), CORE],
     sections: detail.transcript.map((s) => ({ ...s, entries: [...s.entries] })),
     current: detail.transcript.at(-1)?.execution ?? null,
@@ -104,26 +105,106 @@ export function initMissionPage(
   };
 }
 
+/** True when what the panel shows still exists in the Mission's Assembly. */
+function selectionExists(selection: PanelSelection, detail: MissionDetail): boolean {
+  const slots = detail.assembly.slots;
+  switch (selection.kind) {
+    case 'mission':
+      return true;
+    case 'slot':
+      return slots.some((s) => s.name === selection.name);
+    case 'sideSlot':
+      return slots.some((s) => (s.sideSlots ?? []).some((x) => sideSlotName(x) === selection.name));
+    case 'subPilot':
+      return slots.some(
+        (s) =>
+          s.name === selection.slot && (s.subPilots ?? []).some((x) => x.unit === selection.unit),
+      );
+  }
+}
+
+/** The record of a Side Slot after `change`; one not seen yet starts from the Assembly. */
+function withSideSlot(
+  state: ReadyMissionState,
+  name: string,
+  parent: string,
+  change: (record: SideSlotRecord) => SideSlotRecord,
+): SideSlotRecord[] {
+  const known = state.sideSlots.find((s) => s.name === name);
+  const unit =
+    state.assembly.slots
+      .find((s) => s.name === parent)
+      ?.sideSlots?.find((s) => sideSlotName(s) === name)?.unit ?? name;
+  const record = change(
+    known ?? {
+      name,
+      parent,
+      unit,
+      status: 'waiting',
+      starts: 0,
+      cost: { usd: 0, inputTokens: 0, outputTokens: 0 },
+    },
+  );
+  if (known) return state.sideSlots.map((s) => (s.name === name ? record : s));
+  // Kept in Assembly order, as the server lists them.
+  const order = state.assembly.slots.flatMap((s) => (s.sideSlots ?? []).map(sideSlotName));
+  return [...state.sideSlots, record].sort((a, b) => order.indexOf(a.name) - order.indexOf(b.name));
+}
+
 /** The transcript row of a Slot that is done through its Loop's Accept Condition. */
 export const ACCEPTED_AT_LIMIT_NOTE =
   'Accepted at the Loop limit: the Done Condition still fails, the Accept Condition holds.';
+
+/**
+ * The index of the section an event belongs in: the latest one of the Slot it names, since a
+ * Side Slot works while the ordered list goes on. An event without a Slot, or of a Slot without
+ * a section yet, goes into the last one; -1 when there is none.
+ */
+function sectionIndexFor(state: ReadyMissionState, event: MissionEvent): number {
+  const slot = 'slot' in event ? event.slot : undefined;
+  const index = state.sections.findLastIndex((s) => s.execution.slot === slot);
+  return index === -1 ? state.sections.length - 1 : index;
+}
 
 function appendEntry(
   state: ReadyMissionState,
   event: MissionEvent,
   body: EntryBody,
 ): ReadyMissionState {
-  const last = state.sections.at(-1);
-  if (!last) return state;
+  const index = sectionIndexFor(state, event);
+  const target = state.sections[index];
+  if (!target) return state;
   const entry = {
     id: `${event.missionId}:${event.seq}`,
     at: new Date().toISOString(),
     ...body,
   } as TranscriptEntry;
   const sections = [...state.sections];
-  sections[sections.length - 1] = { ...last, entries: [...last.entries, entry] };
+  sections[index] = { ...target, entries: [...target.entries, entry] };
   // A real entry ends whatever the live row was showing.
   return withoutActivity({ ...state, sections });
+}
+
+/** The Slot records after a Sub-pilot was called or returned; an error return is not counted. */
+function withSubPilotEvent(
+  slots: ReadyMissionState['slots'],
+  event: Extract<MissionEvent, { type: 'agent.sub_pilot_called' | 'agent.sub_pilot_returned' }>,
+): ReadyMissionState['slots'] {
+  const record = slots[event.slot];
+  if (!record) return slots;
+  const called = event.type === 'agent.sub_pilot_called';
+  const counted = called || !event.isError;
+  const list = record.subPilots ?? [];
+  const known = list.some((sub) => sub.unit === event.subPilot);
+  const subPilots = (known ? list : [...list, { unit: event.subPilot, calls: 0, returns: 0 }]).map(
+    (sub) =>
+      sub.unit !== event.subPilot || !counted
+        ? sub
+        : called
+          ? { ...sub, calls: sub.calls + 1 }
+          : { ...sub, returns: sub.returns + 1 },
+  );
+  return { ...slots, [event.slot]: { ...record, subPilots } };
 }
 
 function withoutActivity(state: ReadyMissionState): ReadyMissionState {
@@ -153,6 +234,8 @@ function applyEvent(state: ReadyMissionState, event: MissionEvent, now: number):
   const base: ReadyMissionState = { ...state, seq: event.seq, lastEventAt: now };
   switch (event.type) {
     case 'agent.activity': {
+      // The live row follows the ordered list; a Side Slot's signs of life are not shown there.
+      if (!(event.slot in base.slots)) return base;
       const { phase, detail } = event.payload;
       const previous = base.activity;
       const same =
@@ -225,7 +308,16 @@ function applyEvent(state: ReadyMissionState, event: MissionEvent, now: number):
         : base.loopFiredAt;
       const slots = { ...base.slots };
       const record = slots[event.slot];
-      if (record) slots[event.slot] = { ...record, attempts: record.attempts + 1 };
+      if (record) {
+        slots[event.slot] = {
+          ...record,
+          attempts: record.attempts + 1,
+          // The Sub-pilots are counted per Attempt, as in the Runner.
+          ...(record.subPilots && {
+            subPilots: record.subPilots.map((sub) => ({ ...sub, calls: 0, returns: 0 })),
+          }),
+        };
+      }
       if (event.loopFrom && slots[event.loopFrom]) {
         // A round of this Loop is new work: the Loops inside it count from zero, as in the Runner.
         const order = base.assembly.slots.map((s) => s.name);
@@ -297,37 +389,47 @@ function applyEvent(state: ReadyMissionState, event: MissionEvent, now: number):
       };
     }
     case 'agent.text':
-      return appendEntry(base, event, { kind: 'text', text: event.payload.text });
+      return appendEntry(base, event, {
+        kind: 'text',
+        text: event.payload.text,
+        ...(event.payload.agent && { agent: event.payload.agent }),
+      });
     case 'agent.tool_call':
       return appendEntry(base, event, {
         kind: 'tool_call',
         toolCallId: event.payload.id,
         name: event.payload.name,
         input: event.payload.input,
+        ...(event.payload.agent && { agent: event.payload.agent }),
       });
+    case 'agent.sub_pilot_called':
+    case 'agent.sub_pilot_returned':
+      return { ...base, slots: withSubPilotEvent(base.slots, event) };
     case 'agent.tool_result': {
-      const last = base.sections.at(-1);
+      const sectionIndex = sectionIndexFor(base, event);
+      const target = base.sections[sectionIndex];
       const index =
-        last?.entries.findIndex(
+        target?.entries.findIndex(
           (e) => e.kind === 'tool_call' && e.toolCallId === event.payload.toolCallId,
         ) ?? -1;
-      if (!last || index === -1) {
+      if (!target || index === -1) {
         return appendEntry(base, event, {
           kind: 'tool_call',
           toolCallId: event.payload.toolCallId,
           name: '(result)',
           input: null,
           result: { output: event.payload.output, isError: event.payload.isError },
+          ...(event.payload.agent && { agent: event.payload.agent }),
         });
       }
-      const entries = [...last.entries];
+      const entries = [...target.entries];
       const call = entries[index]!;
       entries[index] = {
         ...call,
         result: { output: event.payload.output, isError: event.payload.isError },
       } as TranscriptEntry;
       const sections = [...base.sections];
-      sections[sections.length - 1] = { ...last, entries };
+      sections[sectionIndex] = { ...target, entries };
       return { ...base, sections };
     }
     case 'agent.error':
@@ -390,12 +492,70 @@ function applyEvent(state: ReadyMissionState, event: MissionEvent, now: number):
       const slots = { ...base.slots };
       const record = slots[event.slot];
       if (record) slots[event.slot] = { ...record, cost: event.cost };
+      const sideSlots = base.sideSlots.map((s) =>
+        s.name === event.slot ? { ...s, cost: event.cost } : s,
+      );
       return {
         ...base,
         slots,
+        sideSlots,
         summary: { ...base.summary, cost: { ...event.missionTotal, estimated: true } },
       };
     }
+    case 'side_slot.waiting':
+      return {
+        ...base,
+        sideSlots: withSideSlot(base, event.slot, event.parent, (record) => {
+          const { note: _dropped, ...rest } = record;
+          void _dropped;
+          return { ...rest, status: 'waiting' };
+        }),
+      };
+    case 'side_slot.started': {
+      const section: TranscriptSection = {
+        execution: { slot: event.slot, attempt: event.attempt },
+        sideSlotOf: event.parent,
+        entries: [],
+        dropped: 0,
+      };
+      return {
+        ...base,
+        sections: [...base.sections, section],
+        sideSlots: withSideSlot(base, event.slot, event.parent, (record) => {
+          const { note: _dropped, ...rest } = record;
+          void _dropped;
+          return { ...rest, status: 'running', starts: event.attempt };
+        }),
+      };
+    }
+    case 'side_slot.ended': {
+      const next = appendEntry(base, event, {
+        kind: 'note',
+        text: sideSlotEndedNote(event.status, event.note),
+      });
+      return {
+        ...next,
+        sideSlots: withSideSlot(next, event.slot, event.parent, (record) => ({
+          ...record,
+          status: event.status,
+          ...(event.note !== undefined && { note: event.note }),
+        })),
+      };
+    }
+    case 'side_slots.left_out':
+      return appendEntry(base, event, { kind: 'note', text: SIDE_SLOTS_LEFT_OUT_NOTE });
+    case 'mission.reported':
+      // The report is there while the Mission waits for its Side Slots, still Running.
+      return {
+        ...withoutActivity(base),
+        summary: {
+          ...base.summary,
+          currentSlot: null,
+          ...(event.result.pr && { pr: event.result.pr }),
+        },
+        result: event.result,
+        slotStatus: { ...base.slotStatus, [event.result.exitSlot]: 'done' },
+      };
     case 'mission.completed': {
       const slots = { ...base.slots };
       for (const record of event.slots) slots[record.name] = record;
@@ -470,6 +630,28 @@ export function reduceMissionPage(
       return {
         ...state,
         panel: { ...state.panel, selection: { kind: 'mission' }, follow: false, tab: 'main' },
+      };
+    case 'selectSideSlot':
+      if (state.status !== 'ready') return state;
+      return {
+        ...state,
+        panel: {
+          ...state.panel,
+          selection: { kind: 'sideSlot', name: action.name },
+          follow: false,
+          tab: 'main',
+        },
+      };
+    case 'selectSubPilot':
+      if (state.status !== 'ready') return state;
+      return {
+        ...state,
+        panel: {
+          ...state.panel,
+          selection: { kind: 'subPilot', slot: action.slot, unit: action.unit },
+          follow: false,
+          tab: 'main',
+        },
       };
     case 'backToCurrent': {
       if (state.status !== 'ready') return state;

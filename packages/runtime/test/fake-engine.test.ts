@@ -17,6 +17,7 @@ const spec: AgentSpec = {
     taskPath: '/tmp',
     taskDocuments: ['/tmp/task.md'],
     configHome: '/tmp',
+    outerFolders: [],
   },
 };
 
@@ -43,6 +44,39 @@ describe('FakeEngine', () => {
     expect(answered).toBe(true);
     expect(events.at(-1)).toMatchObject({ type: 'result', output: handedOver('done') });
     expect(engine.calls[0]?.answers).toEqual([{ 'Which DB?': 'Postgres' }]);
+  });
+
+  it('plays a called agent: the call, its marked work and its return', async () => {
+    const engine = new FakeEngine();
+    engine.script('pilot', 'analyst', [
+      { subAgent: { name: 'unit-tests', steps: [{ text: 'Testing.' }], returns: 'All green.' } },
+      { subAgent: { name: 'browser-tests', returns: null } },
+      { result: { output: 'done' } },
+    ]);
+    const handle = engine.createAgent(spec);
+    handle.send('go');
+    const events: AgentEvent[] = [];
+    for await (const event of handle.events()) events.push(event);
+    const [call, called, text, result, returned, secondCall, secondCalled, end] = events.slice(1);
+    expect(call).toMatchObject({ type: 'tool_call', name: 'Agent' });
+    const callId = (call as { id: string }).id;
+    expect(called).toEqual({ type: 'sub_agent_called', callId, name: 'unit-tests' });
+    expect(text).toEqual({ type: 'text', text: 'Testing.', agent: { name: 'unit-tests', callId } });
+    expect(result).toEqual({
+      type: 'tool_result',
+      toolCallId: callId,
+      output: 'All green.',
+      isError: false,
+    });
+    expect(returned).toEqual({
+      type: 'sub_agent_returned',
+      callId,
+      name: 'unit-tests',
+      isError: false,
+    });
+    expect(secondCall).toMatchObject({ type: 'tool_call', name: 'Agent' });
+    expect(secondCalled).toMatchObject({ type: 'sub_agent_called', name: 'browser-tests' });
+    expect(end).toMatchObject({ type: 'result' });
   });
 
   it('ends without a result when interrupted while waiting', async () => {

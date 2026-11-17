@@ -1,6 +1,8 @@
 import {
+  SIDE_SLOTS_LEFT_OUT_NOTE,
   executionKeyOf,
   resolutionNote,
+  sideSlotEndedNote,
   type MissionEvent,
   type TranscriptEntry,
   type TranscriptSection,
@@ -18,14 +20,15 @@ interface MissionTranscript {
   sections: TranscriptSection[];
 }
 
-/**
- * Transcripts in memory, one list of sections per Mission: a section opens on every
- * `slot.started`; earlier sections are trimmed to their last entries, counting what was dropped.
- */
 /** Shown in the transcript when a Slot is done through its Loop's Accept Condition. */
 export const ACCEPTED_NOTE =
   'Accepted at the Loop limit: the Done Condition still fails, the Accept Condition holds.';
 
+/**
+ * Transcripts in memory, one list of sections per Mission: a section opens on every
+ * `slot.started` and `side_slot.started`; earlier sections are trimmed to their last entries,
+ * counting what was dropped.
+ */
 export class TranscriptStore {
   private readonly missions = new Map<string, MissionTranscript>();
 
@@ -55,22 +58,45 @@ export class TranscriptStore {
         transcript.sections.push(section);
         return;
       }
+      case 'side_slot.started': {
+        const transcript = this.transcript(event.missionId);
+        for (const section of transcript.sections) this.trim(section);
+        transcript.sections.push({
+          execution: { slot: event.slot, attempt: event.attempt },
+          sideSlotOf: event.parent,
+          entries: [],
+          dropped: 0,
+        });
+        return;
+      }
+      case 'side_slot.ended':
+        return this.append(event, {
+          kind: 'note',
+          text: sideSlotEndedNote(event.status, event.note),
+        });
+      case 'side_slots.left_out':
+        return this.append(event, { kind: 'note', text: SIDE_SLOTS_LEFT_OUT_NOTE });
       case 'slot.done':
         if (event.acceptedAtLimit) return this.append(event, { kind: 'note', text: ACCEPTED_NOTE });
         return;
       case 'core.resolved':
         return this.append(event, { kind: 'note', text: resolutionNote(event.resolution) });
       case 'agent.text':
-        return this.append(event, { kind: 'text', text: event.payload.text });
+        return this.append(event, {
+          kind: 'text',
+          text: event.payload.text,
+          ...(event.payload.agent && { agent: event.payload.agent }),
+        });
       case 'agent.tool_call':
         return this.append(event, {
           kind: 'tool_call',
           toolCallId: event.payload.id,
           name: event.payload.name,
           input: event.payload.input,
+          ...(event.payload.agent && { agent: event.payload.agent }),
         });
       case 'agent.tool_result': {
-        const section = this.current(event.missionId);
+        const section = this.sectionFor(event);
         const call = section?.entries.find(
           (e) => e.kind === 'tool_call' && e.toolCallId === event.payload.toolCallId,
         );
@@ -85,6 +111,7 @@ export class TranscriptStore {
           name: '(result)',
           input: null,
           result: { output: event.payload.output, isError: event.payload.isError },
+          ...(event.payload.agent && { agent: event.payload.agent }),
         });
       }
       case 'agent.error':
@@ -125,8 +152,16 @@ export class TranscriptStore {
     return transcript;
   }
 
-  private current(missionId: string): TranscriptSection | undefined {
-    return this.missions.get(missionId)?.sections.at(-1);
+  /**
+   * The section an event belongs in: the latest one of the Slot it names, since a Side Slot works
+   * while the ordered list goes on. An event without a Slot, or of a Slot without a section yet,
+   * goes into the last one.
+   */
+  private sectionFor(event: MissionEvent): TranscriptSection | undefined {
+    const sections = this.missions.get(event.missionId)?.sections;
+    if (!sections) return undefined;
+    const slot = 'slot' in event ? event.slot : undefined;
+    return sections.findLast((s) => s.execution.slot === slot) ?? sections.at(-1);
   }
 
   private entry(event: MissionEvent, body: EntryBody): TranscriptEntry {
@@ -138,7 +173,7 @@ export class TranscriptStore {
   }
 
   private append(event: MissionEvent, body: EntryBody): void {
-    const section = this.current(event.missionId);
+    const section = this.sectionFor(event);
     if (!section) return;
     section.entries.push(this.entry(event, body));
   }

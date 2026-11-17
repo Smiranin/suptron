@@ -4,6 +4,7 @@ import type {
   ExecutionKey,
   MissionDetail,
   MissionSummary,
+  SideSlotRecord,
   SlotRecord,
   TranscriptSection,
 } from '@suptron/runtime/browser';
@@ -16,7 +17,11 @@ export interface MissionsListState {
   loaded: boolean;
 }
 
-export type PanelSelection = { kind: 'slot'; name: string } | { kind: 'mission' };
+export type PanelSelection =
+  | { kind: 'slot'; name: string }
+  | { kind: 'mission' }
+  | { kind: 'sideSlot'; name: string }
+  | { kind: 'subPilot'; slot: string; unit: string };
 export type PanelTab = 'main' | 'question' | 'attention';
 
 export interface PanelState {
@@ -43,6 +48,8 @@ export interface ReadyMissionState {
   summary: MissionSummary;
   assembly: AssemblyFile;
   slots: Record<string, SlotRecord>;
+  /** The Side Slots started so far, in Assembly order. */
+  sideSlots: SideSlotRecord[];
   /** Assembly order, then `core`. */
   slotOrder: string[];
   sections: TranscriptSection[];
@@ -78,6 +85,8 @@ export type MissionPageAction =
   | { type: 'connection'; status: LiveStatus }
   | { type: 'selectSlot'; name: string }
   | { type: 'selectMission' }
+  | { type: 'selectSideSlot'; name: string }
+  | { type: 'selectSubPilot'; slot: string; unit: string }
   | { type: 'backToCurrent' }
   | { type: 'setTab'; tab: PanelTab }
   | { type: 'toggleSection'; executionId: string };

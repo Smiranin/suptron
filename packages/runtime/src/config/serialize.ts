@@ -5,8 +5,10 @@ import type {
   Check,
   KnowledgeSource,
   ProfileFile,
+  SideSlotFile,
   SlotContextFile,
   SlotFile,
+  SubPilotFile,
   UnitFile,
   WorkspaceFile,
 } from './schemas.js';
@@ -36,6 +38,8 @@ function plainCheck(check: Check): Plain {
     }
     case 'llm_judgment':
       return { kind: 'llm_judgment', criterion: check.criterion };
+    case 'sub_pilot_returned':
+      return { kind: 'sub_pilot_returned', unit: check.unit };
     default:
       return { kind: check.kind };
   }
@@ -90,6 +94,28 @@ function plainSlot(slot: SlotFile, isLast: boolean): Plain {
   if (isLast) out.exitPoint = true;
   else put(out, 'exitPoint', unlessDefault(slot.exitPoint, DEFAULTS.slot.exitPoint));
   put(out, 'exitCondition', plainCondition(slot.exitCondition));
+  put(out, 'subPilots', nonEmpty(slot.subPilots)?.map(plainSubPilot));
+  put(out, 'sideSlots', nonEmpty(slot.sideSlots)?.map(plainSideSlot));
+  return out;
+}
+
+function plainSubPilot(sub: SubPilotFile): Plain {
+  const out: Plain = { unit: sub.unit };
+  put(out, 'model', sub.model);
+  put(out, 'instructions', sub.instructions);
+  put(out, 'required', sub.required);
+  return out;
+}
+
+function plainSideSlot(side: SideSlotFile): Plain {
+  const out: Plain = {};
+  put(out, 'name', side.name);
+  out.unit = side.unit;
+  put(out, 'model', side.model);
+  put(out, 'rules', side.rules);
+  put(out, 'instructions', side.instructions);
+  put(out, 'context', plainContext(side.context));
+  put(out, 'subPilots', nonEmpty(side.subPilots)?.map(plainSubPilot));
   return out;
 }
 
@@ -172,6 +198,7 @@ export function serializeProfile(profile: ProfileFile): string {
   put(doc, 'title', profile.title);
   doc.workspace = plainWorkspace(profile.workspace);
   put(doc, 'knowledgeSources', nonEmpty(profile.knowledgeSources)?.map(plainKnowledgeSource));
+  put(doc, 'outerFolders', nonEmpty(profile.outerFolders));
   put(doc, 'engine', unlessDefault(profile.engine, DEFAULTS.profile.engine));
   return stringifyYaml(doc, YAML_OPTIONS);
 }

@@ -120,6 +120,71 @@ describe('reduce', () => {
     expect(run({ type: 'setTitle', title: '' })).not.toHaveProperty('title');
   });
 
+  it('adds, patches, moves and removes Sub-pilots of a Slot, dropping an empty list', () => {
+    const doc = run(
+      { type: 'addAttached', slot: 'tester', list: 'subPilots', unit: 'reviewer' },
+      { type: 'addAttached', slot: 'tester', list: 'subPilots', unit: 'analyst' },
+      {
+        type: 'patchAttached',
+        slot: 'tester',
+        list: 'subPilots',
+        index: 0,
+        patch: { required: true, model: 'opus' },
+      },
+      { type: 'moveAttached', slot: 'tester', list: 'subPilots', index: 1, toIndex: 0 },
+      {
+        type: 'patchAttached',
+        slot: 'tester',
+        list: 'subPilots',
+        index: 1,
+        patch: { model: undefined },
+      },
+    );
+    const tester = doc.slots.find((s) => s.name === 'tester')!;
+    expect(tester.subPilots).toEqual([{ unit: 'analyst' }, { unit: 'reviewer', required: true }]);
+    const emptied = [0, 0].reduce(
+      (d, index) => reduce(d, { type: 'removeAttached', slot: 'tester', list: 'subPilots', index }),
+      doc,
+    );
+    expect(emptied.slots.find((s) => s.name === 'tester')).not.toHaveProperty('subPilots');
+  });
+
+  it('names a Side Slot after its Unit, or uniquely when a Slot or Side Slot has that name', () => {
+    const doc = run(
+      { type: 'addAttached', slot: 'publisher', list: 'sideSlots', unit: 'tester' },
+      { type: 'addAttached', slot: 'publisher', list: 'sideSlots', unit: 'tester' },
+      { type: 'addSlot', unit: 'tester', index: 0 },
+    );
+    const publisher = doc.slots.find((s) => s.name === 'publisher')!;
+    expect(publisher.sideSlots).toEqual([
+      { name: 'tester-2', unit: 'tester' },
+      { name: 'tester-3', unit: 'tester' },
+    ]);
+    expect(doc.slots[0]!.name).toBe('tester-4');
+  });
+
+  it('renameSlot and removeSlot also rewrite what Side Slots read', () => {
+    const doc = run(
+      { type: 'addAttached', slot: 'publisher', list: 'sideSlots', unit: 'docs' },
+      {
+        type: 'patchAttached',
+        slot: 'publisher',
+        list: 'sideSlots',
+        index: 0,
+        patch: { context: { slotOutputs: ['analyst', 'publisher'] } },
+      },
+      { type: 'renameSlot', name: 'analyst', newName: 'planner' },
+    );
+    const side = () => doc.slots.find((s) => s.name === 'publisher')!.sideSlots![0]!;
+    expect(side().context).toEqual({ slotOutputs: ['planner', 'publisher'] });
+    const removed = reduce(doc, { type: 'removeSlot', name: 'planner' });
+    expect(removed.slots.find((s) => s.name === 'publisher')!.sideSlots![0]!.context).toEqual({
+      slotOutputs: ['publisher'],
+    });
+    // a Slot may not take a Side Slot's name
+    expect(reduce(doc, { type: 'renameSlot', name: 'tester', newName: 'docs' })).toBe(doc);
+  });
+
   it('patchCore and replaceDoc', () => {
     expect(run({ type: 'patchCore', patch: { model: 'sonnet' } }).core.model).toBe('sonnet');
     const other = { ...primaryAssembly(), name: 'other' };

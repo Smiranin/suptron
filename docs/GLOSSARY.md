@@ -39,12 +39,16 @@ The description of the job a Unit does; a Slot extends it with its own additiona
 _Avoid_: Prompt, system prompt, guidance
 
 **Slot**:
-One Unit placed at one position of an Assembly under a name unique within that Assembly, with its concrete configuration: model override, additional Instructions, context sources, Done Condition override, Memory Mode, Loop rule, Exit Point flag with Exit Condition, and the "may ask the Commander" flag. The same Unit may appear as several Slots; Loops and Slot Outputs refer to Slots by name.
+One Unit placed at one position of an Assembly under a name unique within that Assembly, with its concrete configuration: model override, additional Instructions, context sources, Done Condition override, Memory Mode, Loop rule, Exit Point flag with Exit Condition, the "may ask the Commander" flag, its Sub-pilots and its Side Slots. The same Unit may appear as several Slots; Loops and Slot Outputs refer to Slots by name.
 _Avoid_: Step, stage, phase, task, Node (former name)
 
 **Slot Output**:
 The result a Slot leaves behind (text or markdown) that later Slots receive only when their configuration names it. Slots are isolated by default.
 _Avoid_: Step output, artifact, handoff, result, Node Output (former name)
+
+**Side Slot**:
+A Unit placed beside a Slot, outside the ordered list: work that starts each time that Slot is done and that the Mission's course never depends on. It has no Done Condition and cannot loop, be an Exit Point or ask the Commander: it is done when its Pilot hands over `done`, and when it fails only its own status says so.
+_Avoid_: Nested slot, sub-slot, hook, side effect, Debrief
 
 **Handover**:
 The block every Pilot ends its Slot Output with: what it produced, what is done, what is open, and a Status line (`done`, `open` or `failed`). The system tells every Pilot how to write it; no Unit does. Plain code reads the Status: `done` is trusted and the Done Condition runs; anything else, a missing Status line included, is the Core's to decide by a Resolution.
@@ -94,8 +98,12 @@ _Avoid_: Core config, orchestration policy, Master Rules (former name)
 The agent instance that performs the work of one Slot, created from the Slot's Unit. The agent that reviews is never the agent that implemented.
 _Avoid_: Step agent, worker, sub-agent, Node Agent (former name)
 
+**Sub-pilot**:
+An agent created from a Unit that a Slot gives its Pilot to call during an Attempt. The Pilot calls it, waits for it and answers for its work; the Core deals with the Pilot only.
+_Avoid_: Sub-agent, co-pilot, nested slot, helper
+
 **Project Profile**:
-The rarely changing facts about one Project shared by all its Assemblies: its Workspace (and, for a repository, its Git conventions, host and CI timeout), its Knowledge Sources and its Engine.
+The rarely changing facts about one Project shared by all its Assemblies: its Workspace (and, for a repository, its Git conventions, host and CI timeout), its Knowledge Sources, its Outer Folders and its Engine.
 _Avoid_: Project config, project settings
 
 **Workspace**:
@@ -105,6 +113,10 @@ _Avoid_: Environment, target, location (when the kind is meant)
 **Knowledge Source**:
 A document or folder listed in a Project Profile (as a path, relative to the Workspace root or absolute), or a text written into the Profile, that tells agents how the Project works: conventions, architecture notes, ADRs.
 _Avoid_: Context files, docs, rules (rules belong to Units)
+
+**Outer Folder**:
+A folder outside the Workspace, listed in the Project Profile, that every Pilot of the Project's Missions may write to.
+_Avoid_: Extra folder, shared folder, output folder
 
 **Human Checkpoint**:
 The moment a Pilot asks the Commander a question and the Mission waits for the answer. Only Slots flagged "may ask the Commander" can do this; by default only the analyst Unit is flagged. The set of flagged Slots is the Mission's level of autonomy.
@@ -119,7 +131,7 @@ An existing working copy (the main clone or a git worktree) of a Project whose W
 _Avoid_: Working copy, worktree (a worktree is one kind of Checkout)
 
 **Needs Attention**:
-The state of a Mission that cannot continue without the Commander: the Core used up its Resolutions on a Slot, judged that the decision belongs to the Commander (it would change the Task, break a Unit's Rules, or the Engine has no access), or met a point plain code reserves for the Commander. Nothing runs while a Mission is in Needs Attention; the Mission waits, it does not end.
+The state of a Mission that cannot continue without the Commander: the Core used up its Resolutions on a Slot, judged that the decision belongs to the Commander (it would change the Task, break a Unit's Rules, or the Engine has no access), or met a point plain code reserves for the Commander. No Slot runs while a Mission is in Needs Attention (a Side Slot that was already started goes on to its end); the Mission waits, it does not end.
 _Avoid_: Failed, error, blocked
 
 **Stopped**:
@@ -135,7 +147,7 @@ The state of a Mission whose Engine refused a call by the usage limit and said w
 _Avoid_: Rate limited, paused, throttled
 
 **Completed**:
-The state of a Mission that left its Assembly through an Exit Point: a Slot flagged as an Exit Point is done and its Exit Condition holds, both checked by the Core against the Slot's Checks. What Completed means is therefore defined entirely by the Slots' Conditions; the Core never declares a Mission Completed on its own. In the primary software scenario: the last Slot is done, meaning no open Pull Request comments and CI passed.
+The state of a Mission that left its Assembly through an Exit Point: a Slot flagged as an Exit Point is done and its Exit Condition holds, both checked by the Core against the Slot's Checks, and every Side Slot that was started has ended, whatever its outcome. What Completed means is therefore defined entirely by the Slots' Conditions; the Core never declares a Mission Completed on its own. In the primary software scenario: the last Slot is done, meaning no open Pull Request comments and CI passed.
 _Avoid_: Done (a Slot is done, a Mission is Completed), finished, merged
 
 **Dismiss**:
@@ -147,7 +159,7 @@ The single user of the system: the person who starts Missions, answers Human Che
 _Avoid_: User, developer, operator, Owner (former name)
 
 **Laws**:
-The set of actions the system never performs regardless of configuration: writing outside the Workspace and the Task location, touching the configuration home, pushing to or merging into the protected branch (where the Workspace knows one), force-pushing, deleting or renaming any branch, deploying, changing repository, CI or secret settings (running a CI job again is not a change of settings). Like the laws of robotics, they are built into the system and no configuration can change them.
+The set of actions the system never performs regardless of configuration: writing outside the Workspace, the Task location and the Project's Outer Folders, touching the configuration home, pushing to or merging into the protected branch (where the Workspace knows one), force-pushing, deleting or renaming any branch, deploying, changing repository, CI or secret settings (running a CI job again is not a change of settings). Like the laws of robotics, they are built into the system and no configuration can change them.
 _Avoid_: Guardrails, safety rules, Never-list (former name)
 
 **Engine**:

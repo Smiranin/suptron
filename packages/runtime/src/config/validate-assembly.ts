@@ -1,4 +1,5 @@
 import { checkDescriptor } from '../checks/catalogue.js';
+import { CORE_SLOT_NAME } from '../domain/mission.js';
 import {
   CONTEXT_SOURCE_REQUIREMENTS,
   describeCapability,
@@ -6,7 +7,8 @@ import {
   type Capability,
   type ContextSource,
 } from '../workspace/kinds.js';
-import type { AssemblyFile, Check, Issue, UnitFile } from './schemas.js';
+import type { AssemblyFile, Check, Issue, SlotFile, SubPilotFile, UnitFile } from './schemas.js';
+import { sideSlotName } from './slot-names.js';
 
 export interface ValidationResult {
   errors: Issue[];
@@ -55,6 +57,7 @@ export function validateAssembly(
   if (slots.length === 0) {
     errors.push({ code: 'no_slots', message: 'The Assembly has no Slots' });
   }
+  errors.push(...attachedWorkIssues(slots, indexOf, unitsByName, capabilities));
 
   slots.forEach((slot, index) => {
     const isLast = index === slots.length - 1;
@@ -115,9 +118,14 @@ export function validateAssembly(
         slotName: slot.name,
       });
     }
+    // The placed Slot's resolved Done Condition is judged, never the Unit on its own (FR-8).
+    const doneCondition = slot.doneCondition ?? unit?.doneCondition ?? [];
+    errors.push(
+      ...systemChecks(slot.name, doneCondition, 'doneCondition'),
+      ...systemChecks(slot.name, slot.exitCondition ?? [], 'exitCondition'),
+      ...systemChecks(slot.name, slot.loop?.acceptCondition ?? [], 'loop.acceptCondition'),
+    );
     if (capabilities) {
-      // The placed Slot's resolved Done Condition is judged, never the Unit on its own (FR-8).
-      const doneCondition = slot.doneCondition ?? unit?.doneCondition ?? [];
       errors.push(
         ...unavailableChecks(slot.name, doneCondition, 'doneCondition', capabilities),
         ...unavailableChecks(slot.name, slot.exitCondition ?? [], 'exitCondition', capabilities),
@@ -151,6 +159,124 @@ export function validateAssembly(
   return { errors, warnings };
 }
 
+/** A system Check is put into a Done Condition by the snapshot; a file never names one. */
+function systemChecks(
+  slotName: string,
+  condition: readonly Check[],
+  field: 'doneCondition' | 'exitCondition' | 'loop.acceptCondition',
+): Issue[] {
+  return condition.flatMap((check, index) =>
+    checkDescriptor(check.kind).system
+      ? [
+          {
+            code: 'system_check_in_condition',
+            message: `Slot "${slotName}" names the Check "${checkDescriptor(check.kind).label}", which only the system adds`,
+            slotName,
+            path: `${field}[${index}]`,
+          },
+        ]
+      : [],
+  );
+}
+
+/**
+ * The Sub-pilots and Side Slots of every Slot: their Units exist, a Unit is a Sub-pilot at most
+ * once per list (the Engine calls it by that name), a Side Slot's name is unique among Slots and
+ * Side Slots and is not `core`, and a Side Slot reads only Slot Outputs of its parent Slot or an
+ * earlier one. Every Issue is filed under the parent Slot.
+ */
+function attachedWorkIssues(
+  slots: readonly SlotFile[],
+  indexOf: ReadonlyMap<string, number>,
+  unitsByName: ReadonlyMap<string, ValidationUnit>,
+  capabilities: ReadonlySet<Capability> | null,
+): Issue[] {
+  const issues: Issue[] = [];
+  const taken = new Set([CORE_SLOT_NAME, ...indexOf.keys()]);
+  slots.forEach((slot, index) => {
+    issues.push(...subPilotIssues(slot.name, slot.subPilots ?? [], 'subPilots', unitsByName));
+    (slot.sideSlots ?? []).forEach((side, sideIndex) => {
+      const path = `sideSlots[${sideIndex}]`;
+      const name = sideSlotName(side);
+      if (!unitsByName.has(side.unit)) {
+        issues.push({
+          code: 'unknown_unit',
+          message: `Side Slot "${name}" of Slot "${slot.name}" uses an unknown Unit "${side.unit}"`,
+          slotName: slot.name,
+          path: `${path}.unit`,
+        });
+      }
+      if (taken.has(name)) {
+        issues.push({
+          code: 'duplicate_side_slot_name',
+          message: `Side Slot name "${name}" of Slot "${slot.name}" is already used by a Slot, a Side Slot or the Core`,
+          slotName: slot.name,
+          path: `${path}.name`,
+        });
+      }
+      taken.add(name);
+      for (const ref of side.context?.slotOutputs ?? []) {
+        const target = indexOf.get(ref);
+        if (target === undefined) {
+          issues.push({
+            code: 'context_reference_missing',
+            message: `Side Slot "${name}" reads the Slot Output of a missing Slot "${ref}"`,
+            slotName: slot.name,
+            path: `${path}.context.slotOutputs`,
+          });
+        } else if (target > index) {
+          issues.push({
+            code: 'context_reference_not_earlier',
+            message: `Side Slot "${name}" reads the Slot Output of "${ref}", which comes after its Slot "${slot.name}"`,
+            slotName: slot.name,
+            path: `${path}.context.slotOutputs`,
+          });
+        }
+      }
+      issues.push(
+        ...subPilotIssues(slot.name, side.subPilots ?? [], `${path}.subPilots`, unitsByName),
+      );
+      if (capabilities) {
+        issues.push(
+          ...unavailableContextSources(slot.name, side.context ?? {}, capabilities, `${path}.`),
+        );
+      }
+    });
+  });
+  return issues;
+}
+
+/** An unknown Unit, or a Unit listed twice, among the Sub-pilots of one Slot or Side Slot. */
+function subPilotIssues(
+  slotName: string,
+  subPilots: readonly SubPilotFile[],
+  path: string,
+  unitsByName: ReadonlyMap<string, ValidationUnit>,
+): Issue[] {
+  const issues: Issue[] = [];
+  const seen = new Set<string>();
+  subPilots.forEach((sub, index) => {
+    if (!unitsByName.has(sub.unit)) {
+      issues.push({
+        code: 'unknown_unit',
+        message: `A Sub-pilot of Slot "${slotName}" uses an unknown Unit "${sub.unit}"`,
+        slotName,
+        path: `${path}[${index}].unit`,
+      });
+    }
+    if (seen.has(sub.unit)) {
+      issues.push({
+        code: 'duplicate_sub_pilot',
+        message: `The Unit "${sub.unit}" is a Sub-pilot of Slot "${slotName}" more than once`,
+        slotName,
+        path: `${path}[${index}].unit`,
+      });
+    }
+    seen.add(sub.unit);
+  });
+  return issues;
+}
+
 function unavailableChecks(
   slotName: string,
   condition: readonly Check[],
@@ -178,6 +304,7 @@ function unavailableContextSources(
   slotName: string,
   context: NonNullable<AssemblyFile['slots'][number]['context']>,
   capabilities: ReadonlySet<Capability>,
+  pathPrefix = '',
 ): Issue[] {
   const issues: Issue[] = [];
   for (const source of Object.keys(CONTEXT_SOURCE_REQUIREMENTS) as ContextSource[]) {
@@ -190,7 +317,7 @@ function unavailableContextSources(
         .map(describeCapability)
         .join(' and ')} this Project's Workspace does not provide`,
       slotName,
-      path: `context.${source}`,
+      path: `${pathPrefix}context.${source}`,
     });
   }
   return issues;

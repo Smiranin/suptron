@@ -18,6 +18,7 @@ import {
   type NeedsAttentionCause,
   type PendingQuestion,
   type Resolution,
+  type SideSlotRecord,
   type SlotRecord,
 } from '../domain/mission.js';
 import type { Answers } from '../domain/transcript.js';
@@ -25,6 +26,8 @@ import type { AgentHandle, Engine } from '../engine/index.js';
 import type { MissionEventInput } from '../events/mission-event.js';
 import { buildGuard, type Workspace } from '../workspace/workspace.js';
 import { buildContextBundle } from './context.js';
+import { SubPilotLog, reportedEvent, subAgentSpecs } from './pilot-events.js';
+import { SideSlots } from './side-slots.js';
 
 export interface RunnerDeps {
   engine: Engine;
@@ -70,12 +73,15 @@ export interface RunnerProgress {
   slotOutputs: Record<string, string>;
   /** Looping Slots whose round is under way: the work went back and has not reached them again. */
   openRounds?: string[];
+  /** The report is written: only Side Slots were awaited, and a Resume completes the Mission. */
+  result?: MissionResult;
 }
 
 /** What a resumed Runner starts from. */
 export interface RunnerRestore {
   progress: RunnerProgress;
   records: SlotRecord[];
+  sideSlots: SideSlotRecord[];
 }
 
 export interface MissionMeta {
@@ -87,6 +93,8 @@ export interface MissionMeta {
   taskDocuments: string[];
   workItemId?: string;
   configHome: string;
+  /** Absent in ledger entries written before Outer Folders existed. */
+  outerFolders?: string[];
   /** Rendered once at start; null when the Workspace has none. */
   gitConventions: string | null;
   knowledgeSources: KnowledgeSourceRef[];
@@ -210,6 +218,9 @@ export class Runner {
   private openSession: { slot: string; sessionId: string } | undefined;
   /** True until the first Slot of a resumed Mission has started. */
   private resumed = false;
+  /** What the Pilot of the Attempt under way did with its Sub-pilots. */
+  private subPilotLog = new SubPilotLog([]);
+  private readonly sideSlots: SideSlots;
 
   constructor(
     private readonly snapshot: MissionSnapshot,
@@ -246,11 +257,27 @@ export class Runner {
       cost: ZERO_COST,
       checkResults: [],
     });
+    this.sideSlots = new SideSlots(snapshot, {
+      engine: deps.engine,
+      workspace: deps.workspace,
+      meta,
+      slotOutputs: this.slotOutputs,
+      emit: deps.emit,
+      addMissionCost: (cost) => {
+        this.addMissionCost(cost);
+        return this.totalCost;
+      },
+    });
     if (restore) this.restore(restore);
   }
 
   /** Takes over where a stopped or interrupted Runner of this Mission stood. */
-  private restore({ progress, records }: RunnerRestore): void {
+  private restore({ progress, records, sideSlots }: RunnerRestore): void {
+    this.sideSlots.restore(sideSlots);
+    if (progress.result) {
+      this.result = progress.result;
+      if (progress.result.pr) this.summary.pr = progress.result.pr;
+    }
     for (const record of records) {
       if (!this.records.has(record.name)) continue;
       this.records.set(record.name, structuredClone(record));
@@ -289,12 +316,23 @@ export class Runner {
       ...(this.openSession && { openSession: this.openSession }),
       slotOutputs: Object.fromEntries(this.slotOutputs),
       openRounds: [...this.openRounds],
+      ...(this.result && { result: this.result }),
     });
   }
 
   /** Slot records in Assembly order, then `core`. */
   slotRecords(): SlotRecord[] {
     return [...this.records.values()];
+  }
+
+  /** The Side Slots started so far, in Assembly order. */
+  sideSlotRecords(): SideSlotRecord[] {
+    return this.sideSlots.list();
+  }
+
+  /** Stops one running Side Slot of this Mission. */
+  stopSideSlot(name: string): Promise<void> {
+    return this.sideSlots.stopOne(name);
   }
 
   /** The Core's cost, reported by the Core client. */
@@ -304,7 +342,7 @@ export class Runner {
 
   run(): Promise<void> {
     if (!this.finished) {
-      this.finished = this.execute().catch((error: unknown) => {
+      this.finished = this.execute().catch(async (error: unknown) => {
         if (!(error instanceof StopRequested)) {
           this.deps.emit({
             type: 'agent.error',
@@ -313,6 +351,7 @@ export class Runner {
             payload: { type: 'error', message: `Runner failed: ${String(error)}` },
           });
         }
+        await this.sideSlots.stopAll();
         this.finishStopped();
       });
     }
@@ -329,7 +368,35 @@ export class Runner {
     await this.currentHandle?.interrupt();
     await this.deps.core.interrupt();
     this.control?.resolve({ kind: 'stop' });
+    await this.sideSlots.stopAll();
     await this.finished;
+  }
+
+  /** Interrupts every Side Slot of a Mission that is about to be dismissed. */
+  stopSideSlots(): Promise<void> {
+    return this.sideSlots.stopAll();
+  }
+
+  /**
+   * Runs a failed or interrupted Side Slot once more, at the end of its parent's chain. A
+   * Completed Mission goes back to Running for the time of the run and is Completed again when
+   * its Side Slots have ended; a Stopped one refuses.
+   */
+  runSideSlotAgain(name: string): void {
+    if (this.state === 'stopped') {
+      throw new MissionStateError(
+        'side_slot_not_runnable',
+        'A Side Slot of a Stopped Mission cannot run again',
+      );
+    }
+    const reopen = this.state === 'completed';
+    this.sideSlots.runAgain(name);
+    if (!reopen) return;
+    this.setState('running');
+    this.finished = this.sideSlots.idle().then(() => {
+      if (this.stopRequested) this.finishStopped();
+      else this.finishCompleted();
+    });
   }
 
   retry(note?: string): void {
@@ -382,6 +449,8 @@ export class Runner {
   // ---- the state machine ----
 
   private async execute(): Promise<void> {
+    // Interrupted while only Side Slots ran: the report stands and they are not started again.
+    if (this.result) return this.finishCompleted();
     const slots = this.snapshot.assembly.slots;
     let note: string | undefined = this.resumed ? RESUME_NOTE : undefined;
 
@@ -575,6 +644,7 @@ export class Runner {
         output,
         ...(acceptance?.holds && { acceptedAtLimit: true }),
       });
+      this.sideSlots.start(slot.name);
       if (slot.exitPoint) {
         const exit = await this.evaluate(slot, slot.exitCondition, output);
         this.throwIfStopping();
@@ -630,6 +700,9 @@ export class Runner {
     feedback: Feedback | undefined,
     interrupted: boolean,
   ): Promise<SlotExecution> {
+    // Counted per Attempt: a turn that goes on after a usage limit keeps what was counted.
+    this.subPilotLog = new SubPilotLog(slot.subPilots);
+    this.noteSubPilots(slot);
     const bundle = buildContextBundle(
       slot,
       { ...this.meta, workspace: this.deps.workspace.fragment },
@@ -697,11 +770,13 @@ export class Runner {
       cwd: this.deps.workspace.cwd,
       additionalDirectories: [this.meta.taskPath],
       allowQuestions: slot.mayAskCommander,
+      ...(slot.subPilots.length > 0 && { subAgents: subAgentSpecs(slot.subPilots) }),
       ...(run.resume !== undefined && { resumeSessionId: run.resume }),
       guard: buildGuard(this.deps.workspace, {
         taskPath: this.meta.taskPath,
         taskDocuments: this.meta.taskDocuments,
         configHome: this.meta.configHome,
+        outerFolders: this.meta.outerFolders ?? [],
       }),
     });
     this.currentHandle = handle;
@@ -710,42 +785,23 @@ export class Runner {
     let sessionLost = false;
     let sessionId: string | undefined;
     let usageResetsAt: string | null = null;
+    const target = {
+      missionId: this.meta.id,
+      slot: slot.name,
+      attempt: this.attempts.get(slot.name) ?? 1,
+    };
     try {
       handle.send(run.prompt);
       for await (const event of handle.events()) {
+        const reported = reportedEvent(event, target, this.subPilotLog);
+        if (reported) {
+          this.deps.emit(reported);
+          if (event.type === 'sub_agent_called' || event.type === 'sub_agent_returned') {
+            this.noteSubPilots(slot);
+          }
+          continue;
+        }
         switch (event.type) {
-          case 'text':
-            this.deps.emit({
-              type: 'agent.text',
-              missionId: this.meta.id,
-              slot: slot.name,
-              payload: event,
-            });
-            break;
-          case 'activity':
-            this.deps.emit({
-              type: 'agent.activity',
-              missionId: this.meta.id,
-              slot: slot.name,
-              payload: event,
-            });
-            break;
-          case 'tool_call':
-            this.deps.emit({
-              type: 'agent.tool_call',
-              missionId: this.meta.id,
-              slot: slot.name,
-              payload: event,
-            });
-            break;
-          case 'tool_result':
-            this.deps.emit({
-              type: 'agent.tool_result',
-              missionId: this.meta.id,
-              slot: slot.name,
-              payload: event,
-            });
-            break;
           case 'error':
             error = event.message;
             sessionLost = event.sessionLost === true;
@@ -832,6 +888,12 @@ export class Runner {
     this.setState('running');
   }
 
+  /** Writes the Sub-pilots of the Attempt under way into the Slot's record, when it has any. */
+  private noteSubPilots(slot: ResolvedSlot): void {
+    if (slot.subPilots.length === 0) return;
+    this.records.get(slot.name)!.subPilots = this.subPilotLog.activities();
+  }
+
   private async evaluate(
     slot: ResolvedSlot,
     condition: readonly CheckResult['check'][],
@@ -842,6 +904,7 @@ export class Runner {
       workspace: this.deps.workspace,
       core: this.deps.core,
       slotOutput: output,
+      subPilotsReturned: this.subPilotLog.returned(),
       signal: this.checkAbort.signal,
       ...(this.deps.ciWaitTimeoutMs !== undefined && {
         ciWaitTimeoutMs: this.deps.ciWaitTimeoutMs,
@@ -1026,12 +1089,18 @@ export class Runner {
     return control;
   }
 
+  /**
+   * The Exit Condition held: the report is written and shown at once, the Mission stays Running
+   * until its Side Slots have ended, whatever their outcome, and is then Completed.
+   */
   private async complete(exitSlot: ResolvedSlot): Promise<void> {
     const pr = await this.deps.workspace.pullRequest();
+    const sideSlots = this.sideSlots.list();
     let report: string;
     try {
       report = await this.deps.core.finalReport({
         slots: this.slotRecords(),
+        ...(sideSlots.length > 0 && { sideSlots }),
         ...(pr && { pr }),
         workspace: this.deps.workspace.fragment,
       });
@@ -1042,13 +1111,22 @@ export class Runner {
     this.result = { report, pr, exitSlot: exitSlot.name };
     if (pr) this.summary.pr = pr;
     this.summary.currentSlot = null;
+    this.deps.emit({ type: 'mission.reported', missionId: this.meta.id, result: this.result });
+    await this.sideSlots.idle();
+    this.throwIfStopping();
+    this.finishCompleted();
+  }
+
+  /** Completed, with the result the report gave. */
+  private finishCompleted(): void {
+    const result = this.result!;
     this.setState('completed');
     this.deps.emit({
       type: 'mission.completed',
       missionId: this.meta.id,
-      report,
-      pr,
-      exitSlot: exitSlot.name,
+      report: result.report,
+      pr: result.pr,
+      exitSlot: result.exitSlot,
       slots: this.slotRecords(),
       cost: this.totalCost,
     });
@@ -1082,8 +1160,7 @@ export class Runner {
     const record = this.records.get(slotName);
     if (!record) return;
     record.cost = addCost(record.cost, cost);
-    this.totalCost = addCost(this.totalCost, cost);
-    this.summary.cost = { ...this.totalCost, estimated: true };
+    this.addMissionCost(cost);
     this.deps.emit({
       type: 'cost.updated',
       missionId: this.meta.id,
@@ -1091,6 +1168,11 @@ export class Runner {
       cost: record.cost,
       missionTotal: this.totalCost,
     });
+  }
+
+  private addMissionCost(cost: Cost): void {
+    this.totalCost = addCost(this.totalCost, cost);
+    this.summary.cost = { ...this.totalCost, estimated: true };
   }
 
   /** A Slot may have switched branches; the summary follows the Workspace (SPEC FR-18). */
@@ -1109,6 +1191,8 @@ export class MissionStateError extends Error {
       | 'not_stopped'
       /** A Stopped Mission that cannot go on: its message says why. */
       | 'cannot_resume'
+      | 'side_slot_not_running'
+      | 'side_slot_not_runnable'
       | 'not_found',
     message: string,
   ) {

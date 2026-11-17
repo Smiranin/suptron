@@ -29,6 +29,8 @@ export const checkSchema = z.discriminatedUnion('kind', [
     kind: z.literal('llm_judgment'),
     criterion: z.string().min(1, 'A criterion is required'),
   }),
+  /** A system Check: put first in a Slot's Done Condition for each required Sub-pilot, never by hand. */
+  z.object({ kind: z.literal('sub_pilot_returned'), unit: nameSchema }),
 ]);
 
 export type Check = z.infer<typeof checkSchema>;
@@ -117,6 +119,14 @@ export const profileFileSchema = z
     title: titleSchema,
     workspace: workspaceFileSchema,
     knowledgeSources: z.array(knowledgeSourceSchema).default([]),
+    outerFolders: z
+      .array(
+        z
+          .string()
+          .min(1, 'A path is required')
+          .refine(isAbsolutePath, 'An Outer Folder must be an absolute path'),
+      )
+      .default([]),
     engine: z.literal('claude-code').default(DEFAULTS.profile.engine),
   })
   .superRefine((profile, ctx) => {
@@ -173,6 +183,32 @@ export const loopRuleSchema = z.object({
 
 export type LoopRule = z.infer<typeof loopRuleSchema>;
 
+/**
+ * A Unit the Slot's Pilot may call during an Attempt; it answers to that Pilot only. A required
+ * one must be called and return in every Attempt, or the Slot's Done Condition fails.
+ */
+export const subPilotFileSchema = z.strictObject({
+  unit: nameSchema,
+  model: z.string().min(1).optional(),
+  instructions: z.string().optional(),
+  required: z.boolean().optional(),
+});
+
+/**
+ * A Unit started beside the ordered list each time its Slot is done. Strict: a Side Slot has no
+ * Done Condition, Loop, Exit Point, Memory Mode, questions or Side Slots, and a file that gives
+ * it one is refused. Its name defaults to the Unit's name.
+ */
+export const sideSlotFileSchema = z.strictObject({
+  name: nameSchema.optional(),
+  unit: nameSchema,
+  model: z.string().min(1).optional(),
+  rules: z.string().optional(),
+  instructions: z.string().optional(),
+  context: slotContextSchema.optional(),
+  subPilots: z.array(subPilotFileSchema).optional(),
+});
+
 export const slotFileSchema = z.object({
   name: nameSchema,
   unit: nameSchema,
@@ -193,9 +229,13 @@ export const slotFileSchema = z.object({
   skipWhenDone: z.boolean().optional(),
   exitPoint: z.boolean().optional(),
   exitCondition: conditionSchema.optional(),
+  subPilots: z.array(subPilotFileSchema).optional(),
+  sideSlots: z.array(sideSlotFileSchema).optional(),
 });
 
 export type SlotFile = z.infer<typeof slotFileSchema>;
+export type SubPilotFile = z.infer<typeof subPilotFileSchema>;
+export type SideSlotFile = z.infer<typeof sideSlotFileSchema>;
 
 export const assemblyFileSchema = z.object({
   name: nameSchema,

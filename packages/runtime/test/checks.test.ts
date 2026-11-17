@@ -24,6 +24,7 @@ function context(statuses: MergeStatus[], overrides: Partial<CheckContext> = {})
     workspace,
     core: {} as CoreAgent,
     slotOutput: '',
+    subPilotsReturned: new Set(),
     ciPollIntervalMs: 1,
     mergeableWaitMs: 1000,
     ...overrides,

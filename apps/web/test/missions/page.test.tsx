@@ -331,4 +331,113 @@ describe('Mission page', () => {
     );
     expect(screen.getByRole('button', { name: /Stop/ })).toBeInTheDocument();
   });
+
+  it('shows Side Slots and Sub-pilots on plates, with Stop, Run again and the report while Running', async () => {
+    const home = useFakeHome();
+    const detail = runningDetail();
+    detail.assembly.slots[3] = {
+      ...detail.assembly.slots[3]!,
+      subPilots: [{ unit: 'reviewer', required: true }],
+    };
+    detail.assembly.slots[5] = {
+      ...detail.assembly.slots[5]!,
+      sideSlots: [{ name: 'docs', unit: 'analyst' }],
+    };
+    home.seedMissions(detail);
+    const user = userEvent.setup();
+    renderApp('/missions/m-running', home.live);
+    await screen.findByTestId('mission-page');
+    const plate = (label: string) => screen.getByRole('button', { name: label });
+    const docs = 'Side Slot docs of pr-reviewer';
+    const reviewer = 'Sub-pilot reviewer of tester';
+    expect(plate(docs)).not.toHaveAttribute('data-status');
+
+    let seq = detail.seq;
+    const emit = (event: Record<string, unknown>) =>
+      home.emit({ missionId: 'm-running', seq: ++seq, ...event } as never);
+    emit({ type: 'slot.started', slot: 'tester', attempt: 1 });
+    emit({
+      type: 'agent.sub_pilot_called',
+      slot: 'tester',
+      attempt: 1,
+      subPilot: 'reviewer',
+      callId: 'c1',
+    });
+    emit({
+      type: 'agent.text',
+      slot: 'tester',
+      payload: {
+        type: 'text',
+        text: 'Reviewing inside.',
+        agent: { name: 'reviewer', callId: 'c1' },
+      },
+    });
+    emit({
+      type: 'agent.text',
+      slot: 'tester',
+      payload: { type: 'text', text: 'Testing myself.' },
+    });
+    await waitFor(() => expect(plate(reviewer)).toHaveAttribute('data-status', 'running'));
+    await user.click(plate(reviewer));
+    expect(screen.getByTestId('tab-main')).toHaveTextContent('tester · reviewer');
+    expect(screen.getByText('Reviewing inside.')).toBeInTheDocument();
+    expect(screen.queryByText('Testing myself.')).toBeNull();
+    expect(screen.getByTestId('agent-badge')).toHaveTextContent('reviewer');
+
+    emit({ type: 'side_slot.waiting', slot: 'docs', parent: 'pr-reviewer' });
+    await waitFor(() => expect(plate(docs)).toHaveAttribute('data-status', 'waiting'));
+    emit({ type: 'side_slot.started', slot: 'docs', parent: 'pr-reviewer', attempt: 1 });
+    emit({
+      type: 'agent.text',
+      slot: 'docs',
+      payload: { type: 'text', text: 'Writing the docs.' },
+    });
+    await waitFor(() => expect(plate(docs)).toHaveAttribute('data-status', 'running'));
+    await user.click(plate(docs));
+    const view = screen.getByTestId('side-slot-view');
+    expect(within(view).getByText('Writing the docs.')).toBeInTheDocument();
+    await user.click(within(view).getByRole('button', { name: 'Stop' }));
+    await waitFor(() =>
+      expect(home.requestsTo('POST', '/api/missions/m-running/side-slots/docs/stop')).toHaveLength(
+        1,
+      ),
+    );
+
+    emit({
+      type: 'side_slot.ended',
+      slot: 'docs',
+      parent: 'pr-reviewer',
+      attempt: 1,
+      status: 'failed',
+      note: 'Stopped by the Commander',
+    });
+    await waitFor(() => expect(plate(docs)).toHaveAttribute('data-status', 'failed'));
+    expect(within(view).getByTestId('side-slot-note')).toHaveTextContent(
+      'Stopped by the Commander',
+    );
+    await user.click(within(view).getByRole('button', { name: 'Run again' }));
+    await waitFor(() =>
+      expect(home.requestsTo('POST', '/api/missions/m-running/side-slots/docs/run')).toHaveLength(
+        1,
+      ),
+    );
+
+    emit({
+      type: 'mission.reported',
+      result: { report: 'All done here.', pr: null, exitSlot: 'pr-reviewer' },
+    });
+    await user.click(screen.getByTestId('core-circle').querySelector('[aria-label="Core"]')!);
+    const mission = await screen.findByTestId('mission-level-view');
+    expect(within(mission).getByTestId('final-report')).toHaveTextContent('All done here.');
+    expect(within(mission).getByTestId('side-slots-still-run')).toBeInTheDocument();
+    expect(within(mission).getByTestId('side-slots-table')).toHaveTextContent('docs');
+    expect(screen.getByTestId('core-state')).toHaveTextContent('Running');
+
+    emit({ type: 'mission.state', state: 'stopped' });
+    emit({ type: 'mission.stopped' });
+    await user.click(plate(docs));
+    expect(
+      within(screen.getByTestId('side-slot-view')).queryByRole('button', { name: 'Run again' }),
+    ).toBeNull();
+  });
 });

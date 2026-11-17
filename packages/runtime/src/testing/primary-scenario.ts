@@ -113,6 +113,7 @@ export function primaryProfile(repositoryPath: string, name = 'my-app'): Profile
       ciWaitTimeoutMinutes: 30,
     },
     knowledgeSources: [{ path: 'README.md' }],
+    outerFolders: [],
     engine: 'claude-code',
   };
 }

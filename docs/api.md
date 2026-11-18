@@ -67,6 +67,29 @@ POST   /api/projects/:project/assemblies/:assembly/duplicate { newName } → 201
 
 `status: 'unparseable'` carries the raw `text` and the parse error in `issues.errors[0]`.
 
+## Export and Import
+
+```
+GET  /api/export/contents                         { units: [{ name, title? }], projects: [{ name, title?, units: string[] }] }
+POST /api/export          body { units, projects } → { files: { path, text }[] }   | 400 unknown_unit, unknown_project, empty_selection
+POST /api/import/preview  body { files, choices }  → { elements: ImportElement[] } | 400 { issues }
+POST /api/import/apply    body { files, choices }  → { added: ElementRef[], replaced: ElementRef[] } | 400 { issues } | 500 { reason: 'import_failed', message }
+```
+
+An Export is a list of files at their paths in `SUPTRON_HOME` (`hangar/<unit>.md`,
+`projects/<project>/profile.yaml`, `projects/<project>/assemblies/<assembly>.yaml`); the browser packs
+it into a zip and unpacks a chosen zip. A project's `units` are the Hangar Units its Assemblies place.
+
+The Import routes refuse a file set that is not an Export as a whole with `empty_export`,
+`outside_layout` (a path outside the layout above) or `duplicate_path`, and `invalid_paths` when
+`choices.paths` names a Project whose Profile is not written or does not fit its shape.
+`choices` is `{ replace: string[], paths: Record<project, { workspace, outerFolders, knowledgeSources: [{ index, path }] }> }`:
+a `different` element is replaced only when its path is in `replace`; edited paths are written into
+the Profile. Each `ImportElement` has `status` (`new`, `same`, `different`, comparing text with CRLF
+read as LF), `action` (`add`, `replace`, `keep`, `none`), the `issues` of the version that will exist
+afterwards, and for a Profile that will be written its `paths`. Apply writes all or nothing; a failure
+puts the home back and answers 500. Both Import routes take bodies of up to 32 MiB.
+
 ## Tools
 
 ```

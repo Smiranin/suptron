@@ -1,6 +1,7 @@
 import type { AssemblyFile, ProfileFile, UnitFile } from '@suptron/runtime/browser';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { request } from './client';
+import { transferApi } from './transfer';
 import type {
   AssemblyDetail,
   CheckoutItem,
@@ -26,6 +27,7 @@ export const keys = {
   checkouts: (project: string) => ['projects', project, 'checkouts'] as const,
   fsStat: (path: string, base?: string) => ['fs', path, base ?? ''] as const,
   remoteDefaults: (path: string) => ['git', path] as const,
+  exportContents: ['export', 'contents'] as const,
 };
 
 export const api = {
@@ -172,6 +174,11 @@ export function useRemoteDefaults(path: string, enabled: boolean) {
   });
 }
 
+/** What can be exported: every Unit and every Project with the Units it places. */
+export function useExportContents() {
+  return useQuery({ queryKey: keys.exportContents, queryFn: transferApi.contents });
+}
+
 /** Invalidates everything that lists or reads configuration after a write. */
 export function useInvalidateConfig() {
   const client = useQueryClient();
@@ -179,6 +186,7 @@ export function useInvalidateConfig() {
     Promise.all([
       client.invalidateQueries({ queryKey: keys.units }),
       client.invalidateQueries({ queryKey: keys.projects }),
+      client.invalidateQueries({ queryKey: keys.exportContents }),
     ]);
 }
 

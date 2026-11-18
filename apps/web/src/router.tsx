@@ -8,6 +8,7 @@ import {
 } from '@tanstack/react-router';
 import { Shell } from './components/shell';
 import { AssemblyEditorPage } from './features/assembly-editor/AssemblyEditorPage';
+import { ExportImportPage } from './features/export-import/ExportImportPage';
 import { HangarPage } from './features/hangar/HangarPage';
 import { UnitEditorPage } from './features/hangar/UnitEditorPage';
 import { MissionsListPage } from './features/missions/list/MissionsListPage';
@@ -92,6 +93,12 @@ export function createAppRouter(queryClient: QueryClient, history?: RouterHistor
     },
   });
 
+  const exportImportRoute = createRoute({
+    getParentRoute: () => rootRoute,
+    path: '/export-import',
+    component: ExportImportPage,
+  });
+
   return createRouter({
     routeTree: rootRoute.addChildren([
       indexRoute,
@@ -103,6 +110,7 @@ export function createAppRouter(queryClient: QueryClient, history?: RouterHistor
       unitRoute,
       missionsRoute,
       missionRoute,
+      exportImportRoute,
     ]),
     ...(history && { history }),
     context: { queryClient },

@@ -72,3 +72,5 @@ export {
   type CheckParam,
 } from './checks/catalogue.js';
 export type { AssemblyStatus } from './config/load.js';
+export { unitsOfSlot } from './config/usage.js';
+export type * from './transfer/types.js';

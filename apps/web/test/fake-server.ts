@@ -5,11 +5,16 @@ import {
   defaultMissionTitle,
   executionKeyOf,
   profileFileSchema,
+  unitsOfSlot,
   resolveCore,
   resolveSlot,
   unitFileSchema,
   validateAssembly,
   type AssemblyFile,
+  type ExportContents,
+  type ImportChoices,
+  type ImportElement,
+  type ImportSummary,
   type Issue,
   type MissionDetail,
   type MissionEvent,
@@ -18,6 +23,7 @@ import {
   type ProfileFile,
   type SideSlotRecord,
   type SlotRecord,
+  type TransferFile,
   type UnitFile,
   type WorkspaceSummary,
 } from '@suptron/runtime/browser';
@@ -80,6 +86,17 @@ export class FakeHome {
   requests: RecordedRequest[] = [];
   opened: string[] = [];
   live = new FakeLiveEvents();
+  /** What `POST /api/export` answers with. */
+  exportFiles: TransferFile[] = [];
+  /**
+   * The elements `POST /api/import/preview` answers with; the fake applies the choices to them
+   * (a different element named in `replace` is replaced, edited paths replace a Profile's paths).
+   */
+  importElements: ImportElement[] = [];
+  /** When set, the Import routes refuse the files with these Issues (400). */
+  importRefusal: Issue[] | null = null;
+  /** What `POST /api/import/apply` answers with, or the message of a 500 `import_failed`. */
+  importResult: ImportSummary | { failure: string } = { added: [], replaced: [] };
   readonly home = '/home/me/.suptron';
   nextMissionId = 1;
 
@@ -149,6 +166,40 @@ export class FakeHome {
 
   assemblyPath(project: string, assembly: string): string {
     return `${this.home}/projects/${project}/assemblies/${assembly}.yaml`;
+  }
+
+  /** Every Unit and Project, each Project with the Hangar Units its Assemblies place. */
+  exportContents(): ExportContents {
+    return {
+      units: [...this.units.values()].map((u) => ({
+        name: u.name,
+        ...(u.title && { title: u.title }),
+      })),
+      projects: [...this.projects.values()].map(({ profile, assemblies }) => {
+        const placed = [...assemblies.values()].flatMap(
+          (a) => a.doc?.slots.flatMap(unitsOfSlot) ?? [],
+        );
+        return {
+          name: profile.name,
+          ...(profile.title && { title: profile.title }),
+          units: [...new Set(placed)].filter((name) => this.units.has(name)).sort(),
+        };
+      }),
+    };
+  }
+
+  /** `importElements` with the choices applied as the server would decide them. */
+  previewElements(choices: ImportChoices): ImportElement[] {
+    return this.importElements.map((element) => {
+      const action =
+        element.status === 'different'
+          ? choices.replace.includes(element.path)
+            ? 'replace'
+            : 'keep'
+          : element.action;
+      const edited = element.kind === 'profile' ? choices.paths[element.name] : undefined;
+      return { ...element, action, ...(edited && { paths: edited }) };
+    });
   }
 
   requestsTo(method: string, pattern: string | RegExp): RecordedRequest[] {
@@ -780,6 +831,26 @@ export function handlersFor(home: FakeHome): HttpHandler[] {
       const path = raw.startsWith('/') ? raw : base ? `${base.replace(/\/$/, '')}/${raw}` : raw;
       const kind = home.existingPaths.get(path);
       return json(kind ? { exists: true, kind, path } : { exists: false, path });
+    }),
+
+    http.get('/api/export/contents', () => json(home.exportContents())),
+    http.post('/api/export', async ({ request }) => {
+      await record(request);
+      return json({ files: home.exportFiles });
+    }),
+    http.post('/api/import/preview', async ({ request }) => {
+      const body = (await record(request)) as { choices: ImportChoices };
+      if (home.importRefusal) return json({ issues: home.importRefusal }, 400);
+      return json({ elements: home.previewElements(body.choices) });
+    }),
+    http.post('/api/import/apply', async ({ request }) => {
+      await record(request);
+      if (home.importRefusal) return json({ issues: home.importRefusal }, 400);
+      const result = home.importResult;
+      if ('failure' in result) {
+        return json({ reason: 'import_failed', message: result.failure }, 500);
+      }
+      return json(result);
     }),
 
     http.get('/api/missions', () => json([...home.missions.values()].map((m) => m.summary))),

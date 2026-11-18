@@ -17,6 +17,9 @@ import { parseUnitMarkdown } from './unit-markdown.js';
 import { capabilitiesOf, type Capability } from '../workspace/kinds.js';
 import { validateAssembly, type ValidationUnit } from './validate-assembly.js';
 
+/** The Issue of a Project folder that has no `profile.yaml`. */
+export const MISSING_PROFILE = 'missing_profile';
+
 export interface LoadedUnit {
   name: string;
   path: string;
@@ -101,21 +104,22 @@ function parseYamlObject(text: string): { value: unknown; error?: string } {
   }
 }
 
-export async function loadUnit(path: string): Promise<LoadedUnit> {
-  const name = basename(path, '.md');
-  const text = await readFile(path, 'utf8');
+/** Parses one Unit file and checks that its `name` equals the file's basename `name`. */
+export function parseUnitText(
+  name: string,
+  text: string,
+): { unit: UnitFile | null; issues: Issue[] } {
   const parsed = parseUnitMarkdown(text);
   const issues = [...parsed.issues];
   const mismatch = parsed.unit ? nameMismatch(name, parsed.unit.name) : null;
   if (mismatch) issues.push(mismatch);
-  return {
-    name,
-    path,
-    text,
-    etag: etagOf(text),
-    unit: issues.length === 0 ? parsed.unit : null,
-    issues,
-  };
+  return { unit: issues.length === 0 ? parsed.unit : null, issues };
+}
+
+export async function loadUnit(path: string): Promise<LoadedUnit> {
+  const name = basename(path, '.md');
+  const text = await readFile(path, 'utf8');
+  return { name, path, text, etag: etagOf(text), ...parseUnitText(name, text) };
 }
 
 export async function loadUnits(home: string): Promise<LoadedUnit[]> {
@@ -214,7 +218,7 @@ export async function loadProject(
       issues = outerIssues;
     }
   } catch {
-    issues = [{ code: 'missing_profile', message: `${PROFILE_FILE} is missing` }];
+    issues = [{ code: MISSING_PROFILE, message: `${PROFILE_FILE} is missing` }];
   }
   const capabilities = profile ? capabilitiesOf(profile.workspace) : null;
   const assembliesDir = join(path, ASSEMBLIES_DIR);

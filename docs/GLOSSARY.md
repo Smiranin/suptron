@@ -27,7 +27,7 @@ A reusable, Project-independent building block of an Assembly: an agent definiti
 _Avoid_: Sub-agent, component, module, plugin, agent role, Brick (former name)
 
 **Hangar**:
-The one shared library of Units, independent of Projects. A Unit is defined once in the Hangar and can be placed into any Assembly of any Project.
+The one library of Units of a system, shared by all its Projects and kept on the Commander's machine. A Unit is defined once in the Hangar and can be placed into any Assembly of any Project; it reaches another machine or another person only through an Export.
 _Avoid_: Library, catalogue, registry, Unit library
 
 **Rules**:
@@ -117,6 +117,14 @@ _Avoid_: Context files, docs, rules (rules belong to Units)
 **Outer Folder**:
 A folder outside the Workspace, listed in the Project Profile, that every Pilot of the Project's Missions may write to.
 _Avoid_: Extra folder, shared folder, output folder
+
+**Export**:
+One file holding a chosen set of Units and Projects (each Project with its Profile and all its Assemblies) exactly as the system keeps them, and the Commander's action that produces it. An Export never holds Missions; it is how configuration moves to another machine or to another person.
+_Avoid_: Backup, Bundle, Crate, Sync
+
+**Import**:
+The Commander's action that brings the contents of an Export into the system. Every Unit, Profile and Assembly in it is compared with what already exists, and nothing changes until the Commander has chosen for each one and applied.
+_Avoid_: Restore, Sync, merge
 
 **Human Checkpoint**:
 The moment a Pilot asks the Commander a question and the Mission waits for the answer. Only Slots flagged "may ask the Commander" can do this; by default only the analyst Unit is flagged. The set of flagged Slots is the Mission's level of autonomy.

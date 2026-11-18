@@ -10,5 +10,9 @@ describe('app shell', () => {
     expect(await screen.findByRole('heading', { name: 'Projects' })).toBeInTheDocument();
     expect(router.state.location.pathname).toBe('/projects');
     expect(screen.getByRole('link', { name: 'Hangar' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Export & Import' })).toHaveAttribute(
+      'href',
+      '/export-import',
+    );
   });
 });

@@ -1,7 +1,8 @@
 import { Input } from '@suptron/ui/components/input';
 import { cn } from '@suptron/ui/lib/utils';
-import { useEffect, useState, type Ref } from 'react';
+import { useEffect, type Ref } from 'react';
 import { useFsStat } from '../api/queries';
+import { PATH_DEBOUNCE_MS, useDebounced } from '../lib/use-debounced';
 
 export interface PathFieldProps {
   id?: string;
@@ -23,15 +24,6 @@ export interface PathFieldProps {
 export type PathStatus =
   { checking: true } | { checking: false; exists: boolean; kind?: 'file' | 'dir' };
 
-function useDebounced<T>(value: T, delay: number): T {
-  const [debounced, setDebounced] = useState(value);
-  useEffect(() => {
-    const timer = setTimeout(() => setDebounced(value), delay);
-    return () => clearTimeout(timer);
-  }, [value, delay]);
-  return debounced;
-}
-
 /** A typed path with a debounced existence check through `GET /api/fs/stat` (editors SPEC FR-14, FR-15). */
 export function PathField({
   id,
@@ -44,7 +36,7 @@ export function PathField({
   ref,
   ...aria
 }: PathFieldProps) {
-  const debounced = useDebounced(value.trim(), 250);
+  const debounced = useDebounced(value.trim(), PATH_DEBOUNCE_MS);
   const stat = useFsStat(debounced, base);
   const checking = debounced !== '' && (stat.isPending || debounced !== value.trim());
   const exists = stat.data?.exists === true;

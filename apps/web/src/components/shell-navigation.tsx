@@ -2,6 +2,7 @@ import { Button } from '@suptron/ui/components/button';
 import {
   Sidebar,
   SidebarContent,
+  SidebarFooter,
   SidebarGroup,
   SidebarGroupContent,
   SidebarHeader,
@@ -11,7 +12,7 @@ import {
   useSidebar,
 } from '@suptron/ui/components/sidebar';
 import { Link } from '@tanstack/react-router';
-import { FolderGit2, Rocket, Warehouse, X } from 'lucide-react';
+import { ArrowDownUp, FolderGit2, Rocket, Warehouse, X } from 'lucide-react';
 import type { MouseEvent, PropsWithChildren } from 'react';
 import { useNeedsYouCount } from '../features/missions/MissionsProvider';
 import { Brand } from './brand';
@@ -96,6 +97,18 @@ export function ShellNavigation() {
           </SidebarGroupContent>
         </SidebarGroup>
       </SidebarContent>
+      <SidebarFooter className="px-3 pb-5" onClick={closeOnNavigate}>
+        <nav aria-label="Configuration">
+          <SidebarMenu>
+            <NavigationItem>
+              <Link to="/export-import" activeProps={activeProps}>
+                <ArrowDownUp aria-hidden="true" />
+                <span>Export &amp; Import</span>
+              </Link>
+            </NavigationItem>
+          </SidebarMenu>
+        </nav>
+      </SidebarFooter>
     </Sidebar>
   );
 }

@@ -14,6 +14,7 @@ import { registerMissionRoutes } from './routes/missions.js';
 import { registerProjectRoutes } from './routes/projects.js';
 import { registerPromptRoutes } from './routes/prompts.js';
 import { registerToolRoutes } from './routes/tools.js';
+import { registerTransferRoutes } from './routes/transfer.js';
 import { registerUnitRoutes } from './routes/units.js';
 import { EventHub } from './sse.js';
 import { registerStatic } from './static.js';
@@ -69,6 +70,7 @@ export async function buildApp(options: BuildAppOptions): Promise<BuiltApp> {
   registerMissionRoutes(app, context);
   registerToolRoutes(app, context);
   registerPromptRoutes(app, context);
+  registerTransferRoutes(app, context);
   if (options.webDist) await registerStatic(app, options.webDist);
 
   return { app, context };

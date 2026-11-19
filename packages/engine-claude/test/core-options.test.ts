@@ -45,6 +45,7 @@ function spec(role: AgentSpec['role'], additionalDirectories: string[]): AgentSp
       taskPath: '/tmp/x/task',
       taskDocuments: [],
       configHome: '/tmp/x/home',
+      missionFolder: '/tmp/x/home/missions/m1',
       outerFolders: [],
     },
   };

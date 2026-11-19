@@ -131,7 +131,7 @@ The moment a Pilot asks the Commander a question and the Mission waits for the a
 _Avoid_: Approval gate, pause point, manual step, autonomy level
 
 **Mission**:
-One execution of an Assembly for one Task in the Project's Workspace: a Checkout for a repository (under the Project's Git conventions; the system itself never creates or switches branches, a Slot does when its Instructions say so), the folder, or the Mission folder. Every Mission has a title, given by the Commander at start or made of the Project name and the date, which names the Mission and, through the Git conventions, what it produces. Every Mission has a Mission folder `missions/<id>/` in `SUPTRON_HOME`, removed on Dismiss. Several Missions may be active at the same time, also on the same Project: in different Checkouts, or any number on a Project without a folder.
+One execution of an Assembly for one Task in the Project's Workspace: a Checkout for a repository (under the Project's Git conventions; the system itself never creates or switches branches, a Slot does when its Instructions say so), the folder, or the Mission folder. Every Mission has a title, given by the Commander at start or made of the Project name and the date, which names the Mission and, through the Git conventions, what it produces. Every Mission has a Mission folder `missions/<id>/` in `SUPTRON_HOME`, where its Pilots keep their working files (scripts, drafts, logs), removed on Dismiss. Several Missions may be active at the same time, also on the same Project: in different Checkouts, or any number on a Project without a folder.
 _Avoid_: Job, execution, session, Run (former name)
 
 **Checkout**:

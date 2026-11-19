@@ -9,7 +9,7 @@ export function missionFolder(home: string, id: string): string {
 
 /**
  * Creates `missions/<id>/` for a Mission of any kind (SPEC FR-11): the Task document of a text
- * Task lives there, a Pilot may leave notes there, and a Workspace of kind `none` works there.
+ * Task lives there, a Pilot keeps its working files there, and a Workspace of kind `none` works there.
  */
 export async function createMissionFolder(home: string, id: string): Promise<string> {
   const dir = missionFolder(home, id);

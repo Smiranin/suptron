@@ -44,12 +44,12 @@ function isGitInternal(target: string, root: string): boolean {
 /**
  * Denies any access to the configuration home, writes to the Commander's Task documents (a Slot's
  * own files next to them, such as OUTLINE.md, may be rewritten), writes outside the write roots,
- * the Task location and the Project's Outer Folders, and writes to `.git` internals wherever a `.git` directory sits under a
+ * the Task location, the Mission folder and the Project's Outer Folders, and writes to `.git` internals wherever a `.git` directory sits under a
  * write root.
  *
- * The Task location and the write roots are decided before the configuration home, because
- * both may live inside it: a text Task is stored in the Mission folder, and a Workspace of
- * kind `none` works in that same folder.
+ * The Task location, the Mission folder and the write roots are decided before the
+ * configuration home, because they live inside it or may: the Mission folder always does, a
+ * text Task is stored in it, and a Workspace of kind `none` works in it.
  */
 export function evaluatePath(path: string, mode: PathMode, ctx: GuardContext): PathVerdict {
   const target = canonicalPath(isAbsolute(path) ? path : resolve(ctx.cwd, path));
@@ -62,6 +62,7 @@ export function evaluatePath(path: string, mode: PathMode, ctx: GuardContext): P
     }
     return { allowed: true };
   }
+  if (isInside(target, canonicalPath(ctx.missionFolder))) return { allowed: true };
   const root = ctx.writeRoots.map(canonicalPath).find((r) => isInside(target, r));
   if (root !== undefined) {
     if (mode !== 'read' && isGitInternal(target, root)) {
@@ -80,11 +81,11 @@ export function evaluatePath(path: string, mode: PathMode, ctx: GuardContext): P
   return { allowed: false, reason: outsideWriteReason(ctx) };
 }
 
-/** Names the Task folder so a Slot that wanted a scratch file (run 4: `/tmp`) knows where it goes. */
+/** Names the Mission folder so a Slot that wanted a scratch file (run 4: `/tmp`) knows where it goes. */
 export function outsideWriteReason(ctx: GuardContext): string {
   const places =
     ctx.outerFolders.length > 0
-      ? `the Workspace, the Task folder and the Outer Folders (${ctx.outerFolders.join(', ')})`
-      : 'the Workspace and the Task folder';
-  return `Writes are allowed only inside ${places}; keep working files in ${ctx.taskPath}`;
+      ? `the Workspace, the Task folder, the Mission folder and the Outer Folders (${ctx.outerFolders.join(', ')})`
+      : 'the Workspace, the Task folder and the Mission folder';
+  return `Writes are allowed only inside ${places}; keep working files in ${ctx.missionFolder}`;
 }

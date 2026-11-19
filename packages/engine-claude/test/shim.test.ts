@@ -34,6 +34,7 @@ describe('git/gh shims', () => {
     taskPath: join(home, 'task'),
     taskDocuments: [join(home, 'task', 'SPEC.md')],
     configHome: home,
+    missionFolder: join(home, 'missions', 'm1'),
     outerFolders: [join(home, '..', 'notes'), '/var/logs'],
   });
   const env = (protectedBranch: string | null = 'main') => ({

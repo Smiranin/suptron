@@ -58,7 +58,7 @@ A quick workaround may be **one of the options** (never the only one) if clearly
 
 **Code Duplication:** Avoid repeating code. Extract common logic. Apply DRY principle.
 
-**Documentation:** A doc comment (TSDoc) above every new function, method and class: what it does and, where it is not obvious, why. No comments on variables and properties: the name says it. A comment above a block or a line that is hard to follow, saying what it does or why. A comment describes the code as it is: no ticket, ADR, decision or conversation behind it.
+**Documentation:** A doc comment (TSDoc) above every new function, method and class: what it does and, where it is not obvious, why. No comment on a variable or a property whose name says it all; where the value is not obvious, one line on why. A comment above a block or a line that is hard to follow, saying what it does or why. A comment describes the code as it is: no ticket, ADR, decision or conversation behind it.
 
 **Readability:** Descriptive names, focused functions, clarity over cleverness.
 

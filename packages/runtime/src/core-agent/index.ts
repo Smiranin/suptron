@@ -15,6 +15,8 @@ export interface ContextBundle {
   knowledgeSources: KnowledgeSourceRef[];
   /** The Workspace's own fragment: where the Pilot works and where results go (SPEC FR-15). */
   workspace: string;
+  /** The Mission folder: the only place for the Pilot's working files. */
+  missionFolder: string;
   /** The Git conventions rendered with the Mission's values; null when the Slot does not read them. */
   gitConventions: string | null;
   slotOutputs: { slotName: string; output: string }[];
@@ -140,7 +142,7 @@ Calls:
 /** The instruction at the head of each Core call; the call's input follows it as JSON. */
 export const CORE_CALL_INSTRUCTIONS: Readonly<Record<string, string>> = {
   composeSlotPrompt:
-    'Compose the prompt for this Slot. Include the Slot instructions verbatim, list the paths of the Task documents and of the Knowledge Sources given as paths, quote a Knowledge Source given as text under its title, state the Workspace fragment so the Pilot knows where it works and where results go, quote the Git conventions when they are given (never mention them otherwise), include every Slot Output given, and when feedback is present put it under a heading that names its source (Loop feedback from <Slot>, or the previous Attempt) with the failed Checks and the note, named after its author (the Commander note, or the Core note). When interrupted is true, open the prompt by saying that an earlier Attempt at this Slot was interrupted before it finished, that what it left in the Workspace and the Task folder is still there, and that the Pilot first checks what is already done and goes on from it instead of starting over.',
+    'Compose the prompt for this Slot. Include the Slot instructions verbatim, list the paths of the Task documents and of the Knowledge Sources given as paths, quote a Knowledge Source given as text under its title, state the Workspace fragment so the Pilot knows where it works and where results go, name the Mission folder as the only place for the working files of the Pilot (scripts, drafts, logs), quote the Git conventions when they are given (never mention them otherwise), include every Slot Output given, and when feedback is present put it under a heading that names its source (Loop feedback from <Slot>, or the previous Attempt) with the failed Checks and the note, named after its author (the Commander note, or the Core note). When interrupted is true, open the prompt by saying that an earlier Attempt at this Slot was interrupted before it finished, that what it left in the Workspace, the Task folder and the Mission folder is still there, and that the Pilot first checks what is already done and goes on from it instead of starting over.',
   judge:
     'Judge the criterion. When it is about files (a document, the content, the code), read the files it names, or the ones the Slot Output lists as produced, and judge on what they hold: the Slot Output and the change summary tell you where to look, they are not the evidence. When it is about what the Slot Output itself states (the verdict of a review), judge on the Slot Output. A null change summary means the Workspace keeps none. Be strict: holds is true only when the criterion is clearly satisfied; the reason names the file and the place of what fails.',
   explainNeedsAttention:

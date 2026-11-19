@@ -28,6 +28,7 @@ import { buildGuard, type Workspace } from '../workspace/workspace.js';
 import { buildContextBundle } from './context.js';
 import { SubPilotLog, reportedEvent, subAgentSpecs } from './pilot-events.js';
 import { SideSlots } from './side-slots.js';
+import { missionFolder } from './task.js';
 
 export interface RunnerDeps {
   engine: Engine;
@@ -705,7 +706,11 @@ export class Runner {
     this.noteSubPilots(slot);
     const bundle = buildContextBundle(
       slot,
-      { ...this.meta, workspace: this.deps.workspace.fragment },
+      {
+        ...this.meta,
+        workspace: this.deps.workspace.fragment,
+        missionFolder: missionFolder(this.meta.configHome, this.meta.id),
+      },
       this.slotOutputs,
     );
     let prompt: string;
@@ -768,7 +773,10 @@ export class Runner {
       model: slot.model,
       systemPrompt: { rules: slot.rules, instructions: withHandover(slot.instructions) },
       cwd: this.deps.workspace.cwd,
-      additionalDirectories: [this.meta.taskPath],
+      additionalDirectories: [
+        this.meta.taskPath,
+        missionFolder(this.meta.configHome, this.meta.id),
+      ],
       allowQuestions: slot.mayAskCommander,
       ...(slot.subPilots.length > 0 && { subAgents: subAgentSpecs(slot.subPilots) }),
       ...(run.resume !== undefined && { resumeSessionId: run.resume }),
@@ -776,6 +784,7 @@ export class Runner {
         taskPath: this.meta.taskPath,
         taskDocuments: this.meta.taskDocuments,
         configHome: this.meta.configHome,
+        missionFolder: missionFolder(this.meta.configHome, this.meta.id),
         outerFolders: this.meta.outerFolders ?? [],
       }),
     });

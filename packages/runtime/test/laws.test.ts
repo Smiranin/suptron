@@ -9,6 +9,7 @@ const ctx: CommandContext = {
   taskPath: '/work/tasks/t1',
   taskDocuments: ['/work/tasks/t1/SPEC.md'],
   configHome: '/home/me/.suptron',
+  missionFolder: '/home/me/.suptron/missions/m1',
   outerFolders: [],
   currentBranch: 'feature/x',
 };
@@ -134,7 +135,7 @@ const commandTable: [command: string, context: CommandContext, allowed: boolean]
   // unrelated commands
   ['pnpm test', onMain, true],
   ['ls -la', onMain, true],
-  // files a command writes must lie inside the Workspace or the Task folder (run 4 wrote to /tmp)
+  // files a command writes must lie inside the Workspace, the Task folder or the Mission folder (run 4 wrote to /tmp)
   ['cat > notes.md', ctx, true],
   ['echo x > /work/repo/out.txt', ctx, true],
   ['python3 gen.py > /work/tasks/t1/cards.md', ctx, true],
@@ -144,6 +145,8 @@ const commandTable: [command: string, context: CommandContext, allowed: boolean]
   ['mkdir -p /tmp/rs', ctx, false],
   ['cd /tmp/rs && cat > pass1.py', ctx, false],
   ['cd /work/tasks/t1 && cat > pass1.py', ctx, true],
+  ['pnpm test > /home/me/.suptron/missions/m1/tests.log 2>&1', ctx, true],
+  ['echo x > /home/me/.suptron/missions/m2/tests.log', ctx, false],
   ['git diff --name-only > /tmp/dojo_new.txt', ctx, false],
   ['tee /tmp/a < x', ctx, false],
   ['cp a.md /tmp/b.md', ctx, false],
@@ -169,11 +172,11 @@ describe('evaluateCommand', () => {
     if (!verdict.allowed) expect(verdict.reason).toContain('protected branch');
   });
 
-  it('names the Task folder and the offending path when a command writes outside', () => {
+  it('names the Mission folder and the offending path when a command writes outside', () => {
     const verdict = evaluateCommand('cd /tmp/rs && cat > pass1.py', ctx);
     expect(verdict.allowed).toBe(false);
     if (!verdict.allowed) {
-      expect(verdict.reason).toContain('/work/tasks/t1');
+      expect(verdict.reason).toContain('/home/me/.suptron/missions/m1');
       expect(verdict.reason).toContain('/tmp/rs/pass1.py');
     }
   });
@@ -190,6 +193,9 @@ const pathTable: [path: string, mode: 'read' | 'write' | 'create', allowed: bool
   ['/work/tasks/t1/answers.md', 'create', true],
   // a file a Slot wrote next to the Task is its own to rewrite (FR-27 protects the Commander's)
   ['/work/tasks/t1/OUTLINE.md', 'write', true],
+  // working files go into the Mission's own folder, never into another Mission's
+  ['/home/me/.suptron/missions/m1/tests.log', 'create', true],
+  ['/home/me/.suptron/missions/m2/tests.log', 'create', false],
   ['/home/me/.suptron/hangar/analyst.md', 'read', false],
   ['/home/me/.suptron/hangar/analyst.md', 'write', false],
   ['/etc/hosts', 'write', false],
@@ -203,9 +209,12 @@ describe('evaluatePath', () => {
     expect(evaluatePath(path, mode, ctx).allowed).toBe(allowed);
   });
 
-  it('names the Task folder as the place for working files', () => {
+  it('names the Mission folder as the place for working files', () => {
     const verdict = evaluatePath('/tmp/x', 'create', ctx);
-    expect(verdict).toEqual({ allowed: false, reason: expect.stringContaining('/work/tasks/t1') });
+    expect(verdict).toEqual({
+      allowed: false,
+      reason: expect.stringContaining('/home/me/.suptron/missions/m1'),
+    });
   });
 });
 
@@ -325,6 +334,7 @@ describe('evaluatePath with symlinked roots', () => {
       taskPath: join(root, 'task'),
       taskDocuments: [join(root, 'task', 'SPEC.md')],
       configHome: join(root, 'home'),
+      missionFolder: join(root, 'home', 'missions', 'm1'),
     };
     expect(evaluatePath(join(real, 'new.txt'), 'create', linked).allowed).toBe(true);
     expect(evaluatePath(join(link, 'new.txt'), 'create', linked).allowed).toBe(true);

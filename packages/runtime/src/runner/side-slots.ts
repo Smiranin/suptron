@@ -9,6 +9,7 @@ import { buildContextBundle } from './context.js';
 import { SubPilotLog, reportedEvent, subAgentSpecs } from './pilot-events.js';
 import { MissionStateError, type MissionMeta } from './runner.js';
 import { composeSideSlotPrompt } from './side-slot-prompt.js';
+import { missionFolder } from './task.js';
 
 export interface SideSlotsDeps {
   engine: Engine;
@@ -212,9 +213,10 @@ export class SideSlots {
     record: SideSlotRecord,
   ): Promise<Ending> {
     const { meta, workspace } = this.deps;
+    const missionDir = missionFolder(meta.configHome, meta.id);
     const bundle = buildContextBundle(
       side,
-      { ...meta, workspace: workspace.fragment },
+      { ...meta, workspace: workspace.fragment, missionFolder: missionDir },
       this.deps.slotOutputs,
     );
     const handle = this.deps.engine.createAgent({
@@ -223,13 +225,14 @@ export class SideSlots {
       model: side.model,
       systemPrompt: { rules: side.rules, instructions: withHandover(side.instructions) },
       cwd: workspace.cwd,
-      additionalDirectories: [meta.taskPath],
+      additionalDirectories: [meta.taskPath, missionDir],
       allowQuestions: false,
       ...(side.subPilots.length > 0 && { subAgents: subAgentSpecs(side.subPilots) }),
       guard: buildGuard(workspace, {
         taskPath: meta.taskPath,
         taskDocuments: meta.taskDocuments,
         configHome: meta.configHome,
+        missionFolder: missionDir,
         outerFolders: meta.outerFolders ?? [],
       }),
     });

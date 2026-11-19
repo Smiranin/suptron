@@ -430,6 +430,7 @@ export class MissionRegistry {
         taskPath: meta.taskPath,
         taskDocuments: meta.taskDocuments,
         configHome: this.deps.home,
+        missionFolder: missionFolder(this.deps.home, meta.id),
         outerFolders: meta.outerFolders ?? [],
       }),
       ...(resume?.coreSessionId !== undefined && { resumeSessionId: resume.coreSessionId }),

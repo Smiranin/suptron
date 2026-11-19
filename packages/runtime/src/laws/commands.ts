@@ -374,7 +374,7 @@ function writeTargets(program: string, args: string[]): string[] {
  * Evaluates one shell command line against the Laws: every simple command whose program is
  * `git` or `gh` (by basename, so `/usr/bin/git` counts) is inspected, and every file a command
  * writes (an output redirection, `mkdir`, `touch`, `tee`, the destination of `cp`/`mv`) must lie
- * inside the Workspace or the Task folder, like a Write tool call. `cd` moves the directory the
+ * inside the Workspace, the Task folder or the Mission folder, like a Write tool call. `cd` moves the directory the
  * later commands of the line resolve against. Anything else is allowed.
  */
 export function evaluateCommand(command: string, ctx: CommandContext): Verdict {

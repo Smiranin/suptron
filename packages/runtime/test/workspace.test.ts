@@ -69,6 +69,7 @@ describe('openWorkspace', () => {
           taskPath: '/t',
           taskDocuments: ['/t/SPEC.md'],
           configHome: '/h',
+          missionFolder: '/h/missions/m1',
           outerFolders: ['/notes'],
         }),
       ).toEqual({
@@ -78,6 +79,7 @@ describe('openWorkspace', () => {
         taskPath: '/t',
         taskDocuments: ['/t/SPEC.md'],
         configHome: '/h',
+        missionFolder: '/h/missions/m1',
         outerFolders: ['/notes'],
       });
       await repo.git(['checkout', '-q', 'main']);
@@ -171,6 +173,7 @@ describe('openWorkspace', () => {
           taskPath: '/task',
           taskDocuments: [],
           configHome: '/h',
+          missionFolder: '/h/missions/m1',
           outerFolders: [],
         }),
       ).toMatchObject({

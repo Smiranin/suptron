@@ -90,6 +90,7 @@ export interface GuardLocations {
   taskPath: string;
   taskDocuments: readonly string[];
   configHome: string;
+  missionFolder: string;
   outerFolders: readonly string[];
 }
 
@@ -102,6 +103,7 @@ export function buildGuard(workspace: Workspace, locations: GuardLocations): Gua
     taskPath: locations.taskPath,
     taskDocuments: [...locations.taskDocuments],
     configHome: locations.configHome,
+    missionFolder: locations.missionFolder,
     outerFolders: [...locations.outerFolders],
   };
 }

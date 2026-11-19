@@ -8,6 +8,7 @@ export function composeSideSlotPrompt(bundle: ContextBundle, parentSlot: string)
   const parts = [
     `The Slot "${parentSlot}" of this Mission is done, and you were started after it. Your work stands beside the Mission and does not change its course. Do what your Instructions ask, then hand over.`,
     `## Workspace\n\n${bundle.workspace}`,
+    `## Mission folder\n\nYour working files (scripts, drafts, logs) go into ${bundle.missionFolder} and nowhere else.`,
   ];
   if (bundle.taskDocuments.length > 0) {
     parts.push(

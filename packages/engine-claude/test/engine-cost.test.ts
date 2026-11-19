@@ -55,6 +55,7 @@ function spec(resumeSessionId?: string): AgentSpec {
       taskPath: '/tmp/x/task',
       taskDocuments: [],
       configHome: '/tmp/x/home',
+      missionFolder: '/tmp/x/home/missions/m1',
       outerFolders: [],
     },
     ...(resumeSessionId !== undefined && { resumeSessionId }),

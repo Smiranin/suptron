@@ -9,6 +9,8 @@ export interface MissionLocations {
   knowledgeSources: KnowledgeSourceRef[];
   /** The Workspace's own fragment; every Slot receives it (SPEC FR-15). */
   workspace: string;
+  /** Where the Pilot keeps its working files. */
+  missionFolder: string;
   /** null when the Workspace has no Git conventions. */
   gitConventions: string | null;
 }
@@ -39,6 +41,7 @@ export function buildContextBundle(
     taskDocuments: slot.context.taskDocuments ? locations.taskDocuments : [],
     knowledgeSources: slot.context.knowledgeSources ? locations.knowledgeSources : [],
     workspace: locations.workspace,
+    missionFolder: locations.missionFolder,
     gitConventions: slot.context.gitConventions ? locations.gitConventions : null,
     slotOutputs: slot.context.slotOutputs.flatMap((name) => {
       const output = slotOutputs.get(name);

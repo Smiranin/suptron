@@ -30,6 +30,7 @@ describe.skipIf(process.env.SUPTRON_LIVE !== '1')('ClaudeEngine (live)', () => {
         taskPath: join(dir, 'task'),
         taskDocuments: [],
         configHome: join(dir, 'home'),
+        missionFolder: join(dir, 'home', 'missions', 'm1'),
         outerFolders: [],
       },
     });
@@ -68,6 +69,7 @@ describe.skipIf(process.env.SUPTRON_LIVE !== '1')('ClaudeEngine (live)', () => {
         taskPath: join(dir, 'task'),
         taskDocuments: [],
         configHome: join(dir, 'home'),
+        missionFolder: join(dir, 'home', 'missions', 'm1'),
         outerFolders: [],
       },
     });
@@ -106,6 +108,7 @@ describe.skipIf(process.env.SUPTRON_LIVE !== '1')('ClaudeEngine (live)', () => {
         taskPath: join(dir, 'task'),
         taskDocuments: [],
         configHome: join(dir, 'home'),
+        missionFolder: join(dir, 'home', 'missions', 'm1'),
         outerFolders: [],
       },
     });
@@ -140,6 +143,7 @@ describe.skipIf(process.env.SUPTRON_LIVE !== '1')('ClaudeEngine (live)', () => {
         taskPath: join(dir, 'task'),
         taskDocuments: [],
         configHome: home,
+        missionFolder: join(home, 'missions', 'm1'),
         outerFolders: [],
       },
     });
@@ -172,6 +176,7 @@ describe.skipIf(process.env.SUPTRON_LIVE !== '1')('ClaudeEngine (live)', () => {
         taskPath: join(dir, 'task'),
         taskDocuments: [],
         configHome: join(dir, 'home'),
+        missionFolder: join(dir, 'home', 'missions', 'm1'),
         outerFolders: [],
       },
     };
@@ -221,6 +226,7 @@ describe.skipIf(process.env.SUPTRON_LIVE !== '1')('ClaudeEngine (live)', () => {
         taskPath: join(dir, 'task'),
         taskDocuments: [],
         configHome: join(dir, 'home'),
+        missionFolder: join(dir, 'home', 'missions', 'm1'),
         outerFolders: [],
       },
       subAgents: [

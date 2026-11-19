@@ -17,6 +17,7 @@ const spec: AgentSpec = {
     taskPath: '/tmp',
     taskDocuments: ['/tmp/task.md'],
     configHome: '/tmp',
+    missionFolder: '/tmp/missions/m1',
     outerFolders: [],
   },
 };

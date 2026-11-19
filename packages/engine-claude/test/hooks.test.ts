@@ -9,6 +9,7 @@ const ctx: GuardContext = {
   taskPath: '/work/tasks/t1',
   taskDocuments: ['/work/tasks/t1/SPEC.md'],
   configHome: '/home/me/.suptron',
+  missionFolder: '/home/me/.suptron/missions/m1',
   outerFolders: [],
 };
 const exists = (path: string) =>

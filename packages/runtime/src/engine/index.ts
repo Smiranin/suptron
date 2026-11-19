@@ -13,7 +13,7 @@ export type HealthStatus = { ok: true } | { ok: false; reason: string };
 export interface GuardContext {
   /** Relative paths resolve against it: the Engine's working directory (the Workspace). */
   cwd: string;
-  /** The Laws allow writes inside these roots and the Task location, nowhere else. */
+  /** The Laws allow writes inside these roots, the Task location and the Mission folder, nowhere else. */
   writeRoots: readonly string[];
   /** null when the Workspace knows no protected branch; the branch Laws are then skipped. */
   protectedBranch: string | null;
@@ -24,6 +24,8 @@ export interface GuardContext {
    */
   taskDocuments: readonly string[];
   configHome: string;
+  /** The Mission folder: open for writes although it lies in the configuration home. */
+  missionFolder: string;
   /** Folders outside the Workspace that the Laws open for writes, never the configuration home. */
   outerFolders: readonly string[];
 }
@@ -53,7 +55,7 @@ export interface AgentSpec {
   systemPrompt: { rules: string; instructions: string };
   /** The Workspace's working directory for 'pilot'; the Task folder for 'core'. */
   cwd: string;
-  /** The Task folder for 'pilot'; the Workspace for 'core'. */
+  /** The Task folder and the Mission folder for 'pilot'; the Workspace for 'core'. */
   additionalDirectories: string[];
   /** false removes AskUserQuestion from the agent. */
   allowQuestions: boolean;

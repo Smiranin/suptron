@@ -134,6 +134,10 @@ _Avoid_: Approval gate, pause point, manual step, autonomy level
 One execution of an Assembly for one Task in the Project's Workspace: a Checkout for a repository (under the Project's Git conventions; the system itself never creates or switches branches, a Slot does when its Instructions say so), the folder, or the Mission folder. Every Mission has a title, given by the Commander at start or made of the Project name and the date, which names the Mission and, through the Git conventions, what it produces. Every Mission has a Mission folder `missions/<id>/` in `SUPTRON_HOME`, where its Pilots keep their working files (scripts, drafts, logs), removed on Dismiss. Several Missions may be active at the same time, also on the same Project: in different Checkouts, or any number on a Project without a folder.
 _Avoid_: Job, execution, session, Run (former name)
 
+**Universe**:
+The illustrated picture of a running Mission: the same Assembly the clock draws, shown as a world of objects seen from one fixed angle. What that world is (a station with ships, anything else) is not part of the term.
+_Avoid_: Scene, World, Station, 3D view, canvas
+
 **Checkout**:
 An existing working copy (the main clone or a git worktree) of a Project whose Workspace is a repository, picked by the Commander when starting a Mission. A Checkout is busy while a Mission uses it; the system never creates or deletes Checkouts.
 _Avoid_: Working copy, worktree (a worktree is one kind of Checkout)

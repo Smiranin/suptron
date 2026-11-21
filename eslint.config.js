@@ -17,4 +17,24 @@ export default tseslint.config(
     plugins: { 'react-hooks': reactHooks },
     rules: reactHooks.configs.recommended.rules,
   },
+  {
+    // three.js stays inside the Universe module, which the page loads lazily: anywhere else it
+    // would land in the main bundle.
+    files: ['apps/web/**/*.{ts,tsx}'],
+    ignores: ['apps/web/src/features/universe/**'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              group: ['three', 'three/*'],
+              message:
+                'Only apps/web/src/features/universe may import three.js; elsewhere it lands in the main bundle.',
+            },
+          ],
+        },
+      ],
+    },
+  },
 );

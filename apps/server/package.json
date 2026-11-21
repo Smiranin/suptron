@@ -4,6 +4,7 @@
   "type": "module",
   "scripts": {
     "dev": "tsx watch src/main.ts",
+    "demo": "tsx src/demo.ts",
     "start": "tsx src/main.ts",
     "build": "tsc",
     "typecheck": "tsc"

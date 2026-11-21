@@ -1,5 +1,5 @@
 import type { FastifyReply, FastifyRequest } from 'fastify';
-import { isGlobalStreamEvent, type MissionEvent } from '@suptron/runtime';
+import { isEphemeralEvent, isGlobalStreamEvent, type MissionEvent } from '@suptron/runtime';
 
 export const HEARTBEAT_MS = 15_000;
 export const BUFFER_PER_MISSION = 5000;
@@ -22,9 +22,9 @@ export class EventHub {
   publish(event: MissionEvent): void {
     if (event.type === 'mission.dismissed') {
       this.buffers.delete(event.missionId);
-    } else if (event.type !== 'agent.activity') {
-      // A sign of life is worthless after the fact: never replayed, never crowding the buffer.
-      // (It still takes a seq; a replay simply skips those numbers.)
+    } else if (!isEphemeralEvent(event)) {
+      // A sign of life or the end of a call of the Core is worthless after the fact: never
+      // replayed, never crowding the buffer. (It still takes a seq; a replay skips those numbers.)
       const buffer = this.buffers.get(event.missionId) ?? [];
       buffer.push(event);
       if (buffer.length > BUFFER_PER_MISSION) buffer.splice(0, buffer.length - BUFFER_PER_MISSION);

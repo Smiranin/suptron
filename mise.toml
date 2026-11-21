@@ -30,6 +30,14 @@ run = "pnpm --filter @suptron/server dev"
 description = "Start the web UI dev server"
 run = "pnpm --filter @suptron/web dev"
 
+[tasks.demo]
+description = "Start a demo server with a fake Engine and the web UI: a voyage Mission to watch, no model called"
+depends = ["demo:server", "dev:web"]
+
+[tasks."demo:server"]
+description = "Start the demo server alone, in a fresh home of its own"
+run = "pnpm --filter @suptron/server demo"
+
 [tasks.build]
 description = "Build every package and application"
 run = "pnpm -r build"

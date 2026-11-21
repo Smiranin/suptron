@@ -14,6 +14,7 @@ import {
 } from '@suptron/runtime/browser';
 import { slotUnderWay } from './selectors';
 import type {
+  LiveActivity,
   MissionPageAction,
   MissionPageState,
   PanelSelection,
@@ -214,6 +215,38 @@ function withoutActivity(state: ReadyMissionState): ReadyMissionState {
   return rest;
 }
 
+function withoutCoreActivity(state: ReadyMissionState): ReadyMissionState {
+  if (state.coreActivity === undefined) return state;
+  const { coreActivity: _dropped, ...rest } = state;
+  void _dropped;
+  return rest;
+}
+
+/** A Mission that stops, completes or resumes has no sign of life of anyone left. */
+function withoutAnyActivity(state: ReadyMissionState): ReadyMissionState {
+  return withoutCoreActivity(withoutActivity(state));
+}
+
+/** The sign of life after `event`; a repeated frame of the same phase keeps when the phase began. */
+function nextActivity(
+  previous: LiveActivity | undefined,
+  event: Extract<MissionEvent, { type: 'agent.activity' }>,
+  now: number,
+): LiveActivity {
+  const { phase, detail } = event.payload;
+  const same =
+    previous !== undefined &&
+    previous.slot === event.slot &&
+    previous.phase === phase &&
+    previous.detail === detail;
+  return {
+    slot: event.slot,
+    phase,
+    ...(detail !== undefined && { detail }),
+    since: same ? previous.since : now,
+  };
+}
+
 /** The summary after a `mission.state`: the reset time lives only in Waiting for usage. */
 export function withState(
   summary: MissionSummary,
@@ -234,25 +267,16 @@ function applyEvent(state: ReadyMissionState, event: MissionEvent, now: number):
   const base: ReadyMissionState = { ...state, seq: event.seq, lastEventAt: now };
   switch (event.type) {
     case 'agent.activity': {
+      // The Core's signs of life are kept apart, so the live row does not take the Core for the current Slot.
+      if (event.slot === CORE) {
+        return { ...base, coreActivity: nextActivity(base.coreActivity, event, now) };
+      }
       // The live row follows the ordered list; a Side Slot's signs of life are not shown there.
       if (!(event.slot in base.slots)) return base;
-      const { phase, detail } = event.payload;
-      const previous = base.activity;
-      const same =
-        previous !== undefined &&
-        previous.slot === event.slot &&
-        previous.phase === phase &&
-        previous.detail === detail;
-      return {
-        ...base,
-        activity: {
-          slot: event.slot,
-          phase,
-          ...(detail !== undefined && { detail }),
-          since: same ? previous.since : now,
-        },
-      };
+      return { ...base, activity: nextActivity(base.activity, event, now) };
     }
+    case 'core.idle':
+      return withoutCoreActivity(base);
     case 'mission.state': {
       const summary = withState(base.summary, event);
       if (event.state === 'needs_attention') {
@@ -282,7 +306,7 @@ function applyEvent(state: ReadyMissionState, event: MissionEvent, now: number):
       return { ...base, summary };
     }
     case 'mission.resumed': {
-      const { attention: _a, pendingQuestion: _q, ...rest } = withoutActivity(base);
+      const { attention: _a, pendingQuestion: _q, ...rest } = withoutAnyActivity(base);
       void _a;
       void _q;
       return { ...rest, summary: event.mission, resumable: false };
@@ -560,7 +584,7 @@ function applyEvent(state: ReadyMissionState, event: MissionEvent, now: number):
       const slots = { ...base.slots };
       for (const record of event.slots) slots[record.name] = record;
       return {
-        ...withoutActivity(base),
+        ...withoutAnyActivity(base),
         slots,
         summary: {
           ...base.summary,
@@ -575,7 +599,7 @@ function applyEvent(state: ReadyMissionState, event: MissionEvent, now: number):
       };
     }
     case 'mission.stopped': {
-      const { pendingQuestion: _q, attention: _a, ...rest } = withoutActivity(base);
+      const { pendingQuestion: _q, attention: _a, ...rest } = withoutAnyActivity(base);
       void _q;
       void _a;
       const { usageResetsAt: _u, ...summary } = base.summary;

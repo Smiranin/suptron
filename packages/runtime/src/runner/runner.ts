@@ -22,7 +22,7 @@ import {
   type SlotRecord,
 } from '../domain/mission.js';
 import type { Answers } from '../domain/transcript.js';
-import type { AgentHandle, Engine } from '../engine/index.js';
+import type { AgentEvent, AgentHandle, Engine } from '../engine/index.js';
 import type { MissionEventInput } from '../events/mission-event.js';
 import { buildGuard, type Workspace } from '../workspace/workspace.js';
 import { buildContextBundle } from './context.js';
@@ -341,6 +341,34 @@ export class Runner {
     this.addCost(CORE_SLOT_NAME, cost);
   }
 
+  /**
+   * An Engine event of the Core: a sign of life goes out as `agent.activity` of the slot `core`;
+   * the Core's text and tool calls are not reported (it has no transcript of its own).
+   */
+  reportCoreEvent(event: AgentEvent): void {
+    if (event.type !== 'activity' || this.finishedForGood()) return;
+    this.deps.emit({
+      type: 'agent.activity',
+      missionId: this.meta.id,
+      slot: CORE_SLOT_NAME,
+      payload: event,
+    });
+  }
+
+  /** A call of the Core has ended: the page stops showing the Core at work. */
+  reportCoreIdle(): void {
+    if (this.finishedForGood()) return;
+    this.deps.emit({ type: 'core.idle', missionId: this.meta.id });
+  }
+
+  /**
+   * True once the Mission is Stopped or Completed: nothing live is reported any more, so that
+   * `mission.stopped` and `mission.completed` stay the last events of a Mission.
+   */
+  private finishedForGood(): boolean {
+    return this.state === 'stopped' || this.state === 'completed';
+  }
+
   run(): Promise<void> {
     if (!this.finished) {
       this.finished = this.execute().catch(async (error: unknown) => {
@@ -360,7 +388,7 @@ export class Runner {
   }
 
   async stop(): Promise<void> {
-    if (this.state === 'stopped' || this.state === 'completed') return;
+    if (this.finishedForGood()) return;
     this.stopRequested = true;
     for (const question of this.questions) question.dismiss();
     this.questions = [];
@@ -1142,7 +1170,7 @@ export class Runner {
   }
 
   private finishStopped(): void {
-    if (this.state === 'stopped' || this.state === 'completed') return;
+    if (this.finishedForGood()) return;
     this.attention = undefined;
     this.pendingQuestion = undefined;
     this.summary.currentSlot = null;

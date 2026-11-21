@@ -66,6 +66,8 @@ export interface ReadyMissionState {
   loopFiredAt: Record<string, number>;
   /** The last sign of life of the current Slot; dropped by the next transcript entry. */
   activity?: LiveActivity;
+  /** The last sign of life of the Core while a call of it runs; dropped when the call ends. */
+  coreActivity?: LiveActivity;
   /** Date.now() of the last event of any kind (init counts), for the "no activity" warning. */
   lastEventAt: number;
   seq: number;

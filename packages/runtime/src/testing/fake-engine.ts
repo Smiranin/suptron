@@ -50,7 +50,11 @@ export type FakeStep =
 
 export interface FakeSubAgent {
   name: string;
-  steps?: Extract<FakeStep, { text: string } | { toolCall: unknown } | { shell: string }>[];
+  /** The called agent's own work; a delay keeps the call open for that long. */
+  steps?: Extract<
+    FakeStep,
+    { text: string } | { toolCall: unknown } | { shell: string } | { delay: number }
+  >[];
   returns?: string | null;
   isError?: boolean;
 }
@@ -180,6 +184,21 @@ class FakeAgentHandle implements AgentHandle {
     return readHandoverStatus(output) === null ? handedOver(output, status) : output;
   }
 
+  /** Waits `ms`; an interrupt ends the wait at once. */
+  private pause(ms: number): Promise<void> {
+    return new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(resolve, ms);
+      this.abort.signal.addEventListener(
+        'abort',
+        () => {
+          clearTimeout(timer);
+          reject(new Interrupted());
+        },
+        { once: true },
+      );
+    });
+  }
+
   /**
    * Plays a step of work (a text, a tool call or a shell command), marked as a called agent's
    * when `agent` is given. False when a failed shell command ended the turn.
@@ -262,7 +281,8 @@ class FakeAgentHandle implements AgentHandle {
           yield { type: 'tool_call', id: callId, name: 'Agent', input: { subagent_type: name } };
           yield { type: 'sub_agent_called', callId, name };
           for (const inner of steps) {
-            if (!(yield* this.work(inner, { name, callId }))) return;
+            if ('delay' in inner) await this.pause(inner.delay);
+            else if (!(yield* this.work(inner, { name, callId }))) return;
           }
           if (returns !== null) {
             yield { type: 'tool_result', toolCallId: callId, output: returns, isError };
@@ -326,17 +346,7 @@ class FakeAgentHandle implements AgentHandle {
           yield { type: 'usage_limit', resetsAt: step.usageLimit.resetsAt };
           return;
         } else if ('delay' in step) {
-          await new Promise<void>((resolve, reject) => {
-            const t = setTimeout(resolve, step.delay);
-            this.abort.signal.addEventListener(
-              'abort',
-              () => {
-                clearTimeout(t);
-                reject(new Interrupted());
-              },
-              { once: true },
-            );
-          });
+          await this.pause(step.delay);
         } else if ('wait' in step) {
           const pending = new Deferred<void>();
           this.pending = pending;

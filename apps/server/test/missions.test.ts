@@ -8,6 +8,7 @@ import {
   defaultCoreScript,
   defaultMissionTitle,
   folderProfile,
+  isEphemeralEvent,
   noneProfile,
   type MissionDetail,
   type MissionEvent,
@@ -339,12 +340,13 @@ describe('Missions routes', () => {
       await s.app.inject({ method: 'POST', url: '/api/missions', payload: s.startBody() })
     ).json().id as string;
     await s.waitFor((es) => es.some((e) => e.type === 'slot.started' && e.slot === 'reviewer'));
-    const soFar = s.events.filter((e) => e.missionId === id).length;
-    const replay = await readSse(`${address}/api/events?mission=${id}&after=2`, soFar - 2);
-    expect(replay.data.map((e) => e.seq)).toEqual(
-      s.events.filter((e) => e.missionId === id && e.seq > 2).map((e) => e.seq),
+    // Ephemeral events (signs of life, the end of a call of the Core) are never replayed.
+    const replayable = s.events.filter(
+      (e) => e.missionId === id && e.seq > 2 && !isEphemeralEvent(e),
     );
-    expect(replay.ids[0]).toBe('3');
+    const replay = await readSse(`${address}/api/events?mission=${id}&after=2`, replayable.length);
+    expect(replay.data.map((e) => e.seq)).toEqual(replayable.map((e) => e.seq));
+    expect(replay.ids[0]).toBe(String(replayable[0]!.seq));
     const resync = await readSse(`${address}/api/events?mission=${id}&after=0`, 1);
     expect(resync.events[0]).toBe('message');
     s.context.events.publish({

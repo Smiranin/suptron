@@ -435,6 +435,8 @@ export class MissionRegistry {
       }),
       ...(resume?.coreSessionId !== undefined && { resumeSessionId: resume.coreSessionId }),
       onCost: (cost) => runner.addCoreCost(cost),
+      onEvent: (event) => runner.reportCoreEvent(event),
+      onCallEnd: () => runner.reportCoreIdle(),
       onUsageLimit: (resetsAt) => runner.waitForUsage(resetsAt),
     });
     const runner: Runner = new Runner(

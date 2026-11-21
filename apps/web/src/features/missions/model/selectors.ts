@@ -1,9 +1,6 @@
 import {
-  CORE_SLOT_NAME,
-  DEFAULTS,
   executionId,
   isActiveState,
-  ZERO_COST,
   type Cost,
   type ExecutionKey,
   type MissionState,
@@ -11,7 +8,7 @@ import {
   type NeedsAttentionCause,
   type TranscriptSection,
 } from '@suptron/runtime/browser';
-import type { MissionsListState, ReadyMissionState, SlotVisualState } from './types';
+import type { MissionsListState, ReadyMissionState } from './types';
 
 export const CAUSE_LABELS: Record<NeedsAttentionCause, string> = {
   handover_not_done: 'Handover not done',
@@ -76,81 +73,6 @@ export function missionTitle(
   summary: Pick<MissionSummary, 'assemblyName' | 'taskTitle' | 'workItemId'>,
 ): string {
   return `${summary.assemblyName} · ${taskName(summary)}`;
-}
-
-export interface MissionDecorations {
-  slots: Record<
-    string,
-    {
-      state: SlotVisualState;
-      current: boolean;
-      marker?: 'waiting' | 'attention';
-      attempts: number;
-      /** How often the Slot was passed by in a later Slot's Loop; 0 when never. */
-      skipped: number;
-      cost: Cost;
-    }
-  >;
-  loops: Record<string, { iterations: number; limit: number; firedAt?: number }>;
-  exitLit: string | null;
-  core: { state: MissionState; cost: Cost };
-}
-
-/**
- * The badge of a Loop on the clock: how many times the work went back, against the limit. Rounds
- * past the limit were granted by the Core or the Commander and are counted apart.
- */
-export function loopBadge(iterations: number, limit: number): string {
-  const granted = iterations - limit;
-  // Short on purpose: the badge sits on the chord of the clock.
-  return granted > 0 ? `Loop ${limit} of ${limit} +${granted}` : `Loop ${iterations} of ${limit}`;
-}
-
-/** Turns the page store into what the clock draws; the clock never sees Mission state directly. */
-export function missionDecorations(state: ReadyMissionState): MissionDecorations {
-  const active = slotUnderWay(state.summary.state);
-  const currentSlot = active ? (state.current?.slot ?? state.summary.currentSlot) : null;
-  const slots: MissionDecorations['slots'] = {};
-  for (const slot of state.assembly.slots) {
-    const record = state.slots[slot.name];
-    let visual = state.slotStatus[slot.name] ?? 'pending';
-    if (currentSlot === slot.name && visual !== 'done') visual = 'running';
-    if (state.attention?.slot === slot.name) visual = 'failed';
-    const marker =
-      state.pendingQuestion?.slot === slot.name
-        ? 'waiting'
-        : state.attention?.slot === slot.name
-          ? 'attention'
-          : undefined;
-    slots[slot.name] = {
-      state: visual,
-      current:
-        (state.current?.slot ?? state.summary.currentSlot) === slot.name &&
-        state.summary.state !== 'completed',
-      ...(marker && { marker }),
-      attempts: record?.attempts ?? 0,
-      skipped: record?.skipped ?? 0,
-      cost: record?.cost ?? { usd: 0, inputTokens: 0, outputTokens: 0 },
-    };
-  }
-  const loops: MissionDecorations['loops'] = {};
-  for (const slot of state.assembly.slots) {
-    if (!slot.loop) continue;
-    const firedAt = state.loopFiredAt[slot.name];
-    loops[slot.name] = {
-      iterations: state.slots[slot.name]?.loops ?? 0,
-      limit:
-        slot.loop.limit ?? state.assembly.core.defaultLoopLimit ?? DEFAULTS.core.defaultLoopLimit,
-      ...(firedAt !== undefined && { firedAt }),
-    };
-  }
-  return {
-    slots,
-    loops,
-    exitLit: state.result?.exitSlot ?? null,
-    // The centre of the clock is the Core: its own spend, not the Mission total (that is in the header).
-    core: { state: state.summary.state, cost: state.slots[CORE_SLOT_NAME]?.cost ?? ZERO_COST },
-  };
 }
 
 export function sectionsOf(state: ReadyMissionState, slot: string): TranscriptSection[] {

@@ -92,6 +92,7 @@ All everyday commands go through mise (`mise tasks` lists them):
 | `mise run dev`        | Server and web UI in watch mode                              |
 | `mise run dev:server` | Server only                                                  |
 | `mise run dev:web`    | Web UI only (proxies `/api` to the server)                   |
+| `mise run demo`       | A demo voyage Mission on a fake Engine, in a fresh temp home |
 | `mise run build`      | Build everything                                             |
 | `mise run start`      | Build, then run the server that serves the built UI          |
 | `mise run typecheck`  | Type-check every package                                     |

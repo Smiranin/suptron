@@ -6,7 +6,6 @@ import {
   initMissionPage,
   initialMissionsListState,
   liveRow,
-  missionDecorations,
   missionTitle,
   needsYouCount,
   reduceMissionPage,
@@ -17,12 +16,32 @@ import {
   type ReadyMissionState,
 } from '../../src/features/missions/model';
 import {
+  elementKey,
+  loopBadge,
+  missionPicture,
+  type SlotPiece,
+} from '../../src/features/missions/picture';
+import {
   attentionDetail,
   completedDetail,
   runningDetail,
   stoppedDetail,
   waitingDetail,
 } from '../fixtures/missions';
+
+/** The piece of the named Slot in the picture of `state`. */
+function slotPiece(state: ReadyMissionState, name: string): SlotPiece {
+  const piece = missionPicture(state).slots.find((s) => s.name === name);
+  if (!piece) throw new Error(`no Slot ${name} in the picture`);
+  return piece;
+}
+
+/** The Slots whose Exit Point is lit. */
+function litExits(state: ReadyMissionState): string[] {
+  return missionPicture(state)
+    .slots.filter((s) => s.exitPoint?.lit)
+    .map((s) => s.name);
+}
 
 function ready(state: MissionPageState): ReadyMissionState {
   if (state.status !== 'ready') throw new Error(`expected ready, got ${state.status}`);
@@ -178,17 +197,24 @@ describe('mission page reducer', () => {
       loopFrom: 'reviewer',
     });
     expect(sectionsOf(state, 'implementer')).toHaveLength(2);
-    const decorations = missionDecorations(state);
-    expect(decorations.slots.implementer).toMatchObject({
+    expect(slotPiece(state, 'implementer')).toMatchObject({
+      unit: 'implementer',
+      index: 1,
       state: 'running',
       current: true,
       attempts: 2,
     });
-    expect(decorations.slots.analyst!.state).toBe('done');
-    expect(decorations.slots.reviewer!.state).toBe('failed');
-    expect(decorations.slots.tester!.state).toBe('pending');
-    expect(decorations.loops.reviewer).toEqual({ iterations: 1, limit: 3 });
-    expect(decorations.exitLit).toBeNull();
+    expect(slotPiece(state, 'analyst').state).toBe('done');
+    expect(slotPiece(state, 'reviewer').state).toBe('failed');
+    expect(slotPiece(state, 'tester').state).toBe('pending');
+    expect(slotPiece(state, 'reviewer').loop).toEqual({
+      kind: 'loop',
+      ref: { kind: 'loop', slot: 'reviewer' },
+      to: 'implementer',
+      iterations: 1,
+      limit: 3,
+    });
+    expect(litExits(state)).toEqual([]);
   });
 
   it('the clock centre shows the cost of the Core itself, the header the Mission total', () => {
@@ -206,7 +232,7 @@ describe('mission page reducer', () => {
         12,
       ),
     );
-    expect(missionDecorations(state).core.cost).toEqual({
+    expect(missionPicture(state).core.cost).toEqual({
       usd: 0.5,
       inputTokens: 500,
       outputTokens: 50,
@@ -236,7 +262,7 @@ describe('mission page reducer', () => {
     ];
     state = play(state, [...loop(2), ...loop(3)], 12);
     let r = ready(state);
-    expect(missionDecorations(r).loops.reviewer).toMatchObject({
+    expect(slotPiece(r, 'reviewer').loop).toMatchObject({
       iterations: 3,
       limit: 3,
       firedAt: expect.any(Number),
@@ -269,7 +295,7 @@ describe('mission page reducer', () => {
     expect(r.summary.state).toBe('needs_attention');
     expect(r.attention).toMatchObject({ cause: 'loop_limit', slot: 'reviewer' });
     expect(r.panel.tab).toBe('attention');
-    expect(missionDecorations(r).slots.reviewer).toMatchObject({
+    expect(slotPiece(r, 'reviewer')).toMatchObject({
       state: 'failed',
       marker: 'attention',
     });
@@ -286,7 +312,7 @@ describe('mission page reducer', () => {
     expect(r.attention).toBeUndefined();
     expect(r.panel.tab).toBe('main');
     expect(r.sections.at(-1)?.entries[0]).toMatchObject({ kind: 'note', text: 'look again' });
-    expect(missionDecorations(r).slots.reviewer!.state).toBe('running');
+    expect(slotPiece(r, 'reviewer').state).toBe('running');
   });
 
   it('ignores events with seq <= state.seq and merges tool results into their calls', () => {
@@ -435,7 +461,7 @@ describe('mission page reducer', () => {
     let r = ready(state);
     expect(r.pendingQuestion).toMatchObject({ id: 'q1', slot: 'implementer' });
     expect(r.panel.tab).toBe('question');
-    expect(missionDecorations(r).slots.implementer!.marker).toBe('waiting');
+    expect(slotPiece(r, 'implementer').marker).toBe('waiting');
     state = play(
       state,
       [
@@ -565,10 +591,8 @@ describe('mission page reducer', () => {
     );
     expect(completed.panel).toMatchObject({ selection: { kind: 'mission' }, follow: false });
     expect(completed.result).toEqual({ report: 'done', pr: null, exitSlot: 'pr-reviewer' });
-    expect(missionDecorations(completed).exitLit).toBe('pr-reviewer');
-    expect(missionDecorations(ready(initMissionPage(completedDetail()))).exitLit).toBe(
-      'pr-reviewer',
-    );
+    expect(litExits(completed)).toEqual(['pr-reviewer']);
+    expect(litExits(ready(initMissionPage(completedDetail())))).toEqual(['pr-reviewer']);
     const stopped = ready(
       play(
         initMissionPage(waitingDetail()),
@@ -597,7 +621,7 @@ describe('mission page reducer', () => {
     );
     expect(waiting.summary).toMatchObject({ state: 'waiting_for_usage', usageResetsAt: resetsAt });
     // The Slot is still under way: the clock keeps it lit, the live row says nothing.
-    expect(missionDecorations(waiting).slots.implementer).toMatchObject({ state: 'running' });
+    expect(slotPiece(waiting, 'implementer')).toMatchObject({ state: 'running' });
     expect(liveRow(waiting, 2000)).toBeNull();
     const running = ready(play(waiting, [{ type: 'mission.state', state: 'running' }], 13));
     expect(running.summary.state).toBe('running');
@@ -680,8 +704,8 @@ describe('mission page reducer', () => {
     // The fixture's reviewer had looped once; the tester's round is new work for it.
     expect(state.slots.reviewer).toMatchObject({ loops: 0, skipped: 1 });
     expect(state.slots.tester).toMatchObject({ loops: 1 });
-    expect(missionDecorations(state).slots.reviewer).toMatchObject({ skipped: 1 });
-    expect(missionDecorations(state).slots.tester).toMatchObject({ skipped: 0 });
+    expect(slotPiece(state, 'reviewer')).toMatchObject({ skipped: 1 });
+    expect(slotPiece(state, 'tester')).toMatchObject({ skipped: 0 });
   });
 
   it('absent and connection actions', () => {
@@ -719,5 +743,156 @@ describe('mission page reducer: Resolutions of the Core', () => {
       text: 'The Core decided on one more Attempt: One entry is left.\n\nNote to the Pilot: Drop the unsourced entry.',
     });
     expect(state.slots.implementer?.resolutions).toEqual([resolution]);
+  });
+});
+
+describe('the picture of a Mission', () => {
+  /** The running fixture with a Sub-pilot on tester, a Side Slot on pr-reviewer and an Exit Point on analyst. */
+  function detailWithChildren() {
+    const detail = runningDetail();
+    const slots = detail.assembly.slots;
+    slots[0] = { ...slots[0]!, exitPoint: true };
+    slots[3] = { ...slots[3]!, subPilots: [{ unit: 'reviewer', required: true }] };
+    slots[5] = { ...slots[5]!, sideSlots: [{ name: 'docs', unit: 'analyst' }] };
+    return detail;
+  }
+
+  it('gives a Sub-pilot idle, running and done from the calls of the Slot', () => {
+    let state: MissionPageState = initMissionPage(detailWithChildren());
+    const subPilot = () => slotPiece(ready(state), 'tester').subPilots[0];
+    expect(subPilot()).toEqual({
+      kind: 'subPilot',
+      ref: { kind: 'subPilot', slot: 'tester', unit: 'reviewer' },
+      unit: 'reviewer',
+      status: 'idle',
+    });
+    const call = { slot: 'tester', attempt: 1, subPilot: 'reviewer', callId: 'c1' };
+    state = play(
+      state,
+      [
+        { type: 'slot.started', slot: 'tester', attempt: 1 },
+        { type: 'agent.sub_pilot_called', ...call },
+      ],
+      12,
+    );
+    expect(subPilot()?.status).toBe('running');
+    state = play(state, [{ type: 'agent.sub_pilot_returned', ...call, isError: false }], 14);
+    expect(subPilot()?.status).toBe('done');
+  });
+
+  it('gives a Side Slot idle until it was started, then the status of its record', () => {
+    let state: MissionPageState = initMissionPage(detailWithChildren());
+    const sideSlot = () => slotPiece(ready(state), 'pr-reviewer').sideSlots[0];
+    expect(sideSlot()).toEqual({
+      kind: 'sideSlot',
+      ref: { kind: 'sideSlot', name: 'docs' },
+      name: 'docs',
+      unit: 'analyst',
+      status: 'idle',
+    });
+    state = play(state, [{ type: 'side_slot.waiting', slot: 'docs', parent: 'pr-reviewer' }], 12);
+    expect(sideSlot()?.status).toBe('waiting');
+    state = play(
+      state,
+      [{ type: 'side_slot.started', slot: 'docs', parent: 'pr-reviewer', attempt: 1 }],
+      13,
+    );
+    expect(sideSlot()?.status).toBe('running');
+  });
+
+  it('puts an Exit Point on a flagged Slot and on the last one, and none elsewhere', () => {
+    const state = ready(initMissionPage(detailWithChildren()));
+    expect(
+      missionPicture(state)
+        .slots.filter((s) => s.exitPoint)
+        .map((s) => s.name),
+    ).toEqual(['analyst', 'pr-reviewer']);
+    expect(slotPiece(state, 'analyst').exitPoint).toEqual({
+      kind: 'exitPoint',
+      ref: { kind: 'exitPoint', slot: 'analyst' },
+      lit: false,
+    });
+    expect(slotPiece(state, 'implementer').loop).toBeUndefined();
+  });
+
+  it('lowers the power when Stopped or Waiting for usage and raises the alarm in Needs Attention', () => {
+    const running = ready(initMissionPage(runningDetail()));
+    expect(missionPicture(running)).toMatchObject({ power: 'normal', alarm: false });
+    expect(missionPicture(running).core).not.toHaveProperty('usageResetsAt');
+    expect(missionPicture(ready(initMissionPage(stoppedDetail())))).toMatchObject({
+      power: 'low',
+      alarm: false,
+    });
+    expect(missionPicture(ready(initMissionPage(attentionDetail())))).toMatchObject({
+      power: 'normal',
+      alarm: true,
+    });
+    const resetsAt = '2026-10-23T15:00:00.000Z';
+    const waiting = ready(
+      play(
+        initMissionPage(runningDetail()),
+        [{ type: 'mission.state', state: 'waiting_for_usage', resetsAt }],
+        12,
+      ),
+    );
+    expect(missionPicture(waiting)).toMatchObject({
+      power: 'low',
+      alarm: false,
+      core: { state: 'waiting_for_usage', usageResetsAt: resetsAt },
+    });
+  });
+
+  it('keeps the Slots in Assembly order and names every element by a stable key', () => {
+    const state = ready(initMissionPage(runningDetail()));
+    expect(missionPicture(state).slots.map((s) => s.name)).toEqual(
+      state.assembly.slots.map((s) => s.name),
+    );
+    expect(elementKey({ kind: 'mission' })).toBe('core');
+    expect(elementKey({ kind: 'slot', name: 'a' })).toBe('slot:a');
+    expect(elementKey({ kind: 'subPilot', slot: 'a', unit: 'b' })).toBe('subPilot:a/b');
+    expect(elementKey({ kind: 'sideSlot', name: 'd' })).toBe('sideSlot:d');
+    expect(elementKey({ kind: 'loop', slot: 'a' })).toBe('loop:a');
+    expect(elementKey({ kind: 'exitPoint', slot: 'a' })).toBe('exitPoint:a');
+    expect(loopBadge(2, 3)).toBe('Loop 2 of 3');
+    expect(loopBadge(5, 3)).toBe('Loop 3 of 3 +2');
+  });
+});
+
+describe('mission page reducer: the Core at work', () => {
+  const coreSign = (phase: 'thinking' | 'tool'): EventBody => ({
+    type: 'agent.activity',
+    slot: 'core',
+    payload: { type: 'activity', phase },
+  });
+
+  it("keeps the Core's signs of life apart from the live row until the call ends", () => {
+    const initial = initMissionPage(runningDetail(), undefined, 1000);
+    expect(missionPicture(ready(initial)).core.atWork).toBe(false);
+    let state = play(initial, [coreSign('thinking'), coreSign('thinking')], 12);
+    expect(ready(state).coreActivity).toMatchObject({
+      slot: 'core',
+      phase: 'thinking',
+      since: 1000,
+    });
+    expect(ready(state).activity).toBeUndefined();
+    // The live row still speaks of the current Slot, not of the Core.
+    expect(liveRow(ready(state), 5000)?.text).toMatch(/^Working… /);
+    expect(missionPicture(ready(state)).core.atWork).toBe(true);
+    state = play(state, [{ type: 'core.idle' }], 14);
+    expect(ready(state).coreActivity).toBeUndefined();
+    expect(missionPicture(ready(state)).core.atWork).toBe(false);
+  });
+
+  it('shows the Core at work only while the Mission runs, and forgets it when the Mission stops', () => {
+    let state = play(initMissionPage(runningDetail()), [coreSign('tool')], 12);
+    state = play(
+      state,
+      [{ type: 'mission.state', state: 'waiting_for_usage', resetsAt: '2026-10-23T15:00:00.000Z' }],
+      13,
+    );
+    expect(ready(state).coreActivity).toBeDefined();
+    expect(missionPicture(ready(state)).core.atWork).toBe(false);
+    state = play(state, [{ type: 'mission.stopped', note: 'interrupted' }], 14);
+    expect(ready(state).coreActivity).toBeUndefined();
   });
 });

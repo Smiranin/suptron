@@ -1,3 +1,4 @@
+import type { AssemblyFile } from '@suptron/runtime/browser';
 import { cn } from '@suptron/ui/lib/utils';
 import { AlertTriangle, MessageCircleQuestion } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
@@ -10,21 +11,20 @@ import {
   type AttachedPlate,
   type Viewport,
 } from '../../clock';
-import { loopBadge, missionDecorations, type MissionDecorations } from '../model/selectors';
-import type { ReadyMissionState } from '../model/types';
+import type { PanelSelection } from '../model/types';
+import {
+  loopBadge,
+  type CorePiece,
+  type LoopPiece,
+  type MissionPicture,
+  type SlotPiece,
+} from '../picture';
 
 const HIGHLIGHT_MS = 1500;
 
-export function MissionSlotCard({
-  name,
-  unit,
-  decoration,
-}: {
-  name: string;
-  unit: string;
-  decoration: MissionDecorations['slots'][string];
-}) {
-  const { state, current, marker, attempts, skipped, cost } = decoration;
+/** The content of a Slot's card on the clock: name, Unit, state, counters and cost. */
+export function MissionSlotCard({ slot }: { slot: SlotPiece }) {
+  const { name, unit, state, current, marker, attempts, skipped, cost } = slot;
   return (
     <div
       className="flex size-full flex-col justify-between"
@@ -77,7 +77,8 @@ export function MissionSlotCard({
   );
 }
 
-export function MissionCoreContent({ core }: { core: MissionDecorations['core'] }) {
+/** The content of the clock's centre: the Core with the state of the Mission and its own cost. */
+export function MissionCoreContent({ core }: { core: CorePiece }) {
   return (
     <div className="flex flex-col items-center gap-1 px-2">
       <span className="text-muted-foreground text-[10px] font-bold tracking-wider uppercase">
@@ -92,8 +93,8 @@ export function MissionCoreContent({ core }: { core: MissionDecorations['core'] 
 }
 
 /** Which Loops fired within the last moment, so their chords light up once; re-rendered when the highlight ends. */
-function useRecentlyFired(loops: MissionDecorations['loops']): Set<string> {
-  const latest = Math.max(0, ...Object.values(loops).map((l) => l.firedAt ?? 0));
+function useRecentlyFired(loops: readonly LoopPiece[]): Set<string> {
+  const latest = Math.max(0, ...loops.map((l) => l.firedAt ?? 0));
   // `now` lags behind a fresh `firedAt` until the timer catches up, which is exactly the highlight window.
   const [now, setNow] = useState(0);
   useEffect(() => {
@@ -102,51 +103,56 @@ function useRecentlyFired(loops: MissionDecorations['loops']): Set<string> {
     return () => clearTimeout(timer);
   }, [latest]);
   return new Set(
-    Object.entries(loops)
-      .filter(([, l]) => l.firedAt !== undefined && now - l.firedAt < HIGHLIGHT_MS)
-      .map(([name]) => name),
+    loops
+      .filter((l) => l.firedAt !== undefined && now - l.firedAt < HIGHLIGHT_MS)
+      .map((l) => l.ref.slot),
   );
 }
 
-/**
- * A Side Slot's status as its record says (absent until it was started); a Sub-pilot's from the
- * Slot's last Attempt: done once it returned, running while it was called and has not.
- */
-function plateStatus(state: ReadyMissionState, plate: AttachedPlate): string | undefined {
-  if (plate.kind === 'sideSlot') return state.sideSlots.find((s) => s.name === plate.name)?.status;
-  const activity = state.slots[plate.slot]?.subPilots?.find((s) => s.unit === plate.name);
-  if (!activity || activity.calls === 0) return undefined;
-  return activity.returns > 0 ? 'done' : 'running';
+/** The status a plate shows: none for a Sub-pilot or Side Slot that was not started yet. */
+function plateStatus(slot: SlotPiece | undefined, plate: AttachedPlate): string | undefined {
+  const status =
+    plate.kind === 'sideSlot'
+      ? slot?.sideSlots.find((s) => s.name === plate.name)?.status
+      : slot?.subPilots.find((s) => s.unit === plate.name)?.status;
+  return status === 'idle' ? undefined : status;
+}
+
+/** Whether a plate is the element the page has selected. */
+function plateSelected(selection: PanelSelection, plate: AttachedPlate): boolean {
+  return plate.kind === 'sideSlot'
+    ? selection.kind === 'sideSlot' && selection.name === plate.name
+    : selection.kind === 'subPilot' &&
+        selection.slot === plate.slot &&
+        selection.unit === plate.name;
 }
 
 export interface MissionClockProps {
-  state: ReadyMissionState;
-  onSelectSlot(name: string): void;
-  onSelectMission(): void;
-  onSelectSideSlot(name: string): void;
-  onSelectSubPilot(slot: string, unit: string): void;
+  /** Only for `layoutClock`: the geometry of the clock is computed from the Assembly. */
+  assembly: AssemblyFile;
+  picture: MissionPicture;
+  selection: PanelSelection;
+  onSelect(selection: PanelSelection): void;
   /** Tests pass a fixed viewport; the page measures with ResizeObserver. */
   viewport?: Viewport;
 }
 
-/** The read-only clock of a Mission: the editor's layout with per-Slot state, counters and cost (FR-15 to FR-18). */
+/** The read-only clock of a Mission: draws the picture of the Mission with the editor's layout. */
 export function MissionClock({
-  state,
-  onSelectSlot,
-  onSelectMission,
-  onSelectSideSlot,
-  onSelectSubPilot,
+  assembly,
+  picture,
+  selection,
+  onSelect,
   viewport: fixed,
 }: MissionClockProps) {
-  const layout = useMemo(() => layoutClock(state.assembly), [state.assembly]);
-  const decorations = useMemo(() => missionDecorations(state), [state]);
-  const fired = useRecentlyFired(decorations.loops);
-  const { ref, viewport } = useViewportSize(fixed);
-  const units = useMemo(
-    () => new Map(state.assembly.slots.map((s) => [s.name, s.unit])),
-    [state.assembly],
+  const layout = useMemo(() => layoutClock(assembly), [assembly]);
+  const slots = useMemo(() => new Map(picture.slots.map((s) => [s.name, s])), [picture.slots]);
+  const loops = useMemo(
+    () => picture.slots.flatMap((s) => (s.loop ? [s.loop] : [])),
+    [picture.slots],
   );
-  const selection = state.panel.selection;
+  const fired = useRecentlyFired(loops);
+  const { ref, viewport } = useViewportSize(fixed);
   const selected =
     selection.kind === 'slot' ? selection.name : selection.kind === 'mission' ? 'core' : null;
   return (
@@ -159,48 +165,45 @@ export function MissionClock({
         layout={layout}
         viewport={viewport}
         selected={selected}
-        core={<MissionCoreContent core={decorations.core} />}
-        card={(slot) => (
-          <MissionSlotCard
-            name={slot.name}
-            unit={units.get(slot.name) ?? slot.name}
-            decoration={decorations.slots[slot.name]!}
-          />
-        )}
+        core={<MissionCoreContent core={picture.core} />}
+        card={(position) => {
+          const slot = slots.get(position.name);
+          return slot && <MissionSlotCard slot={slot} />;
+        }}
         cardProps={(name) => ({
-          'data-state': decorations.slots[name]?.state,
-          'data-current': decorations.slots[name]?.current ? 'true' : undefined,
+          'data-state': slots.get(name)?.state,
+          'data-current': slots.get(name)?.current ? 'true' : undefined,
           className: 'cursor-pointer',
           role: 'button',
           'aria-label': `Slot ${name}`,
         })}
         loops={Object.fromEntries(
-          Object.entries(decorations.loops).map(([from, loop]) => [
-            from,
-            { badge: loopBadge(loop.iterations, loop.limit), highlighted: fired.has(from) },
+          loops.map((loop) => [
+            loop.ref.slot,
+            {
+              badge: loopBadge(loop.iterations, loop.limit),
+              highlighted: fired.has(loop.ref.slot),
+            },
           ]),
         )}
         exits={Object.fromEntries(
           layout.exits.map((exit) => [
             exit.slot,
-            { label: 'exit', highlighted: decorations.exitLit === exit.slot },
+            { label: 'exit', highlighted: slots.get(exit.slot)?.exitPoint?.lit === true },
           ]),
         )}
-        onSlotClick={(name) => onSelectSlot(name)}
-        onCoreClick={onSelectMission}
+        onSlotClick={(name) => onSelect({ kind: 'slot', name })}
+        onCoreClick={() => onSelect({ kind: 'mission' })}
         plate={(plate) => ({
-          status: plateStatus(state, plate),
-          selected:
-            plate.kind === 'sideSlot'
-              ? selection.kind === 'sideSlot' && selection.name === plate.name
-              : selection.kind === 'subPilot' &&
-                selection.slot === plate.slot &&
-                selection.unit === plate.name,
+          status: plateStatus(slots.get(plate.slot), plate),
+          selected: plateSelected(selection, plate),
         })}
         onPlateClick={(plate) =>
-          plate.kind === 'sideSlot'
-            ? onSelectSideSlot(plate.name)
-            : onSelectSubPilot(plate.slot, plate.name)
+          onSelect(
+            plate.kind === 'sideSlot'
+              ? { kind: 'sideSlot', name: plate.name }
+              : { kind: 'subPilot', slot: plate.slot, unit: plate.name },
+          )
         }
         animateCards={false}
       />

@@ -1,7 +1,14 @@
 import '@testing-library/jest-dom/vitest';
 import { cleanup } from '@testing-library/react';
-import { afterAll, afterEach, beforeAll } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach } from 'vitest';
 import { mswServer } from './fake-server';
+
+// jsdom cannot draw 3D: every Mission page in the tests shows the clock, chosen the way the
+// page's switch remembers it. Written before the application's modules read it, and again before
+// each test because the storage is cleared after each one.
+const PICTURE_CHOICE_KEY = 'suptron-mission-picture';
+window.localStorage.setItem(PICTURE_CHOICE_KEY, 'clock');
+beforeEach(() => window.localStorage.setItem(PICTURE_CHOICE_KEY, 'clock'));
 
 beforeAll(() => mswServer.listen({ onUnhandledFrame: 'error' }));
 afterEach(() => {

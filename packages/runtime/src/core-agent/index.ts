@@ -165,6 +165,8 @@ export interface EngineCoreAgentOptions {
   resumeSessionId?: string;
   onCost?: (cost: Cost) => void;
   onEvent?: (event: AgentEvent) => void;
+  /** A call of the Core has ended, by a result or by an error: once per call, however many tries it took. */
+  onCallEnd?: () => void;
   /**
    * The Engine refused a call by the usage limit: resolves when the call may be made again,
    * rejects when the Mission is stopped meanwhile. Without it the refusal fails the call.
@@ -243,7 +245,24 @@ export class EngineCoreAgent implements CoreAgent {
     await this.current?.interrupt();
   }
 
+  /** One typed call of the Core; tells `onCallEnd` when it is over, whatever its outcome. */
   private async call<T>(name: string, input: unknown, schema: z.ZodType<T>): Promise<T> {
+    try {
+      return await this.callUntilAnswered(name, input, schema);
+    } finally {
+      this.options.onCallEnd?.();
+    }
+  }
+
+  /**
+   * Tries the call until it has an answer: again after a usage limit resets, again in a fresh
+   * session when the old one is lost; the answer is checked against the schema.
+   */
+  private async callUntilAnswered<T>(
+    name: string,
+    input: unknown,
+    schema: z.ZodType<T>,
+  ): Promise<T> {
     let result: Extract<AgentEvent, { type: 'result' }>;
     for (;;) {
       const outcome = await this.tryCall(name, input, schema);

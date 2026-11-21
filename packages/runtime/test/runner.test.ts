@@ -26,6 +26,7 @@ import {
   FakeHost,
   coreCallInput,
   coreCallName,
+  defaultCoreScript,
   folderProfile,
   handedOver,
   noneProfile,
@@ -437,6 +438,27 @@ describe('Runner scenarios', () => {
       { type: 'activity', phase: 'tool', detail: 'Read' },
     ]);
     expect(activity.every((e) => e.type === 'agent.activity' && e.slot === 'a')).toBe(true);
+  });
+
+  it("forwards the Core's signs of life as agent.activity of the slot core and ends each call with core.idle", async () => {
+    h = await harness([unit('a', [PASS])], [linear([{ name: 'a', unit: 'a' }])]);
+    h.engine.script('core', 'core', (call) => [
+      { activity: { phase: 'thinking' } },
+      { text: 'The Core thinks aloud.' },
+      ...defaultCoreScript(call),
+    ]);
+    const id = await h.start();
+    await h.waitFor((es) => es.some((e) => e.type === 'mission.completed'));
+    const mission = h.events.filter((e) => e.missionId === id);
+    const coreActivity = mission.filter((e) => e.type === 'agent.activity' && e.slot === 'core');
+    const calls = h.engine.callsFor('core', 'core').length;
+    expect(calls).toBeGreaterThan(0);
+    expect(coreActivity).toHaveLength(calls);
+    expect(coreActivity[0]).toMatchObject({ payload: { type: 'activity', phase: 'thinking' } });
+    expect(mission.filter((e) => e.type === 'core.idle')).toHaveLength(calls);
+    // The Core's text is not reported: it has no transcript of its own.
+    expect(mission.some((e) => e.type === 'agent.text' && e.slot === 'core')).toBe(false);
+    expect(mission.at(-1)?.type).toBe('mission.completed');
   });
 
   it('leaves early through an Exit Point whose Exit Condition holds', async () => {

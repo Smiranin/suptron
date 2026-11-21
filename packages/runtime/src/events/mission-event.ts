@@ -77,6 +77,8 @@ export type MissionEvent =
   | { type: 'slot.skipped'; missionId: string; seq: number; slot: string; loopFrom: string }
   /** The Core took a Resolution on this Slot instead of sending the Mission to Needs Attention. */
   | { type: 'core.resolved'; missionId: string; seq: number; slot: string; resolution: Resolution }
+  /** A call of the Core has ended, by a result or by an error. Ephemeral, like `agent.activity`. */
+  | { type: 'core.idle'; missionId: string; seq: number }
   | {
       type: 'agent.text';
       missionId: string;
@@ -106,7 +108,8 @@ export type MissionEvent =
       payload: Extract<AgentPayload, { type: 'error' }>;
     }
   /**
-   * A sign of life between two transcript entries (the model thinks, writes or runs a tool).
+   * A sign of life between two transcript entries (the model thinks, writes or runs a tool), of a
+   * Pilot or, with the slot `core`, of the Core while it composes a prompt or judges.
    * Ephemeral: not a transcript entry, not kept by the server's stores, not replayed.
    */
   | {
@@ -240,4 +243,15 @@ export const GLOBAL_STREAM_EVENT_TYPES: ReadonlySet<MissionEventType> = new Set<
 
 export function isGlobalStreamEvent(event: MissionEvent): boolean {
   return GLOBAL_STREAM_EVENT_TYPES.has(event.type);
+}
+
+/** Event types that are sent live and never stored or replayed: they mean nothing after the fact. */
+const EPHEMERAL_EVENT_TYPES: ReadonlySet<MissionEventType> = new Set<MissionEventType>([
+  'agent.activity',
+  'core.idle',
+]);
+
+/** True for an event that is sent live and never stored or replayed. */
+export function isEphemeralEvent(event: Pick<MissionEvent, 'type'>): boolean {
+  return EPHEMERAL_EVENT_TYPES.has(event.type);
 }

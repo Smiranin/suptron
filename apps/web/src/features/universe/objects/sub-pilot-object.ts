@@ -1,9 +1,9 @@
 import { Group, Object3D, type Vector3 } from 'three';
 import type { SubPilotPiece } from '../../missions/picture';
+import type { LoadedAssets } from '../scene/assets';
 import { sameLook, type Look } from '../scene/compare';
-import { MODELS } from '../world/models';
 import { WORLD } from '../world/world';
-import { markRing, matteMaterial, trackedMesh } from './materials';
+import { markRing, paintedMesh, setGlow } from './materials';
 import { Resources } from './resources';
 import { powerFactor, SmoothColor, SmoothNumber, wave } from './smooth';
 import type { Ambience, Marks, ViewObject } from './view-object';
@@ -20,15 +20,15 @@ export function createSubPilotObject(
   piece: SubPilotPiece,
   place: Vector3,
   phase: number,
+  assets: LoadedAssets,
 ): ViewObject<SubPilotPiece> {
   const resources = new Resources();
   const root = new Group();
   root.position.copy(place);
-  const bodyMaterial = matteMaterial(resources, WORLD.palette.hull);
-  const body = trackedMesh(resources, MODELS.subPilot(), bodyMaterial);
+  const body = paintedMesh(resources, assets.model('subPilot'));
   const selectedRing = markRing(resources, WORLD.sizes.smallSelectedRing, WORLD.palette.selected);
   const anchor = new Object3D();
-  anchor.position.y = WORLD.sizes.subPilot.radius * 2;
+  anchor.position.y = WORLD.sizes.subPilot.span;
   root.add(body, selectedRing, anchor);
 
   const color = new SmoothColor(WORLD.palette.idle);
@@ -64,8 +64,8 @@ export function createSubPilotObject(
       body.position.y = hover.amplitude * (wave(now, hover.periodSeconds, phase) - 0.5);
       // A called drone turns slowly, so work reads even where its light is small.
       if (running) body.rotation.y += subPilotSpin * deltaSeconds;
-      bodyMaterial.emissive.copy(color.step(deltaSeconds));
-      bodyMaterial.emissiveIntensity = glow.step(deltaSeconds);
+      const shade = color.step(deltaSeconds);
+      setGlow(body, glow.step(deltaSeconds), shade);
       selectedRing.material.opacity = ring.step(deltaSeconds);
     },
     dispose() {

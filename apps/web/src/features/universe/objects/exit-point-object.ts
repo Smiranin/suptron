@@ -1,9 +1,9 @@
 import { Group, Object3D, type Vector3 } from 'three';
 import type { ExitPointPiece } from '../../missions/picture';
+import type { LoadedAssets } from '../scene/assets';
 import { sameLook, type Look } from '../scene/compare';
-import { MODELS } from '../world/models';
 import { WORLD } from '../world/world';
-import { matteMaterial, trackedMesh } from './materials';
+import { paintedMesh, setGlow } from './materials';
 import { Resources } from './resources';
 import { powerFactor, SmoothColor, SmoothNumber } from './smooth';
 import type { Ambience, Marks, ViewObject } from './view-object';
@@ -13,16 +13,20 @@ export function createExitPointObject(
   piece: ExitPointPiece,
   place: Vector3,
   outward: Vector3,
+  assets: LoadedAssets,
 ): ViewObject<ExitPointPiece> {
   const resources = new Resources();
   const root = new Group();
   root.position.copy(place);
   // The gate's opening faces along `outward`: the way out of the ring.
   root.rotation.y = Math.atan2(outward.x, outward.z);
-  const material = matteMaterial(resources, WORLD.palette.hullDark, WORLD.palette.exit);
-  const gate = trackedMesh(resources, MODELS.exitGate(), material);
+  const gate = paintedMesh(resources, assets.model('exitGate'), {
+    kind: 'colour',
+    colour: WORLD.palette.exit,
+  });
   const anchor = new Object3D();
-  anchor.position.y = WORLD.sizes.exitGate.radius + WORLD.sizes.exitGate.tube;
+  // The gate floats centred on its place, so its top is half its height up.
+  anchor.position.y = WORLD.sizes.exitGate.height / 2;
   root.add(gate, anchor);
 
   const color = new SmoothColor(WORLD.palette.exit);
@@ -44,8 +48,8 @@ export function createExitPointObject(
       );
     },
     frame(_now, deltaSeconds) {
-      material.emissive.copy(color.step(deltaSeconds));
-      material.emissiveIntensity = glow.step(deltaSeconds);
+      const shade = color.step(deltaSeconds);
+      setGlow(gate, glow.step(deltaSeconds), shade);
     },
     dispose() {
       resources.dispose();

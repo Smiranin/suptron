@@ -1,4 +1,4 @@
-import { SHIP_MODELS } from './models';
+import { SHIP_COLOURS, SHIP_FILES, type ShipColour } from './models';
 
 const FNV_OFFSET_BASIS = 0x811c9dc5;
 const FNV_PRIME = 0x01000193;
@@ -13,10 +13,21 @@ function fnv1a(text: string): number {
   return hash >>> 0;
 }
 
+/** The ship a Unit flies: which model, painted in which colour. */
+export interface ShipChoice {
+  /** The index of the model in `SHIP_FILES`. */
+  model: number;
+  colour: ShipColour;
+}
+
 /**
- * The index of the ship a Unit flies, picked by the Unit's name: the same Unit has the same ship
- * in every Mission and after every reload.
+ * The ship a Unit flies, picked by the Unit's name: the same Unit has the same ship in the same
+ * colour in every Mission and after every reload. The model and the colour come from different
+ * parts of one hash, so they do not follow each other.
  */
-export function shipFor(unitName: string): number {
-  return fnv1a(unitName) % SHIP_MODELS.length;
+export function shipFor(unitName: string): ShipChoice {
+  const hash = fnv1a(unitName);
+  const model = hash % SHIP_FILES.length;
+  const colour = SHIP_COLOURS[Math.floor(hash / SHIP_FILES.length) % SHIP_COLOURS.length]!;
+  return { model, colour };
 }

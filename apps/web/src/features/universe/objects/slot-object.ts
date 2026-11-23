@@ -1,4 +1,4 @@
-import { Group, Object3D, Quaternion, Vector3 } from 'three';
+import { Group, Object3D } from 'three';
 import type {
   ExitPointPiece,
   LoopPiece,
@@ -7,14 +7,21 @@ import type {
   SubPilotPiece,
 } from '../../missions/picture';
 import type { SlotVisualState } from '../../missions/model/types';
+import type { LoadedAssets } from '../scene/assets';
 import { sameLook, type Look } from '../scene/compare';
 import type { LoopPlace, SlotPlace } from '../scene/layout';
-import { MODELS, SHIP_MODELS } from '../world/models';
-import { shipFor } from '../world/ships';
+import { MODELS } from '../world/models';
 import { WORLD } from '../world/world';
 import { createExitPointObject } from './exit-point-object';
 import { createLoopObject } from './loop-object';
-import { lightMaterial, markRing, matteMaterial, trackedMesh } from './materials';
+import {
+  lightMaterial,
+  markRing,
+  matteMaterial,
+  paintedMesh,
+  setGlow,
+  trackedMesh,
+} from './materials';
 import { Resources } from './resources';
 import { powerFactor, SmoothColor, SmoothNumber, wave } from './smooth';
 import { createSideSlotObject } from './side-slot-object';
@@ -47,23 +54,23 @@ export interface SlotObject extends ViewObject<SlotPiece> {
   readonly exitPoint: ViewObject<ExitPointPiece> | undefined;
 }
 
-/** Where the beam from a running ship ends: high on the monolith. */
-function beamTarget(): Vector3 {
-  return new Vector3(
-    0,
-    WORLD.sizes.plinth.height + WORLD.sizes.monolith.height * WORLD.layout.beamOnMonolith,
-    0,
-  );
-}
+/** The light of the route into a dock for each state of its Slot. */
+const ROUTE_LIGHT: Record<SlotVisualState, { color: number; glow: number }> = {
+  pending: { color: WORLD.palette.route, glow: WORLD.glow.route.ahead },
+  running: { color: WORLD.palette.work, glow: WORLD.glow.route.reached },
+  done: { color: WORLD.palette.done, glow: WORLD.glow.route.reached },
+  failed: { color: WORLD.palette.failed, glow: WORLD.glow.route.reached },
+};
 
 /**
  * A dock with a ship: the ship is the one its Unit flies, the dock's lights tell the Slot's state,
- * a beam ties a running ship to the Core, a beacon calls the Commander.
+ * a beam on the ground ties a running dock to the Core, a beacon calls the Commander.
  */
 export function createSlotObject(
   piece: SlotPiece,
   place: SlotPlace,
   loopPlace: LoopPlace | undefined,
+  assets: LoadedAssets,
 ): SlotObject {
   const resources = new Resources();
   const root = new Group();
@@ -71,13 +78,11 @@ export function createSlotObject(
   body.position.copy(place.dock);
   root.add(body);
 
-  const dock = trackedMesh(resources, MODELS.dock(), matteMaterial(resources, WORLD.palette.dock));
+  const dock = paintedMesh(resources, assets.model('dock'));
   const lightsMaterial = matteMaterial(resources, WORLD.palette.dockEdge, WORLD.palette.idle);
   const dockLights = trackedMesh(resources, MODELS.dockLights(), lightsMaterial);
-  const shipMaterial = matteMaterial(resources, WORLD.palette.hull, WORLD.palette.work);
-  const shipModel = SHIP_MODELS[shipFor(piece.unit)]!;
-  const ship = trackedMesh(resources, shipModel(), shipMaterial);
-  ship.scale.setScalar(WORLD.sizes.ship);
+  // At work the ship only grows lighter, in its own colours; its dock lights up in the state's.
+  const ship = paintedMesh(resources, assets.ship(piece.unit), { kind: 'paint' });
   // The ship's nose points the way the Mission goes round the ring.
   ship.rotation.y = Math.atan2(place.along.x, place.along.z);
   const markHeight = WORLD.sizes.dock.height + WORLD.sizes.markLift;
@@ -92,16 +97,24 @@ export function createSlotObject(
   anchor.position.y = WORLD.layout.slotLabelHeight;
   body.add(dock, dockLights, ship, currentRing, selectedRing, beacon, anchor);
 
+  // The beam lies on the ground from the dock to the Core; both platforms cover its ends.
   const beamMaterial = lightMaterial(resources, WORLD.palette.work);
-  const beam = trackedMesh(resources, MODELS.beam(), beamMaterial);
-  const beamStart = place.dock.clone().setY(WORLD.layout.shipHeight);
-  const beamLine = beamTarget().sub(beamStart);
-  beam.position.copy(beamStart).addScaledVector(beamLine, 0.5);
-  beam.quaternion.copy(
-    new Quaternion().setFromUnitVectors(new Vector3(0, 1, 0), beamLine.clone().normalize()),
-  );
-  beam.scale.y = beamLine.length();
+  const beam = trackedMesh(resources, MODELS.beam(place.dock), beamMaterial);
+  beam.position.y = WORLD.sizes.markLift;
+  // Drawn after the ground it lies on, so it is never hidden in it.
+  beam.renderOrder = 1;
   root.add(beam);
+
+  // The route from the Slot before lights up once the Mission reaches this dock.
+  const routeMaterial = lightMaterial(resources, WORLD.palette.route);
+  if (place.route) {
+    const { radius, from, to } = place.route;
+    const route = trackedMesh(resources, MODELS.routeArc(radius, from, to), routeMaterial);
+    route.position.y = WORLD.sizes.markLift;
+    // Drawn after the ground it lies on, so it is never hidden in it.
+    route.renderOrder = 1;
+    root.add(route);
+  }
 
   const subPilots = new Map(
     piece.subPilots.map((sub, i) => [
@@ -110,6 +123,7 @@ export function createSlotObject(
         sub,
         place.subPilots[i]!,
         (piece.index + i + 1) * WORLD.motion.hoverPhaseStep,
+        assets,
       ),
     ]),
   );
@@ -119,7 +133,7 @@ export function createSlotObject(
   const loop = piece.loop && loopPlace ? createLoopObject(piece.loop, loopPlace) : undefined;
   const exitPoint =
     piece.exitPoint && place.exitPoint
-      ? createExitPointObject(piece.exitPoint, place.exitPoint, place.outward)
+      ? createExitPointObject(piece.exitPoint, place.exitPoint, place.outward, assets)
       : undefined;
   const children = [
     ...subPilots.values(),
@@ -131,7 +145,10 @@ export function createSlotObject(
 
   const lightColor = new SmoothColor(WORLD.palette.idle);
   const lightGlow = new SmoothNumber(0);
-  const engines = new SmoothNumber(0);
+  const dockGlow = new SmoothNumber(0);
+  const shipGlow = new SmoothNumber(0);
+  const routeColor = new SmoothColor(WORLD.palette.route);
+  const routeLevel = new SmoothNumber(0);
   const beamLevel = new SmoothNumber(0);
   const current = new SmoothNumber(0);
   const selected = new SmoothNumber(0);
@@ -166,7 +183,14 @@ export function createSlotObject(
       const running = next.state === 'running';
       lightColor.set(light.color);
       lightGlow.set((light.glow + hovered) * power);
-      engines.set(((running ? WORLD.glow.on : WORLD.glow.off) + hovered) * power);
+      shipGlow.set(running ? WORLD.glow.shipRunning * power : 0);
+      const route = ROUTE_LIGHT[next.state];
+      routeColor.set(route.color);
+      routeLevel.set(route.glow * power);
+      dockGlow.set(
+        ((running ? WORLD.glow.dockRunning : 0) + (marks.hovered ? WORLD.glow.dockHovered : 0)) *
+          power,
+      );
       beamLevel.set(running ? WORLD.glow.beam * power : 0);
       current.set(next.current ? WORLD.glow.mark.current : 0);
       selected.set(
@@ -181,10 +205,14 @@ export function createSlotObject(
         WORLD.layout.shipHeight +
         hover.amplitude * (wave(now, hover.periodSeconds, hoverPhase) - 0.5);
       const breath = 1 - breathe.depth * wave(now, breathe.periodSeconds, hoverPhase);
-      lightsMaterial.emissive.copy(lightColor.step(deltaSeconds));
+      const shade = lightColor.step(deltaSeconds);
+      lightsMaterial.emissive.copy(shade);
+      setGlow(dock, dockGlow.step(deltaSeconds), shade);
+      setGlow(ship, shipGlow.step(deltaSeconds));
       lightsMaterial.emissiveIntensity = lightGlow.step(deltaSeconds) * breath;
-      shipMaterial.emissiveIntensity = engines.step(deltaSeconds);
       beamMaterial.opacity = beamLevel.step(deltaSeconds) * breath;
+      routeMaterial.color.copy(routeColor.step(deltaSeconds));
+      routeMaterial.opacity = routeLevel.step(deltaSeconds) * breath;
       currentRing.material.opacity = current.step(deltaSeconds);
       selectedRing.material.opacity = selected.step(deltaSeconds);
       beaconMaterial.opacity =

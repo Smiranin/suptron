@@ -18,9 +18,11 @@ export interface SlotPlace {
   sideSlots: Vector3[];
   /** The middle of the gate of the Exit Point, when the Slot has one. */
   exitPoint?: Vector3;
+  /** The route into the dock along the ring, from the Slot before; the first Slot has none. */
+  route?: { radius: number; from: number; to: number };
 }
 
-/** The arc of a Loop: from its Slot's dock to its target's, high over the inside of the ring. */
+/** The curve of a Loop on the ground: from its Slot's dock to its target's, inside the ring. */
 export interface LoopPlace {
   from: Vector3;
   control1: Vector3;
@@ -67,6 +69,10 @@ function placeSlot(slot: SlotPiece, slotCount: number, radius: number): SlotPlac
   const outward = new Vector3(Math.sin(angle), 0, -Math.cos(angle));
   const along = new Vector3(Math.cos(angle), 0, Math.sin(angle));
   const dock = outward.clone().multiplyScalar(radius);
+  // The route stops short of both docks, so it never runs under a platform.
+  const margin = (WORLD.sizes.dock.radius + WORLD.sizes.route.gap) / radius;
+  const from = slotAngle(slot.index - 1, slotCount) + margin;
+  const to = angle - margin;
   const subPilots = slot.subPilots.map((_, i) =>
     offset(
       dock,
@@ -95,25 +101,15 @@ function placeSlot(slot: SlotPiece, slotCount: number, radius: number): SlotPlac
     ...(slot.exitPoint && {
       exitPoint: offset(dock, outward, layout.exitOutward, along, 0).setY(layout.exitHeight),
     }),
+    ...(slot.index > 0 && to > from && { route: { radius, from, to } }),
   };
 }
 
-/** The arc of a Loop from one dock back to another, rising over the inside of the ring. */
+/** The curve of a Loop on the ground from one dock back to another, bowing in towards the Core. */
 function placeLoop(from: Vector3, to: Vector3): LoopPlace {
-  const { loopRise, loopInward, shipHeight } = WORLD.layout;
-  const rise = shipHeight + from.distanceTo(to) * loopRise;
-  // The control points are pulled towards the Core, so the arc runs inside the ring.
-  const lift = (point: Vector3) =>
-    point
-      .clone()
-      .multiplyScalar(1 - loopInward)
-      .setY(rise);
-  return {
-    from: from.clone().setY(shipHeight),
-    control1: lift(from),
-    control2: lift(to),
-    to: to.clone().setY(shipHeight),
-  };
+  // The control points are pulled towards the Core, so the curve runs inside the ring.
+  const pull = (point: Vector3) => point.clone().multiplyScalar(1 - WORLD.layout.loopInward);
+  return { from: from.clone(), control1: pull(from), control2: pull(to), to: to.clone() };
 }
 
 /**

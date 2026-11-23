@@ -100,12 +100,15 @@ export function createUniverseScene(options: UniverseSceneOptions): UniverseScen
   const ambience = createAmbienceObject();
   scene.fog = ambience.fog;
   scene.add(ambience.root);
-  const core = createCoreObject();
+  const core = createCoreObject(options.assets);
   const slots = new Map<string, SlotObject>();
   for (const piece of options.picture.slots) {
     const place = layout.slots.get(piece.name);
     if (!place) continue;
-    slots.set(piece.name, createSlotObject(piece, place, layout.loops.get(piece.name)));
+    slots.set(
+      piece.name,
+      createSlotObject(piece, place, layout.loops.get(piece.name), options.assets),
+    );
   }
   /** Every view object by the key of its element: what labels and the pointer are matched by. */
   const objects = new Map<string, PlacedObject>();

@@ -14,7 +14,12 @@ export const WORLD = {
     hullDark: 0x262b32,
     dock: 0x2e333a,
     dockEdge: 0x4a525c,
-    monolith: 0x0b0c0f,
+    /** The body of the Core's crystal, under the light it gives off. */
+    crystal: 0x1b2330,
+    /** The route between docks that the Mission has not run yet. */
+    route: 0x8a96a6,
+    /** The tint over a model's own picture: white leaves the picture as it was painted. */
+    paint: 0xffffff,
     /** The calm light of things at work: running engines, the beam, the Core's glow. */
     work: 0x9fc3e6,
     /** The light of a dock whose Slot has not run. */
@@ -54,14 +59,12 @@ export const WORLD = {
 
   layout: {
     /** The radius of the ring of docks, at least, and per Slot. */
-    minRadius: 14,
-    radiusPerSlot: 3.2,
+    minRadius: 9,
+    radiusPerSlot: 1.5,
     /** How high a ship hovers over its dock. */
-    shipHeight: 1.4,
+    shipHeight: 1.8,
     /** How high a Slot's label stands over its dock. */
     slotLabelHeight: 2.6,
-    /** Where the beam of a running ship meets the monolith, as a share of its height. */
-    beamOnMonolith: 0.6,
     /** Sub-pilots: outward from the ship, on the side the ring comes from. */
     subPilotOutward: 2.6,
     subPilotAside: 1.6,
@@ -74,8 +77,6 @@ export const WORLD = {
     /** The gate of an Exit Point, behind the dock. */
     exitOutward: 4.4,
     exitHeight: 1.6,
-    /** How high a Loop's arc rises over the ring, as a share of the distance it spans. */
-    loopRise: 0.35,
     /** How far a Loop's arc is drawn towards the Core, as a share of the radius. */
     loopInward: 0.45,
     /** Room kept around everything when the whole Assembly is fitted into view. */
@@ -83,27 +84,44 @@ export const WORLD = {
   },
 
   sizes: {
-    monolith: { width: 2.4, height: 9, depth: 0.9 },
-    /** The plinth under the monolith. */
+    /** The column the Core's crystal floats over: its width and its height. */
+    coreColumn: { span: 1.1, height: 3 },
+    /** The Core's crystal: half its width, how much taller than wide it is, its gap over the column. */
+    crystal: { radius: 0.9, stretch: 1.5, lift: 0.5 },
+    /** The rings of light around the crystal, each tilted by its own angle in radians. */
+    coreRings: [
+      { radius: 1.8, tilt: 0.35 },
+      { radius: 2.3, tilt: -0.6 },
+    ],
+    coreRingTube: 0.035,
+    /** The plinth under the Core. */
     plinth: { radius: 3.2, height: 0.3 },
-    dock: { radius: 1.7, height: 0.35 },
+    /** The dock's platform model is stretched to this height; it is flatter by itself. */
+    dock: { radius: 1.7, height: 0.2 },
     /** The ring of lights around a dock's edge. */
     dockLights: { radius: 1.75, tube: 0.07 },
-    ship: 1,
+    /** The longest side of a ship across the ground: its length or its wingspan. */
+    ship: { span: 6.4 },
     currentRing: { inner: 2.05, outer: 2.3 },
     selectedRing: { inner: 2.45, outer: 2.6 },
     coreSelectedRing: { inner: 3.7, outer: 3.9 },
     beacon: { radius: 0.28, height: 3.2 },
-    beam: { radius: 0.05 },
-    subPilot: { radius: 0.32 },
+    /** The band on the ground from a running dock to the Core. */
+    beam: { width: 0.3 },
+    /** The longest side of a Sub-pilot's drone across the ground. */
+    subPilot: { span: 0.7 },
     sideSlotPad: { radius: 0.75, height: 0.18 },
     sideSlotShuttle: { radius: 0.32, height: 0.9 },
     smallSelectedRing: { inner: 0.55, outer: 0.65 },
     padSelectedRing: { inner: 0.9, outer: 1.02 },
-    loop: { tube: 0.08, segments: 48, sides: 8 },
+    /** The band on the ground a Loop draws from one dock back to another. */
+    loop: { width: 0.22, segments: 48 },
     /** How far marks on the ground float over it, so they never flicker into it. */
     markLift: 0.03,
-    exitGate: { radius: 1.3, tube: 0.12 },
+    /** The route on the ground from dock to dock: its width, and the room left at each dock. */
+    route: { width: 0.22, gap: 0.35, segments: 32 },
+    /** The frame of an Exit Point's gate: its width and its height. */
+    exitGate: { span: 2.6, height: 2.7 },
   },
 
   /** Light levels (emissive intensities) of the parts that glow. */
@@ -112,13 +130,23 @@ export const WORLD = {
     dim: 0.25,
     on: 1.2,
     hovered: 0.35,
+    /** How bright a dock's platform lights up under the pointer. */
+    dockHovered: 0.6,
+    /** How bright a dock's platform glows while its ship is at work. */
+    dockRunning: 0.5,
+    /** How much lighter a ship is while it is at work: it glows in its own paint. */
+    shipRunning: 0.35,
     beam: 0.7,
     core: { idle: 0.15, atWork: 0.9 },
     /** How bright a Loop flashes when it fires, and how bright it rests. */
-    loop: { rest: 0.35, fired: 2.2 },
+    loop: { rest: 0.35, fired: 0.65 },
     exit: { rest: 0.1, lit: 1.6 },
     /** The light the Core casts on its plinth and the docks near it, at full glow. */
-    coreLight: { intensity: 60, distance: 40, height: 4 },
+    coreLight: { intensity: 60, distance: 40 },
+    /** How bright the rings around the crystal are, as a share of the crystal's glow. */
+    coreRings: 0.8,
+    /** How bright the route into a dock is: before the Mission reaches it, and after. */
+    route: { ahead: 0.12, reached: 0.55 },
     /** How bright the marks on the ground are when shown. */
     mark: { selected: 0.9, current: 0.55, hovered: 0.25 },
     beacon: 1,
@@ -139,6 +167,8 @@ export const WORLD = {
     /** How long a fired Loop flashes. */
     loopFlashMs: 1500,
     subPilotSpin: 1.2,
+    /** How fast the Core's crystal turns, and its rings at rest and at work, in radians a second. */
+    coreSpin: { crystal: 0.25, ringsIdle: 0.15, ringsAtWork: 0.9 },
   },
 
   camera: {
@@ -151,7 +181,7 @@ export const WORLD = {
     far: 3000,
     /** How far the Commander may zoom in and out, relative to "the whole Assembly in view". */
     minZoom: 0.45,
-    maxZoom: 5,
+    maxZoom: 6,
     dampingFactor: 0.12,
     /** A press and release closer than this, in pixels, is a click and not a drag. */
     clickTolerancePx: 4,

@@ -2,7 +2,7 @@ import { Maximize2 } from 'lucide-react';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { ElementRef } from '../missions/picture';
 import { Labels } from './labels/Labels';
-import { loadAssets } from './scene/assets';
+import { loadAssets, type LoadedAssets } from './scene/assets';
 import { canDrawUniverse, createUniverseScene, type UniverseScene } from './scene/scene';
 import type { UniverseProps } from './types';
 import { labelDetail, WORLD, type LabelDetail } from './world/world';
@@ -37,13 +37,15 @@ export function Universe({ picture, selection, onSelect, onFailure }: UniversePr
     canvas.className = 'block size-full';
     host.append(canvas);
     let scene: UniverseScene | null = null;
+    let loaded: LoadedAssets | null = null;
     let disposed = false;
-    loadAssets().then(
+    loadAssets(latest.current.picture.slots.map((slot) => slot.unit)).then(
       (assets) => {
         if (disposed) {
           assets.dispose();
           return;
         }
+        loaded = assets;
         scene = createUniverseScene({
           canvas,
           container,
@@ -65,6 +67,8 @@ export function Universe({ picture, selection, onSelect, onFailure }: UniversePr
     return () => {
       disposed = true;
       scene?.dispose();
+      // The models outlive no scene: they were loaded for this one.
+      loaded?.dispose();
       sceneRef.current = null;
       canvas.remove();
     };
